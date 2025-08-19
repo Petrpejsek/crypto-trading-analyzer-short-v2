@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MarketDecision",
+  "version": "1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "flag": { "type": "string", "enum": ["NO-TRADE", "CAUTION", "OK"] },
+    "posture": { "type": "string", "enum": ["RISK-ON", "NEUTRAL", "RISK-OFF"] },
+    "market_health": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "expiry_minutes": { "type": "integer", "minimum": 15, "maximum": 720 },
+    "reasons": { "type": "array", "items": { "type": "string" }, "maxItems": 3 },
+    "risk_cap": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_concurrent": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "risk_per_trade_max": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+      },
+      "required": ["max_concurrent", "risk_per_trade_max"]
+    }
+  },
+  "required": ["flag", "posture", "market_health", "expiry_minutes", "reasons", "risk_cap"]
+}
+
+

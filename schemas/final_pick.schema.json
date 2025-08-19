@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FinalPickSet",
+  "version": "1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "picks": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Pick" }
+    }
+  },
+  "required": ["picks"],
+  "definitions": {
+    "Pick": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "symbol":         { "type": "string", "minLength": 1 },
+        "side":           { "type": "string", "enum": ["LONG", "SHORT"] },
+        "label":          { "type": "string", "enum": ["SUPER_HOT", "HOT", "WATCH", "IGNORE"] },
+        "setup_type":     { "type": "string", "enum": ["MOMENTUM", "RECLAIM", "CONTINUATION"] },
+        "entry_type":     { "type": "string", "enum": ["MARKET", "LIMIT"] },
+        "entry":          { "type": "number" },
+        "sl":             { "type": "number" },
+        "tp1":            { "type": "number" },
+        "tp2":            { "type": "number" },
+        "risk_pct":       { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "leverage_hint":  { "type": "integer", "minimum": 1, "maximum": 125 },
+        "confidence":     { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "expiry_minutes": { "type": "integer", "minimum": 1, "maximum": 240 },
+        "reasons":        { "type": "array", "items": { "type": "string" }, "maxItems": 3 },
+        "warnings":       { "type": "array", "items": { "type": "string" }, "maxItems": 2 },
+        "advisory":       { "type": "boolean" },
+        "posture_context":{ "type": "string", "enum": ["OK", "CAUTION", "NO-TRADE"] }
+      },
+      "required": [
+        "symbol","side","label","setup_type","entry_type",
+        "entry","sl","tp1","tp2",
+        "risk_pct","leverage_hint","confidence","expiry_minutes",
+        "reasons","warnings",
+        "advisory","posture_context"
+      ]
+    }
+  }
+}
+
+

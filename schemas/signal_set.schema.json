@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "required": ["setups"],
+  "properties": {
+    "setups": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "required": ["symbol", "mode", "side", "entry", "sl", "tp", "sizing", "expires_in_min", "why"],
+        "properties": {
+          "symbol": { "type": "string" },
+          "mode": { "enum": ["intraday", "swing"] },
+          "side": { "enum": ["LONG", "SHORT"] },
+          "entry": { "type": "string" },
+          "sl": { "type": "string" },
+          "tp": { "type": "array", "items": { "type": "string" }, "maxItems": 5 },
+          "trailing": { "type": "string" },
+          "sizing": { "type": "object", "required": ["risk_pct"], "properties": { "risk_pct": { "type": "number", "minimum": 0.25, "maximum": 1 } } },
+          "expires_in_min": { "type": "number", "minimum": 30, "maximum": 90 },
+          "why": { "type": "array", "items": { "type": "string" }, "maxItems": 3 }
+        }
+      }
+    }
+  }
+}
+

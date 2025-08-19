@@ -1,0 +1,27 @@
+[dotenv@17.2.1] injecting env (2) from .env.local -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild
+node:events:502
+      throw er; // Unhandled 'error' event
+      ^
+
+Error: listen EADDRINUSE: address already in use :::8788
+    at Server.setupListenHandle [as _listen2] (node:net:1912:16)
+    at listenInCluster (node:net:1969:12)
+    at Server.listen (node:net:2074:7)
+    at runFinalPickerServer (/Users/petrliesner/Trader-web-1ebcb97/server/index.ts:560:8)
+    at Object.<anonymous> (/Users/petrliesner/Trader-web-1ebcb97/server/index.ts:562:2)
+    at Module._compile (node:internal/modules/cjs/loader:1565:14)
+    at Object.transformer (/Users/petrliesner/Trader-web-1ebcb97/node_modules/tsx/dist/register-D46fvsV_.cjs:3:1104)
+    at Module.load (node:internal/modules/cjs/loader:1318:32)
+    at Function._load (node:internal/modules/cjs/loader:1128:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+Emitted 'error' event on Server instance at:
+    at emitErrorNT (node:net:1948:8)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 8788
+}
+
+Node.js v22.12.0

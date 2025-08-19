@@ -1,0 +1,45 @@
+{
+  "requestTimeoutMs": 6000,
+  "timeoutMs": 6000,
+  "retry": {
+    "maxAttempts": 2,
+    "baseDelayMs": 400,
+    "maxDelayMs": 1200
+  },
+  "concurrency": 16,
+  "candles": 220,
+  "depthMode": "bookTicker+depth",
+  "globalDeadlineMs": 8000,
+  "klines": {
+    "btceth": {
+      "H4": { "interval": "4h", "limit": 120 },
+      "H1": { "interval": "1h", "limit": 120 },
+      "M15": { "interval": "15m", "limit": 120 }
+    },
+    "universe": {
+      "H1": { "interval": "1h", "limit": 120 },
+      "M15": { "interval": "15m", "limit": 120 }
+    }
+  },
+  "orderbook": {
+    "limit": 50
+  },
+  "universe": {
+    "topN": 30,
+    "strategy": "volume" 
+  },
+  "preferWSAltH1": false,
+  "backfillH1Limit": 48,
+  "altBackfillTimeoutMs": 5000,
+  "altBackfillConcurrency": 6,
+  "staleThresholdSec": 120,
+  "maxSnapshotBytes": 2621440,
+  "maxSnapshotMB": 2.5,
+  "fundingMode": "all",
+  "openInterestMode": "all"
+  ,
+  "klinesCore": ["4h", "1h", "15m"],
+  "klinesAlt": ["1h", "15m"],
+  "cache": { "klinesMs": 30000, "ticker24hMs": 30000, "exchangeInfoMs": 600000 }
+}
+

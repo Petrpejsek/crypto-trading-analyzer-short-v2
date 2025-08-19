@@ -1,0 +1,14 @@
+node_modules
+dist
+.vite
+.env
+.env*
+.DS_Store
+*.log
+*.tmp
+*.cache
+fixtures/**/*.json
+
+.env*
+logs/
+out/

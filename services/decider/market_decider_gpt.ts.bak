@@ -1,0 +1,101 @@
+import Ajv from 'ajv'
+import addFormats from 'ajv-formats'
+import type { MarketDecision } from './rules_decider'
+import { decideFromFeatures } from './rules_decider'
+import type { FeaturesSnapshot } from '../../types/features'
+import type { MarketCompact } from './market_compact'
+import deciderCfg from '../../config/decider.json'
+import decisionSchema from '../../schemas/market_decision.schema.json'
+import compactSchema from '../../schemas/market_compact.schema.json'
+
+const ajv = new Ajv({ allErrors: true, removeAdditional: true })
+addFormats(ajv)
+const validateDecision = ajv.compile(decisionSchema as any)
+const validateCompact = ajv.compile(compactSchema as any)
+
+function failClosed(code: string): MarketDecision {
+  return {
+    flag: 'NO-TRADE',
+    posture: 'RISK-OFF',
+    market_health: 0,
+    expiry_minutes: 30,
+    reasons: [`gpt_error:${code}`],
+    risk_cap: { max_concurrent: 0, risk_per_trade_max: 0 },
+  }
+}
+
+export async function decideMarketStrict(opts: {
+  mode: 'gpt' | 'mock'
+  compact: MarketCompact
+  features: FeaturesSnapshot
+  openaiKey?: string | null
+  timeoutMs: number
+}): Promise<MarketDecision> {
+  const { mode, compact, features, openaiKey, timeoutMs } = opts
+  if (mode !== 'gpt') {
+    return decideFromFeatures(features)
+  }
+
+  if (!validateCompact(compact)) {
+    console.error('[DECIDER] fail', { reason: 'gpt_error:schema_invalid:compact', msg: 'compact schema invalid' })
+    return failClosed('schema_invalid:compact')
+  }
+
+  if (!openaiKey) {
+    console.error('[DECIDER] fail', { reason: 'gpt_error:no_api_key' })
+    return failClosed('no_api_key')
+  }
+
+  try {
+    const { OpenAI } = await import('openai')
+    const client = new OpenAI({ apiKey: openaiKey })
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const sys = `You are a market decider. Output strict JSON only, matching provided schema. No markdown.`
+    const user = JSON.stringify(compact)
+
+    const resp = await client.chat.completions.create({
+      model: ((deciderCfg as any)?.model || 'gpt-5') as any,
+      temperature: (deciderCfg as any)?.temperature ?? 0.1,
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user', content: user },
+      ],
+      response_format: { type: 'json_object' },
+      signal: controller.signal as any,
+    } as any)
+    clearTimeout(timer)
+
+    const text = resp.choices?.[0]?.message?.content || ''
+    if (!text) return failClosed('empty_response')
+
+    let parsed: any
+    try { parsed = JSON.parse(text) } catch { return failClosed('parse_error') }
+
+    if (!validateDecision(parsed)) {
+      console.error('[DECIDER] fail', { reason: 'gpt_error:schema_invalid:decision' })
+      return failClosed('schema_invalid:decision')
+    }
+    return parsed as MarketDecision
+  } catch (e: any) {
+    const mapOpenAIError = (err: any): string => {
+      const t = err?.error?.type || err?.name || err?.code || 'unknown'
+      const code = err?.error?.code || err?.status || ''
+      const raw = String(t).toLowerCase()
+      if (raw.includes('invalid_request')) return 'openai_invalid_request'
+      if (raw.includes('insufficient_quota')) return 'openai_quota'
+      if (raw.includes('rate_limit')) return 'openai_rate_limit'
+      if (raw.includes('timeout')) return 'openai_timeout'
+      return `openai_${(t || 'unknown')}`.replace(/[^a-z0-9_:-]/gi, '')
+    }
+    const reason = e?.name === 'AbortError' ? 'gpt_error:timeout' : `gpt_error:${mapOpenAIError(e)}`
+    console.error('[DECIDER] fail', { reason, status: e?.status, type: e?.error?.type, code: e?.error?.code, msg: String(e?.message || '').slice(0, 160) })
+    return {
+      flag: 'NO-TRADE', posture: 'RISK-OFF', market_health: 0, expiry_minutes: 30,
+      reasons: [reason], risk_cap: { max_concurrent: 0, risk_per_trade_max: 0 }
+    }
+  }
+}
+
+
