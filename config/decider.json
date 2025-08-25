@@ -1,8 +1,8 @@
 {
   "m3": {
     "use_responses_api": true,
-    "model": "gpt-4o",
-    "max_output_tokens": 512,
+    "model": "gpt-5",
+    "max_output_tokens": 16384,
     "timeoutMs": 12000,
     "enforce_gpt5_only": false
   },
@@ -14,7 +14,8 @@
     "confidence_floor_no_trade": 0.60,
     "risk_pct_no_trade_default": 0.0,
     "use_responses_api": true,
-    "model": "gpt-4o",
+    "model": "gpt-5",
+    "max_output_tokens": 16384,
     "rrr_min_tp1": 1.0,
     "rrr_min_tp2": 2.0,
     "entry_price_atr_mult_ok": 0.8,

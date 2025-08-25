@@ -15,6 +15,7 @@ import { ReportView } from './views/ReportView';
 import { FeaturesPreview } from './components/FeaturesPreview';
 import { DecisionBanner } from './components/DecisionBanner';
 import { SetupsTable } from './components/SetupsTable';
+// BtcInfoPanel removed - integrated into DecisionBanner
 import { buildMarketCompact } from '../../services/decider/market_compact';
 import signalsCfg from '../../config/signals.json';
 // Final Picker input shape (client-side only; request will go to backend)
@@ -55,6 +56,8 @@ export const App: React.FC = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
+  // Hide snapshot/status container (per request we use Copy RAW flow only)
+  const [showSnapshotBar] = useState(false);
   const [copiedSymbol, setCopiedSymbol] = useState<string | null>(null);
   const [rawCopied, setRawCopied] = useState(false);
   const [rawRegime, setRawRegime] = useState<{ btc_h1?: number | null } | null>(null)
@@ -105,6 +108,7 @@ export const App: React.FC = () => {
   }
 
   const coinsSource = useMemo(() => {
+    // Show rawCoins (50) if available, fallback to snapshot.universe (28)
     if (rawCoins && Array.isArray(rawCoins) && rawCoins.length > 0) return rawCoins
     return snapshot?.universe || []
   }, [rawCoins, snapshot])
@@ -134,6 +138,7 @@ export const App: React.FC = () => {
   }, [snapshot])
 
   const onRun = async () => {
+    console.log('🚫 onRun() called - checking if triggered automatically');
     setRunning(true);
     setError(null);
     setErrorPayload(null);
@@ -385,18 +390,23 @@ export const App: React.FC = () => {
 
   const onExportFeatures = () => { if (features) downloadJson(features, 'features') };
 
-  const copyCoin = async (coinData: any) => {
-    const sym = String(coinData?.symbol || '')
+  const copyCoin = async (symbol: string) => {
+    const sym = String(symbol || '')
+    console.log('[COPY_COIN] Clicked symbol:', sym)
     if (!sym) return
+    // Clear previous copied state to avoid confusion
+    setCopiedSymbol(null)
     setLoadingSymbol(sym)
     try {
       const q = universeStrategy === 'gainers' ? '?universe=gainers' : ''
       const sep = q ? '&' : '?'
-      const res = await fetch(`/api/intraday${q}${sep}symbol=${encodeURIComponent(sym)}`)
+      console.log('[COPY_COIN] Fetching:', `/api/intraday_any?symbol=${encodeURIComponent(sym)}`)
+      const res = await fetch(`/api/intraday_any?symbol=${encodeURIComponent(sym)}`)
       if (res.ok) {
         const json: any = await res.json()
         const assets: any[] = Array.isArray(json?.assets) ? json.assets : []
         const asset = assets.find(a => a?.symbol === sym) || null
+        console.log('[COPY_COIN] Found asset:', asset?.symbol || 'none')
         if (asset) {
           try {
             await navigator.clipboard.writeText(JSON.stringify(asset, null, 2))
@@ -407,7 +417,7 @@ export const App: React.FC = () => {
           setCopiedSymbol(sym)
           window.setTimeout(() => setCopiedSymbol(null), 1200)
         } else {
-          setError(`Server returned no matching asset for ${sym}.`)
+          setError(`${sym} not available in current universe (only 28 alts loaded). Try "Run now" first.`)
         }
       } else {
         let msg = `HTTP ${res.status} for /api/intraday?symbol=${sym}`
@@ -545,7 +555,7 @@ export const App: React.FC = () => {
     } catch {}
   }, []);
 
-  // Keyboard shortcuts: r (run), s (export snapshot), f (export features)
+  // Keyboard shortcuts: DISABLED auto-run on 'r' key to prevent accidental runs
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
@@ -553,9 +563,13 @@ export const App: React.FC = () => {
         target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || (target as any).isContentEditable === true || target.tagName === 'SELECT'
       )
       if (isTyping) return
-      if (e.key === 'r' || e.key === 'R') {
-        if (!running) onRun()
-      } else if (e.key === 's' || e.key === 'S') {
+      
+      // DISABLED: Auto-run on 'r' key removed per user request
+      // if (e.key === 'r' || e.key === 'R') {
+      //   if (!running) onRun()
+      // } else 
+      
+      if (e.key === 's' || e.key === 'S') {
         onExport()
       } else if (e.key === 'f' || e.key === 'F') {
         onExportFeatures()
@@ -568,32 +582,26 @@ export const App: React.FC = () => {
   return (
     <div style={{ padding: 16, maxWidth: 1200, margin: '0 auto' }}>
       <HeaderBar running={running} onRun={onRun} onExportSnapshot={onExport} onExportFeatures={onExportFeatures} onToggleSettings={() => setSettingsOpen(true)} onToggleReport={() => setShowReport(v => !v)} showingReport={showReport} />
+      
+      {/* BTC/ETH data integrated into DecisionBanner */}
+      
       {showReport ? (
         <ReportView snapshot={snapshot} features={features} decision={decision} signals={signalSet} featuresMs={featuresMs ?? null} />
       ) : (
         <>
       {decision && (
         <>
-          <DecisionBanner decision={decision} rawBtcH1={rawRegime?.btc_h1 ?? null} />
+          <DecisionBanner 
+            decision={decision} 
+            rawBtcH1={rawRegime?.btc_h1 ?? null}
+            btc={snapshot?.btc}
+            eth={snapshot?.eth}
+            timestamp={snapshot?.timestamp}
+          />
           <div style={{ height: 8 }} />
         </>
       )}
-      <StatusPills
-        feedsOk={snapshot?.feeds_ok ?? null}
-        snapshotMs={(snapshot as any)?.duration_ms ?? (snapshot as any)?.latency_ms ?? null}
-        featuresMs={featuresMs}
-        symbols={snapshot?.universe?.length != null ? (2 + snapshot.universe.length) : null}
-        ws={wsHealth}
-      />
-      <SnapshotBanner
-        feedsOk={!!snapshot?.feeds_ok}
-        latencyMs={(snapshot as any)?.duration_ms ?? (snapshot as any)?.latency_ms ?? 0}
-        symbolsLoaded={symbolsLoaded}
-        featuresMs={featuresMs}
-        breadthPct={features?.breadth.pct_above_EMA50_H1 ?? null}
-        ageMs={snapshotAgeMs ?? undefined}
-        onRun={onRun}
-      />
+      {/* Snapshot/status UI intentionally hidden */}
       {errorPayload ? <ErrorPanel payload={errorPayload} /> : (error ? <pre style={{ color: 'crimson', whiteSpace: 'pre-wrap' }}>{error}</pre> : null)}
       <label style={{fontSize:12,opacity:.9,display:'flex',gap:6,alignItems:'center',margin:'8px 0'}}>
         <input type="checkbox" checked={forceCandidates} onChange={e=>setForceCandidates(e.target.checked)} />
@@ -634,12 +642,12 @@ export const App: React.FC = () => {
           {/* Per-coin copy buttons below header for clarity */}
           <div className="coins-grid">
             {(displayCoins as any[]).map((u: any, idx: number) => (
-              <div key={u.symbol} style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, border: '1px solid #2a2a2a', padding: '4px 6px', borderRadius: 6 }}>
+              <div key={`${u.symbol}-${idx}`} style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, border: '1px solid #2a2a2a', padding: '4px 6px', borderRadius: 6 }}>
                 <span style={{ fontSize: 11, opacity: .8 }}>#{idx + 1}</span>
                 <span style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', fontSize: 13, opacity: .95, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '70%', pointerEvents: 'none' }}>
                   {formatSymbol(u.symbol)}
                 </span>
-                <button className="btn" onClick={() => copyCoin(u)} aria-label={`Copy ${u.symbol} JSON`} title={copiedSymbol === u.symbol ? 'Zkopírováno' : 'Copy to clipboard'} disabled={loadingSymbol === u.symbol} style={{ padding: '3px 6px', fontSize: 11 }}>
+                <button className="btn" onClick={() => copyCoin(String(u.symbol))} aria-label={`Copy ${u.symbol} JSON`} title={copiedSymbol === u.symbol ? 'Zkopírováno' : 'Copy to clipboard'} disabled={loadingSymbol === u.symbol} style={{ padding: '3px 6px', fontSize: 11 }}>
                   {loadingSymbol === u.symbol ? 'Stahuji…' : (copiedSymbol === u.symbol ? '✓' : 'Copy')}
                 </button>
               </div>

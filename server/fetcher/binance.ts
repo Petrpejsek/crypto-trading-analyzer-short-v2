@@ -360,6 +360,9 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
   // Fixed target: always BTC+ETH + exactly 28 alts (when possible). No posture-driven downsizing.
   const desired = Number.isFinite(opts?.desiredTopN as any) && (opts!.desiredTopN as any) > 0 ? (opts!.desiredTopN as number) : config.universe.topN
   const altTarget = Math.max(0, desired - 2)
+  // When includeSymbols provided, expand target to accommodate them
+  const hasIncludeSymbols = Array.isArray(opts?.includeSymbols) && opts!.includeSymbols!.length > 0
+  const effectiveAltTarget = hasIncludeSymbols ? Math.max(altTarget, altTarget + opts!.includeSymbols!.length) : altTarget
   // Pull a large candidate list (the endpoint returns all anyway). We oversample to reliably fill 28 H1-ready alts.
   const strategy = (opts?.universeStrategy || (config as any)?.universe?.strategy || 'volume') as 'volume'|'gainers'
   const baseList = strategy === 'gainers' ? await getTopGainersUsdtSymbols(Math.max(200, desired * 10)) : await getTopNUsdtSymbols(Math.max(200, desired * 10))
@@ -372,8 +375,8 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
     .filter(s => s !== 'BTCUSDT' && s !== 'ETHUSDT' && filteredSymbols.includes(s))))
   // Merge include first, then candidate list without duplicates
   const mergedPref = includeNorm.concat(allAltCandidates.filter(s => !includeNorm.includes(s)))
-  // Start with the first batch respecting altTarget
-  let altSymbols: string[] = mergedPref.slice(0, altTarget)
+  // Start with the first batch respecting effectiveAltTarget (expanded for includeSymbols)
+  let altSymbols: string[] = mergedPref.slice(0, effectiveAltTarget)
   // update WS alt universe to track H1 for selected alts (will be refined after fill-in)
   try { const c = getCollector() as unknown as WsCollector | null; c?.setAltUniverse(altSymbols) } catch {}
   await ensureAtLeastOneH1ForAlts(altSymbols)
@@ -439,8 +442,8 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
     if (readyAlts.length < altTarget) {
       const remainingQueue = allAltCandidates.filter(s => !altSymbols.includes(s))
       let idx = 0
-      while (readyAlts.length < altTarget && idx < remainingQueue.length) {
-        const batchSize = Math.min((config as any).altBackfillConcurrency ?? 6, altTarget - readyAlts.length + 6)
+      while (readyAlts.length < effectiveAltTarget && idx < remainingQueue.length) {
+        const batchSize = Math.min((config as any).altBackfillConcurrency ?? 6, effectiveAltTarget - readyAlts.length + 6)
         const batch = remainingQueue.slice(idx, idx + batchSize)
         if (batch.length === 0) break
         // add to tracked alt list for WS/consistency
@@ -464,12 +467,12 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
       const finalAlts: string[] = []
       for (const s of includeNorm) {
         if (hasAltH1Local(s) && !finalAlts.includes(s)) finalAlts.push(s)
-        if (finalAlts.length >= altTarget) break
+        if (finalAlts.length >= effectiveAltTarget) break
       }
-      if (finalAlts.length < altTarget) {
+      if (finalAlts.length < effectiveAltTarget) {
         for (const s of allAltCandidates) {
           if (hasAltH1Local(s) && !finalAlts.includes(s)) finalAlts.push(s)
-          if (finalAlts.length >= altTarget) break
+          if (finalAlts.length >= effectiveAltTarget) break
         }
       }
       universeSymbols = finalAlts
@@ -550,11 +553,18 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
 
   const tickerMap = await (async () => {
     const raw = await withRetry(() => httpGet('/fapi/v1/ticker/24hr'), config.retry)
-    const out: Record<string, { volume24h_usd?: number; lastPrice?: number; closeTimeMs?: number }> = {}
+    const out: Record<string, { volume24h_usd?: number; lastPrice?: number; closeTimeMs?: number; priceChange?: number; priceChangePercent?: number; volume?: number }> = {}
     for (const t of raw) {
       const sym = t?.symbol
       if (!sym || !sym.endsWith('USDT')) continue
-      out[sym] = { volume24h_usd: toNumber(t?.quoteVolume), lastPrice: toNumber(t?.lastPrice), closeTimeMs: toNumber(t?.closeTime) }
+      out[sym] = { 
+        volume24h_usd: toNumber(t?.quoteVolume), 
+        lastPrice: toNumber(t?.lastPrice), 
+        closeTimeMs: toNumber(t?.closeTime),
+        priceChange: toNumber(t?.priceChange),
+        priceChangePercent: toNumber(t?.priceChangePercent),
+        volume: toNumber(t?.volume)
+      }
     }
     return out
   })()
@@ -688,8 +698,8 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
     item.d1_low = null
     universe.push(item)
   }
-  // Enforce fixed size: require exactly 28 alts in the universe
-  if (universe.length !== altTarget) {
+  // Enforce fixed size: require exactly 28 alts in the universe (unless includeSymbols override)
+  if (universe.length !== altTarget && !hasIncludeSymbols) {
     const err: any = new Error('UNIVERSE_INCOMPLETE')
     err.stage = 'universe_incomplete'
     err.expected = altTarget
@@ -736,7 +746,7 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
     }
   } catch {}
 
-  // BTC/ETH regime filter
+  // BTC/ETH regime filter + ticker data
   try {
     const regimeFor = (set: any) => {
       const h1 = Array.isArray(set?.klines?.H1) ? set.klines.H1 as Kline[] : []
@@ -749,6 +759,26 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
     }
     ;(btc as any).regime = regimeFor(btc)
     ;(eth as any).regime = regimeFor(eth)
+    
+    // Add ticker data to BTC/ETH objects
+    const btcTicker = tickerMap['BTCUSDT']
+    const ethTicker = tickerMap['ETHUSDT']
+    
+    if (btcTicker) {
+      ;(btc as any).price = btcTicker.lastPrice
+      ;(btc as any).volume24h_usd = btcTicker.volume24h_usd
+      ;(btc as any).volume24h_btc = btcTicker.volume
+      ;(btc as any).priceChange = btcTicker.priceChange
+      ;(btc as any).priceChangePercent = btcTicker.priceChangePercent
+    }
+    
+    if (ethTicker) {
+      ;(eth as any).price = ethTicker.lastPrice
+      ;(eth as any).volume24h_usd = ethTicker.volume24h_usd
+      ;(eth as any).volume24h_eth = ethTicker.volume
+      ;(eth as any).priceChange = ethTicker.priceChange
+      ;(eth as any).priceChangePercent = ethTicker.priceChangePercent
+    }
   } catch {}
 
   // Policy

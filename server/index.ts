@@ -185,6 +185,105 @@ const server = http.createServer(async (req, res) => {
       return
     }
 
+    if (url.pathname === '/api/intraday_any' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        const symbolRaw = url.searchParams.get('symbol')
+        if (!symbolRaw) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ error: 'Missing symbol parameter' }))
+          return
+        }
+        const normalizeSymbol = (s: string): string => {
+          let v = String(s || '').trim().toUpperCase()
+          if (!v) return ''
+          if (v.includes('/')) v = v.replace('/', '')
+          if (!v.endsWith('USDT')) v = `${v}USDT`
+          return v
+        }
+        const symbol = normalizeSymbol(symbolRaw)
+        
+        // Fetch data for any symbol directly - use minimal universe to avoid UNIVERSE_INCOMPLETE
+        const { buildMarketRawSnapshot } = await import('./fetcher/binance')
+        const snap = await buildMarketRawSnapshot({ universeStrategy: 'volume', desiredTopN: 1, includeSymbols: [symbol] })
+        
+        // Find the symbol in universe or btc/eth
+        let targetItem: any = null
+        if (symbol === 'BTCUSDT') targetItem = (snap as any)?.btc
+        else if (symbol === 'ETHUSDT') targetItem = (snap as any)?.eth
+        else targetItem = (snap.universe || []).find((u: any) => u.symbol === symbol)
+        
+        if (!targetItem) {
+          res.statusCode = 404
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ error: 'SYMBOL_NOT_SUPPORTED', symbol }))
+          return
+        }
+        
+        const toIsoNoMs = (isoLike: string): string => {
+          const s = String(isoLike || '')
+          if (s.endsWith('Z')) return s.replace(/\.\d{1,3}Z$/, 'Z')
+          const z = s.replace(/\.\d{1,3}$/,'')
+          return z.endsWith('Z') ? z : `${z}Z`
+        }
+        const toBars = (arr: any[], keep: number) => {
+          if (!Array.isArray(arr)) return []
+          const slice = arr.slice(-keep)
+          return slice.map((k: any) => ({
+            time: toIsoNoMs(k.openTime),
+            open: Number(k.open),
+            high: Number(k.high),
+            low: Number(k.low),
+            close: Number(k.close),
+            volume: Number(k.volume)
+          }))
+        }
+        
+        const h1 = toBars(targetItem.klines?.H1 || [], 24)
+        const m15 = toBars(targetItem.klines?.M15 || [], 40)
+        const asset = {
+          symbol: targetItem.symbol,
+          price: Number(targetItem.price ?? (h1.length ? h1[h1.length-1].close : null)),
+          ohlcv: { h1, m15 },
+          indicators: {
+            atr_h1: targetItem.atr_h1 ?? null,
+            atr_m15: targetItem.atr_m15 ?? null,
+            ema_h1: { 20: targetItem.ema20_H1 ?? null, 50: targetItem.ema50_H1 ?? null, 200: targetItem.ema200_H1 ?? null },
+            ema_m15: { 20: targetItem.ema20_M15 ?? null, 50: targetItem.ema50_M15 ?? null, 200: targetItem.ema200_M15 ?? null },
+            rsi_h1: targetItem.rsi_H1 ?? null,
+            rsi_m15: targetItem.rsi_M15 ?? null,
+            vwap_today: targetItem.vwap_today ?? targetItem.vwap_daily ?? null
+          },
+          levels: {
+            support: Array.isArray(targetItem.support) ? targetItem.support.slice(0,4) : [],
+            resistance: Array.isArray(targetItem.resistance) ? targetItem.resistance.slice(0,4) : []
+          },
+          market: {
+            spread_bps: targetItem.spread_bps ?? null,
+            liquidity_usd: targetItem.liquidity_usd ?? null,
+            oi_change_1h_pct: targetItem.oi_change_1h_pct ?? null,
+            funding_8h_pct: targetItem.funding_8h_pct ?? null
+          }
+        }
+        
+        const out = {
+          timestamp: toIsoNoMs((snap as any)?.timestamp || new Date().toISOString()),
+          exchange: 'Binance',
+          market_type: 'perp',
+          assets: [asset]
+        }
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(out))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+      }
+      return
+    }
+
     if (url.pathname === '/api/intraday') {
       res.setHeader('Cache-Control', 'no-store')
       try {
@@ -253,10 +352,50 @@ const server = http.createServer(async (req, res) => {
           const onlySymbol = normalizeSymbol(onlySymbolRaw)
           assets = assets.filter(a => a.symbol === onlySymbol)
           if (assets.length === 0) {
-            res.statusCode = 404
-            res.setHeader('content-type', 'application/json')
-            res.end(JSON.stringify({ error: 'SYMBOL_NOT_FOUND', symbol: onlySymbol, available_count: (snap.universe || []).length }))
-            return
+            // Try to generate data for symbol not in universe
+            try {
+              const expandedSnap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, includeSymbols: [onlySymbol] })
+              const expandedAsset = (expandedSnap.universe || []).find((u: any) => u.symbol === onlySymbol)
+              if (expandedAsset) {
+                const h1 = toBars(expandedAsset.klines?.H1 || [], 24)
+                const m15 = toBars(expandedAsset.klines?.M15 || [], 40)
+                const generatedAsset = {
+                  symbol: expandedAsset.symbol,
+                  price: Number(expandedAsset.price ?? (h1.length ? h1[h1.length-1].close : null)),
+                  ohlcv: { h1, m15 },
+                  indicators: {
+                    atr_h1: expandedAsset.atr_h1 ?? null,
+                    atr_m15: expandedAsset.atr_m15 ?? null,
+                    ema_h1: { 20: expandedAsset.ema20_H1 ?? null, 50: expandedAsset.ema50_H1 ?? null, 200: expandedAsset.ema200_H1 ?? null },
+                    ema_m15: { 20: expandedAsset.ema20_M15 ?? null, 50: expandedAsset.ema50_M15 ?? null, 200: expandedAsset.ema200_M15 ?? null },
+                    rsi_h1: expandedAsset.rsi_H1 ?? null,
+                    rsi_m15: expandedAsset.rsi_M15 ?? null,
+                    vwap_today: expandedAsset.vwap_today ?? expandedAsset.vwap_daily ?? null
+                  },
+                  levels: {
+                    support: Array.isArray(expandedAsset.support) ? expandedAsset.support.slice(0,4) : [],
+                    resistance: Array.isArray(expandedAsset.resistance) ? expandedAsset.resistance.slice(0,4) : []
+                  },
+                  market: {
+                    spread_bps: expandedAsset.spread_bps ?? null,
+                    liquidity_usd: expandedAsset.liquidity_usd ?? null,
+                    oi_change_1h_pct: expandedAsset.oi_change_1h_pct ?? null,
+                    funding_8h_pct: expandedAsset.funding_8h_pct ?? null
+                  }
+                }
+                assets = [generatedAsset]
+              } else {
+                res.statusCode = 404
+                res.setHeader('content-type', 'application/json')
+                res.end(JSON.stringify({ error: 'SYMBOL_NOT_FOUND', symbol: onlySymbol, available_count: (snap.universe || []).length }))
+                return
+              }
+            } catch (e: any) {
+              res.statusCode = 404
+              res.setHeader('content-type', 'application/json')
+              res.end(JSON.stringify({ error: 'SYMBOL_NOT_FOUND', symbol: onlySymbol, expand_error: e?.message || 'unknown' }))
+              return
+            }
           }
         }
         // OPRAVA: Použití konzistentní výpočetní funkce
@@ -407,7 +546,7 @@ const server = http.createServer(async (req, res) => {
             type: 'json_schema',
             json_schema: { name: 'health', schema, strict: true }
           },
-          max_tokens: 64
+          max_completion_tokens: 64
         })
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')

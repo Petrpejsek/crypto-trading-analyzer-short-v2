@@ -68,7 +68,7 @@ export async function runFinalPicker(input: FinalPickInput): Promise<{ ok: boole
 
     if (!parsed) {
       try { console.info('[FP_PAYLOAD_BYTES]', JSON.stringify(adapted).length) } catch {}
-      const resp = await client.chat.completions.create({
+      const body: any = {
         model,
         messages: [
           { role: 'system', content: 'Reply with JSON only. No prose. Follow the JSON schema exactly. If unsure, return an empty picks:[]' },
@@ -81,9 +81,12 @@ export async function runFinalPicker(input: FinalPickInput): Promise<{ ok: boole
             schema: schema as any,
             strict: true
           }
-        },
-        max_tokens: 1024
-      })
+        }
+      }
+      const outTokens = Number(fpCfg?.max_output_tokens ?? 16384)
+      if (String(model).startsWith('gpt-5')) body.max_completion_tokens = outTokens
+      else body.max_completion_tokens = outTokens
+      const resp = await client.chat.completions.create(body)
       const txt = resp.choices?.[0]?.message?.content || ''
       if (!txt || !String(txt).trim()) return result(false, 'empty_output', Date.now() - t0, { picks: [] }, { prompt_hash: promptHash, schema_version: schemaVersion, request_id: (resp as any)?.id ?? null })
       try { parsed = JSON.parse(txt) } catch { 

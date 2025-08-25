@@ -1,9 +1,53 @@
 import React from 'react'
 import type { MarketDecision } from '../../../services/decider/rules_decider'
 
-type Props = { decision: MarketDecision; rawBtcH1?: number | null }
+type BtcData = {
+  price?: number
+  priceChange?: number
+  priceChangePercent?: number
+  volume24h_usd?: number
+  volume24h_btc?: number
+}
 
-export const DecisionBanner: React.FC<Props> = ({ decision, rawBtcH1 }) => {
+type EthData = {
+  price?: number
+  priceChange?: number
+  priceChangePercent?: number
+  volume24h_usd?: number
+  volume24h_eth?: number
+}
+
+type Props = { 
+  decision: MarketDecision; 
+  rawBtcH1?: number | null;
+  btc?: BtcData | null;
+  eth?: EthData | null;
+  timestamp?: string | null;
+}
+
+const formatNumber = (num: number | undefined | null): string => {
+  if (typeof num !== 'number' || !Number.isFinite(num)) return '—'
+  if (num >= 1e9) return `${(num / 1e9).toFixed(2)}B`
+  if (num >= 1e6) return `${(num / 1e6).toFixed(2)}M`
+  if (num >= 1e3) return `${(num / 1e3).toFixed(1)}K`
+  return num.toFixed(2)
+}
+
+const formatCurrency = (num: number | undefined | null): string => {
+  if (typeof num !== 'number' || !Number.isFinite(num)) return '—'
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(num)
+}
+
+const formatPercent = (num: number | undefined | null): string => {
+  if (typeof num !== 'number' || !Number.isFinite(num)) return '—'
+  const sign = num >= 0 ? '+' : ''
+  return `${sign}${num.toFixed(3)}%`
+}
+
+export const DecisionBanner: React.FC<Props> = ({ decision, rawBtcH1, btc, eth, timestamp }) => {
   const color = decision.flag === 'OK' ? '#03543f' : decision.flag === 'CAUTION' ? '#92400e' : '#9b1c1c'
   const bg = decision.flag === 'OK' ? '#e6ffed' : decision.flag === 'CAUTION' ? '#fffbea' : '#fff5f5'
   const icon = decision.flag === 'OK' ? '🟢' : decision.flag === 'CAUTION' ? '🟡' : '🔴'
@@ -28,6 +72,35 @@ export const DecisionBanner: React.FC<Props> = ({ decision, rawBtcH1 }) => {
     return { label: 'Vstup: střední riziko', bg: '#fef3c7', fg: '#92400e', border: '#f59e0b' }
   })()
 
+  // Rizikové hodnocení na základě AI analýzy
+  const getRiskLevel = (): { level: string; aiDescription: string } => {
+    switch (decision.posture) {
+      case 'RISK-OFF':
+        return {
+          level: 'Riziko vysoké',
+          aiDescription: `AI doporučení na základě reálné situace (${decision.flag}, zdraví trhu: ${decision.market_health}%)`
+        }
+      case 'NEUTRAL':
+        return {
+          level: 'Riziko střední', 
+          aiDescription: `AI doporučení na základě reálné situace (${decision.flag}, zdraví trhu: ${decision.market_health}%)`
+        }
+      case 'RISK-ON':
+        return {
+          level: 'Riziko nízké',
+          aiDescription: `AI doporučení na základě reálné situace (${decision.flag}, zdraví trhu: ${decision.market_health}%)`
+        }
+      default:
+        return { level: 'Riziko neurčeno', aiDescription: 'AI analýza nedostupná' }
+    }
+  }
+  
+  const riskInfo = getRiskLevel()
+  const isPositive = (n: number | undefined | null) => typeof n === 'number' && n > 0
+  const isNegative = (n: number | undefined | null) => typeof n === 'number' && n < 0
+  const btcChangeColor = isPositive(btc?.priceChangePercent) ? '#16a34a' : isNegative(btc?.priceChangePercent) ? '#dc2626' : '#6b7280'
+  const ethChangeColor = isPositive(eth?.priceChangePercent) ? '#16a34a' : isNegative(eth?.priceChangePercent) ? '#dc2626' : '#6b7280'
+
   // Contextový komentář k "Zdraví" a BTC režimu
   const contextHint = (() => {
     const h = Number(decision.market_health)
@@ -49,8 +122,9 @@ export const DecisionBanner: React.FC<Props> = ({ decision, rawBtcH1 }) => {
     return { text: 'Smíšené podmínky. Řiď se kvalitou setupu a risk managementem.', color: '#92400e' }
   })()
   return (
-    <div style={{ background: bg, color, border: `1px solid ${color}33`, borderRadius: 8, padding: '10px 12px', marginTop: 12 }}>
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+    <div style={{ background: bg, color, border: `1px solid ${color}33`, borderRadius: 8, padding: '12px 16px', marginTop: 12 }}>
+      {/* Hlavní rozhodnutí řádek */}
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
         <strong>{icon} {decision.flag}</strong>
         <span>Postoj: {decision.posture}</span>
         <span>Zdraví: {decision.market_health}%</span>
@@ -63,11 +137,78 @@ export const DecisionBanner: React.FC<Props> = ({ decision, rawBtcH1 }) => {
             BTC 1h: {rawBtcText}
           </span>
         )}
+        {/* AI Risk Level */}
+        <span style={{ 
+          marginLeft: 'auto', 
+          padding: '4px 12px', 
+          borderRadius: 9999, 
+          background: decision.posture === 'RISK-OFF' ? '#dc2626' : decision.posture === 'NEUTRAL' ? '#d97706' : '#16a34a',
+          color: 'white',
+          fontWeight: 700,
+          fontSize: 13,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6
+        }}>
+          {riskInfo.level} <span style={{ fontSize: 10, background: 'rgba(255,255,255,0.3)', padding: '1px 4px', borderRadius: 3 }}>AI</span>
+        </span>
       </div>
-      <div style={{ marginTop: 6, fontSize: 13, color: contextHint.color }}>
+
+      {/* BTC/ETH Real-time Data řádek */}
+      {(btc || eth) && (
+        <div style={{ 
+          display: 'flex', 
+          gap: 24, 
+          alignItems: 'center', 
+          padding: '8px 12px', 
+          background: 'rgba(255,255,255,0.6)', 
+          borderRadius: 6, 
+          marginBottom: 8,
+          fontSize: 13,
+          flexWrap: 'wrap'
+        }}>
+          {/* BTC Data */}
+          {btc && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontWeight: 600, color: '#f7931a' }}>₿ BTC:</span>
+              <span style={{ fontWeight: 700, color: '#1f2937' }}>${formatCurrency(btc.price)} USDT</span>
+              <span style={{ color: btcChangeColor, fontWeight: 500, fontSize: 11 }}>
+                24h: {formatPercent(btc.priceChangePercent)} (${formatCurrency(btc.priceChange)})
+              </span>
+              <span style={{ fontSize: 11, opacity: 0.8 }}>
+                Vol: {formatNumber(btc.volume24h_btc)} BTC (${formatNumber(btc.volume24h_usd)})
+              </span>
+            </div>
+          )}
+          
+          {/* ETH Data */}
+          {eth && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontWeight: 600, color: '#627eea' }}>Ξ ETH:</span>
+              <span style={{ fontWeight: 700, color: '#1f2937' }}>${formatCurrency(eth.price)} USDT</span>
+              <span style={{ color: ethChangeColor, fontWeight: 500, fontSize: 11 }}>
+                24h: {formatPercent(eth.priceChangePercent)} (${formatCurrency(eth.priceChange)})
+              </span>
+              <span style={{ fontSize: 11, opacity: 0.8 }}>
+                Vol: {formatNumber(eth.volume24h_eth)} ETH (${formatNumber(eth.volume24h_usd)})
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* AI popis rizika */}
+      <div style={{ marginBottom: 6, fontSize: 12, opacity: 0.9, fontStyle: 'italic' }}>
+        {riskInfo.aiDescription}
+      </div>
+
+      {/* Contextový komentář */}
+      <div style={{ marginBottom: 6, fontSize: 13, color: contextHint.color }}>
         {contextHint.text}
       </div>
-      <div style={{ marginTop: 6 }}>
+      
+      {/* Důvody */}
+      <div>
         {(() => {
           const mapReason = (s: string): string => {
             const t = String(s || '')
@@ -89,6 +230,7 @@ export const DecisionBanner: React.FC<Props> = ({ decision, rawBtcH1 }) => {
           return <span>Důvody: {out}</span>
         })()}
       </div>
+      
       {hasGptError && (
         <div style={{ marginTop: 6, fontSize: 12, color: '#7a5b00' }}>
           GPT režim: přísný fail-closed výsledek (gpt_error). UI je funkční.

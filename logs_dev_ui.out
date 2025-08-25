@@ -318,3 +318,737 @@ AggregateError [ECONNREFUSED]:
 AggregateError [ECONNREFUSED]: 
     at internalConnectMultiple (node:net:1128:18)
     at afterConnectMultiple (node:net:1693:7)
+10:16:58 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:16:58 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:02 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:02 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:06 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:06 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:10 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:10 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:14 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:14 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:18 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:18 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:22 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:22 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:26 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:26 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:30 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:30 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:34 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:34 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:38 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:38 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:42 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:42 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:46 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:46 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:50 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:50 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:54 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:54 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:58 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:17:58 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:02 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:02 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:06 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:06 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:10 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:10 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:14 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:14 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:18 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:18 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:22 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:22 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:26 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:26 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:30 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:30 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:34 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:34 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:38 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:38 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:42 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:42 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:46 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:46 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:50 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:50 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:54 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:54 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:58 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:18:58 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:02 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:02 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:06 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:06 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:10 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:10 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:14 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:14 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:18 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:18 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:22 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:22 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:26 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:26 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:30 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:30 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:34 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:34 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:38 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:38 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:42 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:42 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:46 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:46 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:50 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:50 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:54 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:54 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:58 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:19:58 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:02 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:02 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:06 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:06 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:10 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:10 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:14 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:14 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:18 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:18 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:22 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:22 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:26 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:26 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:30 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:30 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:34 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:34 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:38 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:38 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:42 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:42 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:46 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:46 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:50 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:50 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:54 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:54 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:58 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:20:58 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:02 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:02 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:06 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:06 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:10 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:10 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:14 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:14 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:18 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:18 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:22 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:22 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:26 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:26 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:30 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:30 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:35 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:35 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:39 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:39 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:47 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:47 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:51 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:51 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:59 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:21:59 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:22:03 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:22:03 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:22:07 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:22:07 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:22:11 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:22:11 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:24:06 PM [vite] (client) hmr update /src/ui/App.tsx
+10:24:27 PM [vite] (client) hmr update /src/ui/App.tsx
+10:24:36 PM [vite] (client) hmr update /src/ui/App.tsx
+10:25:26 PM [vite] (client) hmr update /src/ui/App.tsx
+10:25:33 PM [vite] (client) hmr update /src/ui/App.tsx
+10:34:54 PM [vite] (client) hmr update /src/ui/App.tsx
+10:35:06 PM [vite] (client) hmr update /src/ui/App.tsx
+10:35:27 PM [vite] (client) hmr update /src/ui/App.tsx
+10:36:07 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:07 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:11 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:11 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:15 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:15 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:19 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:19 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:23 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:23 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:27 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:27 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:31 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:31 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:35 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:35 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:39 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:39 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:47 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:36:47 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1128:18)
+    at afterConnectMultiple (node:net:1693:7)
+10:39:13 PM [vite] (client) hmr update /src/ui/components/BtcInfoPanel.tsx
+10:39:25 PM [vite] (client) hmr update /src/ui/components/BtcInfoPanel.tsx
+10:39:37 PM [vite] (client) hmr update /src/ui/components/BtcInfoPanel.tsx
+10:39:48 PM [vite] (client) hmr update /src/ui/components/BtcInfoPanel.tsx
+10:39:48 PM [vite] (client) hmr update /src/ui/components/BtcInfoPanel.tsx
+10:39:56 PM [vite] (client) hmr update /src/ui/App.tsx

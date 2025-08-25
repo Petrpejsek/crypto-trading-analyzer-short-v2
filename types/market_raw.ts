@@ -86,6 +86,12 @@ export type MarketRawSnapshot = {
     oi_now?: number
     oi_hist?: Array<{ timestamp: string; value: number }>
     regime?: { h1_close?: number | null; m15_close?: number | null; pct_change_1h?: number | null }
+    // Real-time ticker data from Binance
+    price?: number
+    priceChange?: number
+    priceChangePercent?: number
+    volume24h_usd?: number
+    volume24h_btc?: number
   }
   eth?: {
     klines: KlineSet
@@ -93,6 +99,12 @@ export type MarketRawSnapshot = {
     oi_now?: number
     oi_hist?: Array<{ timestamp: string; value: number }>
     regime?: { h1_close?: number | null; m15_close?: number | null; pct_change_1h?: number | null }
+    // Real-time ticker data from Binance
+    price?: number
+    priceChange?: number
+    priceChangePercent?: number
+    volume24h_usd?: number
+    volume24h_eth?: number
   }
   universe: UniverseItem[]
   exchange_filters: ExchangeFilters
