@@ -77,6 +77,34 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: true }))
       return
     }
+    if (url.pathname === '/api/watchdog/last-evals' && req.method === 'GET') {
+      res.statusCode = 200
+      res.setHeader('content-type', 'application/json')
+      const records = ((globalThis as any).__watchdog_last_evals || [])
+      const enabled = (() => { try { const v = String(process.env.WATCHDOG_ENABLED||'false').toLowerCase(); return v==='true'||v==='1'||v==='yes' } catch { return false } })()
+      const mode = String(process.env.WATCHDOG_MODE || 'shadow')
+      res.end(JSON.stringify({ ok: true, enabled, mode, records }))
+      return
+    }
+    if (url.pathname === '/api/watchdog/run-now' && req.method === 'POST') {
+      if (!isDebugApi() && String((process as any)?.env?.RUN_MODE||'').toLowerCase() !== 'local') {
+        res.statusCode = 404
+        res.end('Not found')
+        return
+      }
+      try {
+        // Skeleton: zatím jen placeholder – žádné mazání ani zásah
+        ;(globalThis as any).__watchdog_last_evals = Array.isArray((globalThis as any).__watchdog_last_evals) ? (globalThis as any).__watchdog_last_evals : []
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, ran: false, reason: 'not_implemented' }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
     if (url.pathname === '/api/ws/health') {
       res.statusCode = 200
       res.setHeader('content-type', 'application/json')
