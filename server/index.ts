@@ -48,6 +48,29 @@ function isDebugApi(): boolean {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', 'http://localhost')
+    if (url.pathname === '/api/mark' && req.method === 'GET') {
+      try {
+        const sym = String(url.searchParams.get('symbol') || '')
+        if (!sym) { res.statusCode = 400; res.end(JSON.stringify({ error: 'missing_symbol' })); return }
+        const normalizeSymbol = (s: string): string => {
+          let v = String(s || '').trim().toUpperCase()
+          if (!v) return ''
+          if (v.includes('/')) v = v.replace('/', '')
+          if (!v.endsWith('USDT')) v = `${v}USDT`
+          return v
+        }
+        const symbol = normalizeSymbol(sym)
+        const [mark, last] = await Promise.all([fetchMarkPrice(symbol), fetchLastTradePrice(symbol)])
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ symbol, mark, last }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+      }
+      return
+    }
     if (url.pathname === '/api/health') {
       res.statusCode = 200
       res.setHeader('content-type', 'application/json')

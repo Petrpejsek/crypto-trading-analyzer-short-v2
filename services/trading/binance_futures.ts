@@ -12,6 +12,7 @@ export interface OrderParams {
   workingType?: 'MARK_PRICE' | 'CONTRACT_PRICE'
   closePosition?: boolean
   positionSide?: 'LONG' | 'SHORT'
+  reduceOnly?: boolean
 }
 
 export interface PlaceOrdersRequest {
@@ -128,6 +129,11 @@ class BinanceFuturesAPI {
     return this.request('GET', '/fapi/v2/positionRisk')
   }
 
+  async getOpenOrders(symbol: string): Promise<any[]> {
+    const res = await this.request('GET', '/fapi/v1/openOrders', { symbol })
+    return Array.isArray(res) ? res : []
+  }
+
   async getMarkPrice(symbol: string): Promise<number> {
     const r = await this.request('GET', '/fapi/v1/premiumIndex', { symbol })
     const p = Number(r?.markPrice)
@@ -135,15 +141,7 @@ class BinanceFuturesAPI {
     return p
   }
 
-export async function fetchMarkPrice(symbol: string): Promise<number> {
-  const api = getBinanceAPI()
-  return api.getMarkPrice(symbol)
-}
-
-export async function fetchLastTradePrice(symbol: string): Promise<number> {
-  const api = getBinanceAPI()
-  return api.getLastPrice(symbol)
-}
+// moved below class
 
   async calculateQuantity(symbol: string, usdAmount: number, price: number): Promise<string> {
     // Get symbol info for precision
@@ -170,6 +168,16 @@ export async function fetchLastTradePrice(symbol: string): Promise<number> {
   }
 }
 
+export async function fetchMarkPrice(symbol: string): Promise<number> {
+  const api = getBinanceAPI()
+  return api.getMarkPrice(symbol)
+}
+
+export async function fetchLastTradePrice(symbol: string): Promise<number> {
+  const api = getBinanceAPI()
+  return api.getLastPrice(symbol)
+}
+
 // Initialize only when needed to avoid startup errors
 let binanceAPI: BinanceFuturesAPI | null = null
 
@@ -178,6 +186,22 @@ function getBinanceAPI(): BinanceFuturesAPI {
     binanceAPI = new BinanceFuturesAPI()
   }
   return binanceAPI
+}
+
+async function sleep(ms: number): Promise<void> { return new Promise(res => setTimeout(res, ms)) }
+
+async function waitForStopOrdersCleared(symbol: string, timeoutMs = 4000): Promise<void> {
+  const api = getBinanceAPI()
+  const deadline = Date.now() + timeoutMs
+  const isStopType = (t: string) => ['STOP','STOP_MARKET','TAKE_PROFIT','TAKE_PROFIT_MARKET'].includes(String(t||''))
+  while (Date.now() < deadline) {
+    try {
+      const open = await api.getOpenOrders(symbol)
+      const pending = open.filter(o => isStopType(o?.type))
+      if (pending.length === 0) return
+    } catch {}
+    await sleep(200)
+  }
 }
 
 export async function executeHotTradingOrders(request: PlaceOrdersRequest): Promise<any> {
@@ -214,9 +238,8 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
 
         const lastPrice = await api.getLastPrice(order.symbol)
         const markPrice = await api.getMarkPrice(order.symbol)
-        // Interpret 'amount' as margin in USD; notional = amount * leverage
+        // Interpret 'amount' jako margin v USD; notional = amount * leverage
         const notionalUsd = order.amount * order.leverage
-        const qty = await api.calculateQuantity(order.symbol, notionalUsd, lastPrice)
 
         const info = await api.getSymbolInfo(order.symbol)
         const priceFilter = (info.filters || []).find((f: any) => f.filterType === 'PRICE_FILTER')
@@ -273,12 +296,14 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
         console.info('[ENTRY_ROUTING]', { symbol: order.symbol, requested: order.orderType || null, strategy: order.strategy, resolvedType, entry: order.entry, hasEntry })
 
         let entryRes: any
+        let qtyForEntry: string = '0'
         if (resolvedType === 'limit') {
           if (!hasEntry) throw new Error('limit_entry_missing')
           const entryVal = Number(order.entry)
           assertOnTick(entryVal, 'entry')
           const entryPx = fmt(entryVal)
-          entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'LIMIT', price: entryPx, timeInForce: 'GTC', quantity: qty, positionSide })
+          qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, Number(entryPx))
+          entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'LIMIT', price: entryPx, timeInForce: 'GTC', quantity: qtyForEntry, positionSide })
         } else if (resolvedType === 'stop') {
           if (!hasEntry) throw new Error('stop_entry_missing')
           const trigVal = Number(order.entry)
@@ -287,9 +312,11 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
           // If entry trigger je už aktivní (mark >= entry pro LONG; mark <= entry pro SHORT), přepni na MARKET
           const entryWouldTrigger = sideLong ? (markPrice >= Number(trig)) : (markPrice <= Number(trig))
           if (entryWouldTrigger) {
-            entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'MARKET', quantity: qty, positionSide })
+            qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, markPrice)
+            entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'MARKET', quantity: qtyForEntry, positionSide })
           } else {
-            entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'STOP', stopPrice: trig, price: trig, timeInForce: 'GTC', quantity: qty, positionSide, workingType: 'MARK_PRICE' })
+            qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, Number(trig))
+            entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'STOP', stopPrice: trig, price: trig, timeInForce: 'GTC', quantity: qtyForEntry, positionSide, workingType: 'MARK_PRICE' })
           }
         } else if (resolvedType === 'stop_limit') {
           if (!hasEntry) throw new Error('stop_limit_entry_missing')
@@ -298,16 +325,19 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
           const trig = fmt(trigVal)
           const entryWouldTrigger = sideLong ? (markPrice >= Number(trig)) : (markPrice <= Number(trig))
           if (entryWouldTrigger) {
-            entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'MARKET', quantity: qty, positionSide })
+            qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, markPrice)
+            entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'MARKET', quantity: qtyForEntry, positionSide })
           } else {
-            entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'STOP', stopPrice: trig, price: trig, timeInForce: 'GTC', quantity: qty, positionSide, workingType: 'MARK_PRICE' })
+            qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, Number(trig))
+            entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'STOP', stopPrice: trig, price: trig, timeInForce: 'GTC', quantity: qtyForEntry, positionSide, workingType: 'MARK_PRICE' })
           }
         } else {
           // MARKET je povolen pouze pokud klient poslal 'market'
-          entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'MARKET', quantity: qty, positionSide })
+          qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, markPrice)
+          entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'MARKET', quantity: qtyForEntry, positionSide })
         }
-        const slRes = await api.placeOrder({ symbol: order.symbol, side: exitSide, type: 'STOP_MARKET', stopPrice: slPrice, workingType: 'MARK_PRICE', timeInForce: 'GTC', quantity: qty, positionSide })
-        const tpRes = await api.placeOrder({ symbol: order.symbol, side: exitSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice, workingType: 'MARK_PRICE', timeInForce: 'GTC', quantity: qty, positionSide })
+        const slRes = await api.placeOrder({ symbol: order.symbol, side: exitSide, type: 'STOP_MARKET', stopPrice: slPrice, workingType: 'MARK_PRICE', timeInForce: 'GTC', quantity: qtyForEntry, positionSide, reduceOnly: true })
+        const tpRes = await api.placeOrder({ symbol: order.symbol, side: exitSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice, workingType: 'MARK_PRICE', timeInForce: 'GTC', quantity: qtyForEntry, positionSide, reduceOnly: true })
 
         results.push({
           symbol: order.symbol,
@@ -338,11 +368,18 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
       }
       
     } catch (error: any) {
-      console.error(`[BINANCE_ORDER_ERROR] ${order.symbol}:`, error.message)
+      const raw = String(error?.message || '')
+      let friendly = raw
+      try {
+        if (raw.includes('-4045') || /reach\s+max\s+stop\s+order\s+limit/i.test(raw)) {
+          friendly = 'binance_limit_stop_orders: Reach max stop order limit. Zrušte otevřené STOP/TP/SL příkazy nebo snižte počet.'
+        }
+      } catch {}
+      console.error(`[BINANCE_ORDER_ERROR] ${order.symbol}:`, raw)
       results.push({
         symbol: order.symbol,
         status: 'error',
-        error: error.message
+        error: friendly
       })
     }
   }

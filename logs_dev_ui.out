@@ -2681,3 +2681,1250 @@ AggregateError [ECONNREFUSED]:
 1:27:07 PM [vite] (client) hmr update /src/ui/App.tsx
 1:27:25 PM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
 1:27:25 PM [vite] (client) hmr update /src/ui/App.tsx
+1:42:10 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+1:43:37 PM [vite] (client) hmr update /src/ui/App.tsx
+1:43:54 PM [vite] (client) hmr update /src/ui/App.tsx
+1:44:40 PM [vite] (client) hmr update /src/ui/App.tsx
+1:45:15 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+1:45:15 PM [vite] (client) hmr update /src/ui/App.tsx
+1:57:35 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:57:35 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:57:39 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:57:39 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:57:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:57:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:57:47 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:57:47 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:57:51 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:57:51 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:57:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:57:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:57:59 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:57:59 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:58:03 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:58:03 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:58:07 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:58:07 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:58:11 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:58:11 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:58:15 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:58:15 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:58:19 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:58:19 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:58:23 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+1:58:23 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+2:56:37 PM [vite] (client) hmr update /src/ui/App.tsx
+2:57:08 PM [vite] (client) hmr update /src/ui/App.tsx
+3:16:40 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+3:17:08 PM [vite] (client) hmr update /src/ui/App.tsx
+3:17:15 PM [vite] (client) hmr update /src/ui/App.tsx
+3:17:35 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+3:17:35 PM [vite] (client) hmr update /src/ui/App.tsx
+3:58:56 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+3:59:13 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:01:21 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:03:40 PM [vite] (client) hmr update /src/ui/App.tsx
+4:03:54 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:03:54 PM [vite] (client) hmr update /src/ui/App.tsx
+4:11:28 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:11:40 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:16:59 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:16:59 PM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (135:4)
+
+  133 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  134 |       </div>
+> 135 |     </div>
+      |     ^
+  136 |   )
+  137 | }
+  138 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:135:4
+  133|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  134|        </div>
+  135|      </div>
+     |      ^
+  136|    )
+  137|  }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4775:18)
+      at TypeScriptParserMixin.jsxParseElement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4782:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4792:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:39
+      at TypeScriptParserMixin.tryParse (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6938:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:18)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12432:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12499:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11679:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12803:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11691:12)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+4:17:31 PM [vite] (client) hmr update /src/ui/App.tsx
+4:17:31 PM [vite] (client) Pre-transform error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (135:4)
+
+  133 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  134 |       </div>
+> 135 |     </div>
+      |     ^
+  136 |   )
+  137 | }
+  138 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:135:4
+  133|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  134|        </div>
+  135|      </div>
+     |      ^
+  136|    )
+  137|  }
+4:17:49 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:17:49 PM [vite] (client) hmr update /src/ui/App.tsx
+4:17:49 PM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (135:4)
+
+  133 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  134 |       </div>
+> 135 |     </div>
+      |     ^
+  136 |   )
+  137 | }
+  138 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:135:4
+  133|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  134|        </div>
+  135|      </div>
+     |      ^
+  136|    )
+  137|  }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4775:18)
+      at TypeScriptParserMixin.jsxParseElement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4782:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4792:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:39
+      at TypeScriptParserMixin.tryParse (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6938:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:18)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12432:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12499:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11679:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12803:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11691:12)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+4:17:49 PM [vite] (client) Pre-transform error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (135:4)
+
+  133 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  134 |       </div>
+> 135 |     </div>
+      |     ^
+  136 |   )
+  137 | }
+  138 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:135:4
+  133|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  134|        </div>
+  135|      </div>
+     |      ^
+  136|    )
+  137|  }
+4:19:43 PM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (135:4)
+
+  133 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  134 |       </div>
+> 135 |     </div>
+      |     ^
+  136 |   )
+  137 | }
+  138 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:135:4
+  133|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  134|        </div>
+  135|      </div>
+     |      ^
+  136|    )
+  137|  }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4775:18)
+      at TypeScriptParserMixin.jsxParseElement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4782:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4792:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:39
+      at TypeScriptParserMixin.tryParse (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6938:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:18)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12432:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12499:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11679:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12803:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11691:12)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+4:21:05 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:21:05 PM [vite] (client) Pre-transform error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (137:4)
+
+  135 |       </div>
+  136 |       </div>
+> 137 |     </div>
+      |     ^
+  138 |   )
+  139 | }
+  140 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:137:4
+  135|        </div>
+  136|        </div>
+  137|      </div>
+     |      ^
+  138|    )
+  139|  }
+4:21:05 PM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (137:4)
+
+  135 |       </div>
+  136 |       </div>
+> 137 |     </div>
+      |     ^
+  138 |   )
+  139 | }
+  140 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:137:4
+  135|        </div>
+  136|        </div>
+  137|      </div>
+     |      ^
+  138|    )
+  139|  }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4775:18)
+      at TypeScriptParserMixin.jsxParseElement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4782:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4792:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:39
+      at TypeScriptParserMixin.tryParse (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6938:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:18)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12432:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12499:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11679:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12803:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11691:12)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+4:21:22 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:21:22 PM [vite] (client) Pre-transform error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (137:4)
+
+  135 |       </div>
+  136 |       </div>
+> 137 |     </div>
+      |     ^
+  138 |   )
+  139 | }
+  140 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:137:4
+  135|        </div>
+  136|        </div>
+  137|      </div>
+     |      ^
+  138|    )
+  139|  }
+4:21:22 PM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (137:4)
+
+  135 |       </div>
+  136 |       </div>
+> 137 |     </div>
+      |     ^
+  138 |   )
+  139 | }
+  140 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:137:4
+  135|        </div>
+  136|        </div>
+  137|      </div>
+     |      ^
+  138|    )
+  139|  }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4775:18)
+      at TypeScriptParserMixin.jsxParseElement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4782:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4792:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:39
+      at TypeScriptParserMixin.tryParse (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6938:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:18)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12432:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12499:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11679:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12803:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11691:12)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+4:21:49 PM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (137:4)
+
+  135 |       </div>
+  136 |       </div>
+> 137 |     </div>
+      |     ^
+  138 |   )
+  139 | }
+  140 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:137:4
+  135|        </div>
+  136|        </div>
+  137|      </div>
+     |      ^
+  138|    )
+  139|  }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4775:18)
+      at TypeScriptParserMixin.jsxParseElement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4782:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4792:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:39
+      at TypeScriptParserMixin.tryParse (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6938:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:18)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12432:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12499:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11679:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12803:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11691:12)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+4:24:34 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:24:50 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:25:50 PM [vite] (client) Pre-transform error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (135:4)
+
+  133 |       </div>
+  134 |       </div>
+> 135 |     </div>
+      |     ^
+  136 |   )
+  137 | }
+  138 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:135:4
+  133|        </div>
+  134|        </div>
+  135|      </div>
+     |      ^
+  136|    )
+  137|  }
+4:25:50 PM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Adjacent JSX elements must be wrapped in an enclosing tag. Did you want a JSX fragment <>...</>? (135:4)
+
+  133 |       </div>
+  134 |       </div>
+> 135 |     </div>
+      |     ^
+  136 |   )
+  137 | }
+  138 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:135:4
+  133|        </div>
+  134|        </div>
+  135|      </div>
+     |      ^
+  136|    )
+  137|  }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4775:18)
+      at TypeScriptParserMixin.jsxParseElement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4782:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4792:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:39
+      at TypeScriptParserMixin.tryParse (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6938:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:18)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12432:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12499:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11679:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12803:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11691:12)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+4:28:41 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:28:41 PM [vite] (client) Pre-transform error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Unterminated JSX contents. (133:10)
+
+  131 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132 |       </div>
+> 133 |     </div>
+      |           ^
+  134 |   )
+  135 | }
+  136 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:133:10
+  131|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132|        </div>
+  133|      </div>
+     |            ^
+  134|    )
+  135|  }
+4:28:41 PM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Unterminated JSX contents. (133:10)
+
+  131 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132 |       </div>
+> 133 |     </div>
+      |           ^
+  134 |   )
+  135 | }
+  136 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:133:10
+  131|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132|        </div>
+  133|      </div>
+     |            ^
+  134|    )
+  135|  }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.jsxReadToken (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4481:20)
+      at TypeScriptParserMixin.getTokenFromCode (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4807:12)
+      at TypeScriptParserMixin.getTokenFromCode (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10009:11)
+      at TypeScriptParserMixin.nextToken (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5813:10)
+      at TypeScriptParserMixin.next (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5723:10)
+      at TypeScriptParserMixin.eat (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5727:12)
+      at TypeScriptParserMixin.expect (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6929:15)
+      at TypeScriptParserMixin.jsxParseClosingElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4713:10)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4728:37)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4731:32)
+      at TypeScriptParserMixin.jsxParseElement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4782:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4792:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:39
+      at TypeScriptParserMixin.tryParse (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6938:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:18)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12432:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12499:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11679:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12803:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+4:28:58 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:28:58 PM [vite] (client) Pre-transform error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Unterminated JSX contents. (133:10)
+
+  131 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132 |       </div>
+> 133 |     </div>
+      |           ^
+  134 |   )
+  135 | }
+  136 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:133:10
+  131|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132|        </div>
+  133|      </div>
+     |            ^
+  134|    )
+  135|  }
+4:28:58 PM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Unterminated JSX contents. (133:10)
+
+  131 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132 |       </div>
+> 133 |     </div>
+      |           ^
+  134 |   )
+  135 | }
+  136 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:133:10
+  131|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132|        </div>
+  133|      </div>
+     |            ^
+  134|    )
+  135|  }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.jsxReadToken (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4481:20)
+      at TypeScriptParserMixin.getTokenFromCode (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4807:12)
+      at TypeScriptParserMixin.getTokenFromCode (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10009:11)
+      at TypeScriptParserMixin.nextToken (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5813:10)
+      at TypeScriptParserMixin.next (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5723:10)
+      at TypeScriptParserMixin.eat (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5727:12)
+      at TypeScriptParserMixin.expect (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6929:15)
+      at TypeScriptParserMixin.jsxParseClosingElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4713:10)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4728:37)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4731:32)
+      at TypeScriptParserMixin.jsxParseElement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4782:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4792:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:39
+      at TypeScriptParserMixin.tryParse (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6938:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:18)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12432:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12499:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11679:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12803:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+4:29:22 PM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Unterminated JSX contents. (133:10)
+
+  131 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132 |       </div>
+> 133 |     </div>
+      |           ^
+  134 |   )
+  135 | }
+  136 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:133:10
+  131|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132|        </div>
+  133|      </div>
+     |            ^
+  134|    )
+  135|  }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.jsxReadToken (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4481:20)
+      at TypeScriptParserMixin.getTokenFromCode (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4807:12)
+      at TypeScriptParserMixin.getTokenFromCode (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10009:11)
+      at TypeScriptParserMixin.nextToken (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5813:10)
+      at TypeScriptParserMixin.next (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5723:10)
+      at TypeScriptParserMixin.eat (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5727:12)
+      at TypeScriptParserMixin.expect (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6929:15)
+      at TypeScriptParserMixin.jsxParseClosingElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4713:10)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4728:37)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4731:32)
+      at TypeScriptParserMixin.jsxParseElement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4782:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4792:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:39
+      at TypeScriptParserMixin.tryParse (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6938:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:18)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12432:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12499:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11679:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12803:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+4:29:25 PM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Unterminated JSX contents. (133:10)
+
+  131 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132 |       </div>
+> 133 |     </div>
+      |           ^
+  134 |   )
+  135 | }
+  136 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:133:10
+  131|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132|        </div>
+  133|      </div>
+     |            ^
+  134|    )
+  135|  }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.jsxReadToken (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4481:20)
+      at TypeScriptParserMixin.getTokenFromCode (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4807:12)
+      at TypeScriptParserMixin.getTokenFromCode (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10009:11)
+      at TypeScriptParserMixin.nextToken (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5813:10)
+      at TypeScriptParserMixin.next (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5723:10)
+      at TypeScriptParserMixin.eat (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5727:12)
+      at TypeScriptParserMixin.expect (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6929:15)
+      at TypeScriptParserMixin.jsxParseClosingElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4713:10)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4728:37)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4731:32)
+      at TypeScriptParserMixin.jsxParseElement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4782:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4792:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:39
+      at TypeScriptParserMixin.tryParse (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6938:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:18)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12432:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12499:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11679:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12803:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+4:30:15 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:30:15 PM [vite] (client) Pre-transform error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Unterminated JSX contents. (133:10)
+
+  131 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132 |       </div>
+> 133 |     </div>
+      |           ^
+  134 |   )
+  135 | }
+  136 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:133:10
+  131|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132|        </div>
+  133|      </div>
+     |            ^
+  134|    )
+  135|  }
+4:30:15 PM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Unterminated JSX contents. (133:10)
+
+  131 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132 |       </div>
+> 133 |     </div>
+      |           ^
+  134 |   )
+  135 | }
+  136 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:133:10
+  131|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132|        </div>
+  133|      </div>
+     |            ^
+  134|    )
+  135|  }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.jsxReadToken (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4481:20)
+      at TypeScriptParserMixin.getTokenFromCode (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4807:12)
+      at TypeScriptParserMixin.getTokenFromCode (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10009:11)
+      at TypeScriptParserMixin.nextToken (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5813:10)
+      at TypeScriptParserMixin.next (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5723:10)
+      at TypeScriptParserMixin.eat (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5727:12)
+      at TypeScriptParserMixin.expect (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6929:15)
+      at TypeScriptParserMixin.jsxParseClosingElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4713:10)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4728:37)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4731:32)
+      at TypeScriptParserMixin.jsxParseElement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4782:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4792:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:39
+      at TypeScriptParserMixin.tryParse (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6938:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:18)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12432:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12499:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11679:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12803:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+4:30:32 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:30:32 PM [vite] (client) Pre-transform error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Unterminated JSX contents. (133:10)
+
+  131 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132 |       </div>
+> 133 |     </div>
+      |           ^
+  134 |   )
+  135 | }
+  136 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:133:10
+  131|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132|        </div>
+  133|      </div>
+     |            ^
+  134|    )
+  135|  }
+4:30:32 PM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Unterminated JSX contents. (133:10)
+
+  131 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132 |       </div>
+> 133 |     </div>
+      |           ^
+  134 |   )
+  135 | }
+  136 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:133:10
+  131|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132|        </div>
+  133|      </div>
+     |            ^
+  134|    )
+  135|  }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.jsxReadToken (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4481:20)
+      at TypeScriptParserMixin.getTokenFromCode (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4807:12)
+      at TypeScriptParserMixin.getTokenFromCode (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10009:11)
+      at TypeScriptParserMixin.nextToken (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5813:10)
+      at TypeScriptParserMixin.next (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5723:10)
+      at TypeScriptParserMixin.eat (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5727:12)
+      at TypeScriptParserMixin.expect (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6929:15)
+      at TypeScriptParserMixin.jsxParseClosingElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4713:10)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4728:37)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4731:32)
+      at TypeScriptParserMixin.jsxParseElement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4782:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4792:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:39
+      at TypeScriptParserMixin.tryParse (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6938:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:18)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12432:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12499:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11679:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12803:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+4:31:38 PM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx: Unterminated JSX contents. (133:10)
+
+  131 |         <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132 |       </div>
+> 133 |     </div>
+      |           ^
+  134 |   )
+  135 | }
+  136 |
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/components/HeaderBar.tsx:133:10
+  131|          <button className="btn ghost" onClick={onToggleSettings} aria-label="Open settings" title="Settings" style={{ display: 'none' }}>⚙️</button>
+  132|        </div>
+  133|      </div>
+     |            ^
+  134|    )
+  135|  }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.jsxReadToken (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4481:20)
+      at TypeScriptParserMixin.getTokenFromCode (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4807:12)
+      at TypeScriptParserMixin.getTokenFromCode (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10009:11)
+      at TypeScriptParserMixin.nextToken (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5813:10)
+      at TypeScriptParserMixin.next (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5723:10)
+      at TypeScriptParserMixin.eat (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:5727:12)
+      at TypeScriptParserMixin.expect (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6929:15)
+      at TypeScriptParserMixin.jsxParseClosingElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4713:10)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4728:37)
+      at TypeScriptParserMixin.jsxParseElementAt (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4731:32)
+      at TypeScriptParserMixin.jsxParseElement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4782:17)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4792:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:39
+      at TypeScriptParserMixin.tryParse (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6938:20)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9795:18)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12432:12)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseMaybeAssignAllowInOrVoidPattern (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12499:17)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11679:28)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at TypeScriptParserMixin.parseExpressionBase (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10784:23)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10780:17)
+      at TypeScriptParserMixin.parseReturnStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13147:28)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12803:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+4:32:25 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:32:55 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:37:02 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:37:27 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:50:09 PM [vite] (client) hmr update /src/ui/App.tsx
+4:50:26 PM [vite] (client) hmr update /src/ui/App.tsx
+4:55:01 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+4:55:29 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+5:00:10 PM [vite] (client) hmr update /src/ui/App.tsx
+5:00:27 PM [vite] (client) hmr update /src/ui/App.tsx
+5:07:29 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+5:08:42 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+5:09:01 PM [vite] (client) hmr update /src/ui/components/HeaderBar.tsx
+5:16:06 PM [vite] (client) hmr update /src/ui/App.tsx
+5:20:08 PM [vite] (client) hmr update /src/ui/App.tsx
+5:40:53 PM [vite] (client) hmr update /src/ui/App.tsx
+5:41:09 PM [vite] (client) hmr update /src/ui/App.tsx
+5:44:23 PM [vite] (client) hmr update /src/ui/App.tsx
+5:44:55 PM [vite] (client) hmr update /src/ui/App.tsx

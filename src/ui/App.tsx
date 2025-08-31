@@ -93,6 +93,28 @@ export const App: React.FC = () => {
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({})
   // TODO: future – add markPrice map if needed
   const [placingOrders, setPlacingOrders] = useState(false)
+  const [defaultPreset, setDefaultPreset] = useState<'conservative'|'aggressive'>(()=>{
+    try { return (localStorage.getItem('default_preset') as any) === 'aggressive' ? 'aggressive' : 'conservative' } catch { return 'conservative' }
+  })
+  useEffect(()=>{ try { localStorage.setItem('default_preset', defaultPreset) } catch {} }, [defaultPreset])
+
+  // Global defaults controlled in HeaderBar
+  const [defaultSide, setDefaultSide] = useState<'LONG'|'SHORT'>(()=>{
+    try { return (localStorage.getItem('default_side') as any) === 'SHORT' ? 'SHORT' : 'LONG' } catch { return 'LONG' }
+  })
+  useEffect(()=>{ try { localStorage.setItem('default_side', defaultSide) } catch {} }, [defaultSide])
+  const [defaultTPLevel, setDefaultTPLevel] = useState<'tp1'|'tp2'|'tp3'>(()=>{
+    try { const v = (localStorage.getItem('default_tp_level') as any) || 'tp2'; return (['tp1','tp2','tp3'] as const).includes(v) ? v as any : 'tp2' } catch { return 'tp2' }
+  })
+  useEffect(()=>{ try { localStorage.setItem('default_tp_level', defaultTPLevel) } catch {} }, [defaultTPLevel])
+  const [defaultAmount, setDefaultAmount] = useState<number>(()=>{
+    try { const n = Number(localStorage.getItem('default_amount_usdt')); return Number.isFinite(n) && n > 0 ? n : 20 } catch { return 20 }
+  })
+  useEffect(()=>{ try { localStorage.setItem('default_amount_usdt', String(defaultAmount)) } catch {} }, [defaultAmount])
+  const [defaultLeverage, setDefaultLeverage] = useState<number>(()=>{
+    try { const n = Number(localStorage.getItem('default_leverage')); return Number.isFinite(n) && n > 0 ? n : 15 } catch { return 15 }
+  })
+  useEffect(()=>{ try { localStorage.setItem('default_leverage', String(defaultLeverage)) } catch {} }, [defaultLeverage])
 
   // Load hot trading settings from localStorage
   const hotTradingSettings = useMemo(() => ({
@@ -554,27 +576,29 @@ export const App: React.FC = () => {
         console.warn('Regime calculation failed:', e?.message)
       }
       
-      // OPRAVA: Validace velikosti před kopírováním
-      try {
-        const jsonString = JSON.stringify(coins, null, 2)
-        const sizeKB = new Blob([jsonString]).size / 1024
-        
-        if (sizeKB > 1024) { // Limit 1MB
-          setError(`Data too large for clipboard (${sizeKB.toFixed(0)}KB). Max 1MB allowed.`)
-          return
+      // OPRAVA: Validace velikosti před kopírováním – při chybě NEUKONČUJEME flow
+      {
+        let copiedOk = false
+        try {
+          const jsonString = JSON.stringify(coins, null, 2)
+          const sizeKB = new Blob([jsonString]).size / 1024
+          if (sizeKB > 1024) {
+            setError(`Data too large for clipboard (${sizeKB.toFixed(0)}KB). Max 1MB allowed.`)
+          } else {
+            await writeClipboardSafely(jsonString)
+            copiedOk = true
+          }
+        } catch (e: any) {
+          const msg = String(e?.code || e?.message || '') === 'document_not_focused' ? 'Please focus this tab and click again.' : (e?.message || 'write failed')
+          setError(`Clipboard error: ${msg}`)
         }
-        
-        await writeClipboardSafely(jsonString)
-      } catch (e: any) {
-        const msg = String(e?.code || e?.message || '') === 'document_not_focused' ? 'Please focus this tab and click again.' : (e?.message || 'write failed')
-        setError(`Clipboard error: ${msg}`)
-        return
+        if (copiedOk) {
+          setRawCopied(true)
+          window.setTimeout(() => setRawCopied(false), 1400)
+        }
       }
-      
-      setRawCopied(true)
-      window.setTimeout(() => setRawCopied(false), 1400)
 
-      // Auto-trigger hot screener
+      // Auto-trigger hot screener (pokračuj i když clipboard selže)
       await runHotScreener(coins)
     } catch (e: any) {
       setError(`Network error: ${e?.message || 'request failed'}`)
@@ -678,12 +702,12 @@ export const App: React.FC = () => {
       const controls: CoinControl[] = strategies.map(strategy => ({
         symbol: strategy.symbol,
         include: true,
-        side: 'LONG',
-        strategy: hotTradingSettings.defaultStrategy,
-        tpLevel: hotTradingSettings.defaultTPLevel,
-        orderType: hotTradingSettings.defaultStrategy === 'conservative' ? 'limit' : 'stop_limit',
-        amount: (hotTradingSettings as any).defaultAmount ?? 20,
-        leverage: (hotTradingSettings as any).defaultLeverage ?? 15,
+        side: defaultSide,
+        strategy: defaultPreset,
+        tpLevel: defaultTPLevel,
+        orderType: defaultPreset === 'conservative' ? 'limit' : 'stop_limit',
+        amount: defaultAmount,
+        leverage: defaultLeverage,
         useCustomBuffer: false
       }))
 
@@ -706,8 +730,13 @@ export const App: React.FC = () => {
   const prepareOrders = async () => {
     try {
       setPlacingOrders(true)
+      setError(null)
       const includedControls = coinControls.filter(c => c.include)
-      if (includedControls.length === 0) { alert('No coins selected'); return }
+      if (includedControls.length === 0) { setError('No coins selected'); return }
+      // Pre-validate against MARK price
+      const getMark = async (s: string): Promise<number|null> => {
+        try { const r = await fetch(`/api/mark?symbol=${encodeURIComponent(s)}`); if (!r.ok) return null; const j = await r.json(); return Number(j?.mark) } catch { return null }
+      }
       // Map selected plan to numeric entry/SL/TP
       const findPlan = (symbol: string, strategy: 'conservative'|'aggressive') => {
         const s = entryStrategies.find(es => es.symbol === symbol)
@@ -757,7 +786,28 @@ export const App: React.FC = () => {
         })
       const uniqMap = new Map<string, any>()
       for (const o of mapped) uniqMap.set(o.symbol, o)
-      const payload = { orders: Array.from(uniqMap.values()) }
+      let orders = Array.from(uniqMap.values())
+      // MARK guards (client-side): pokračuj s validními, chybné vypiš
+      const invalid: string[] = []
+      const invalidSymbols = new Set<string>()
+      for (const o of orders) {
+        const mark = await getMark(o.symbol)
+        if (!Number.isFinite(mark as any)) continue
+        const sideLong = (o.side || 'LONG') === 'LONG'
+        if (sideLong) {
+          if (o.tp && !(o.tp > (mark as number))) { invalid.push(`${o.symbol}: TP ${o.tp} ≤ MARK ${(mark as number).toFixed(6)}`); invalidSymbols.add(o.symbol) }
+          if (o.sl && !(o.sl < (mark as number))) { invalid.push(`${o.symbol}: SL ${o.sl} ≥ MARK ${(mark as number).toFixed(6)}`); invalidSymbols.add(o.symbol) }
+        } else {
+          if (o.tp && !(o.tp < (mark as number))) { invalid.push(`${o.symbol}: TP ${o.tp} ≥ MARK ${(mark as number).toFixed(6)}`); invalidSymbols.add(o.symbol) }
+          if (o.sl && !(o.sl > (mark as number))) { invalid.push(`${o.symbol}: SL ${o.sl} ≤ MARK ${(mark as number).toFixed(6)}`); invalidSymbols.add(o.symbol) }
+        }
+      }
+      if (invalid.length) {
+        setError(`Vynechávám nevalidní podle MARK:\n${invalid.join('\n')}`)
+        orders = orders.filter(o => !invalidSymbols.has(o.symbol))
+      }
+      if (orders.length === 0) return
+      const payload = { orders }
 
       const res = await fetch('/api/place_orders', {
         method: 'POST',
@@ -769,13 +819,13 @@ export const App: React.FC = () => {
         const firstErr = Array.isArray(json?.orders) ? json.orders.find((o:any)=>o?.status==='error') : null
         const msg = json?.error || firstErr?.error || firstErr?.status || `HTTP ${res.status}`
         console.error('[PLACE_ORDERS_FAIL]', { status: res.status, response: json })
-        alert(`Order submit failed: ${msg}`)
+        setError(`Order submit failed: ${msg}`)
         return
       }
       console.log('[PLACE_ORDERS_OK]', json)
-      alert(`Orders submitted OK: ${Array.isArray(json?.orders) ? json.orders.length : payload.orders.length}`)
+      // success notice: non-blocking (console only)
     } catch (e: any) {
-      alert(`Order submit error: ${e?.message || 'unknown'}`)
+      setError(`Order submit error: ${e?.message || 'unknown'}`)
     } finally {
       setPlacingOrders(false)
     }
@@ -862,7 +912,31 @@ export const App: React.FC = () => {
 
   return (
     <div style={{ padding: 16, maxWidth: 1200, margin: '0 auto' }}>
-      <HeaderBar running={running} onRun={onRun} onExportSnapshot={onExport} onExportFeatures={onExportFeatures} onToggleSettings={() => setSettingsOpen(true)} onToggleReport={() => setShowReport(v => !v)} showingReport={showReport} />
+      <HeaderBar 
+        running={running} 
+        onRun={onRun} 
+        onExportSnapshot={onExport} 
+        onExportFeatures={onExportFeatures} 
+        onToggleSettings={() => setSettingsOpen(true)} 
+        onToggleReport={() => setShowReport(v => !v)} 
+        showingReport={showReport} 
+        defaultPreset={defaultPreset} 
+        onChangeDefaultPreset={(p)=>setDefaultPreset(p)}
+        defaultSide={defaultSide}
+        onChangeDefaultSide={(s)=>setDefaultSide(s)}
+        defaultTPLevel={defaultTPLevel}
+        onChangeDefaultTPLevel={(t)=>setDefaultTPLevel(t)}
+        defaultAmount={defaultAmount}
+        onChangeDefaultAmount={(n)=>setDefaultAmount(Math.max(1, Math.floor(n || 0)))}
+        defaultLeverage={defaultLeverage}
+        onChangeDefaultLeverage={(n)=>setDefaultLeverage(Math.max(1, Math.floor(n || 0)))}
+        universeStrategy={universeStrategy}
+        onChangeUniverse={(u)=>setUniverseStrategy(u)}
+        onCopyRawAll={copyRawAll}
+        rawLoading={rawLoading}
+        rawCopied={rawCopied}
+        count={(displayCoins as any[]).length}
+      />
       
       {/* BTC/ETH data integrated into DecisionBanner */}
       
@@ -898,27 +972,24 @@ export const App: React.FC = () => {
       )}
       {snapshot && Array.isArray(snapshot.universe) && (
         <div className="card" style={{ marginTop: 12, padding: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <strong>Alt universe</strong>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 12, opacity: .8 }}>count: {(displayCoins as any[]).length}</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 12, opacity: .8 }}>Universe:</span>
-                <button
-                  className={`btn toggle${universeStrategy === 'volume' ? ' active' : ''}`}
-                  onClick={() => setUniverseStrategy('volume')}
-                  aria-pressed={universeStrategy === 'volume'}
-                >Volume</button>
-                <button
-                  className={`btn toggle${universeStrategy === 'gainers' ? ' active' : ''}`}
-                  onClick={() => setUniverseStrategy('gainers')}
-                  aria-pressed={universeStrategy === 'gainers'}
-                >Gainers 24h</button>
-              </div>
-              <button className="btn" style={{ border: '2px solid #333' }} onClick={copyRawAll} aria-label="Copy RAW dataset (all alts)" title={rawCopied ? 'Zkopírováno' : 'Copy RAW dataset'} disabled={rawLoading}>
-                {rawLoading ? 'Stahuji…' : (rawCopied ? 'RAW zkopírováno ✓' : 'Copy RAW (vše)')}
-              </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, opacity: .8 }}>Universe:</span>
+              <button
+                className={`btn toggle${universeStrategy === 'volume' ? ' active' : ''}`}
+                onClick={() => setUniverseStrategy('volume')}
+                aria-pressed={universeStrategy === 'volume'}
+              >Volume</button>
+              <button
+                className={`btn toggle${universeStrategy === 'gainers' ? ' active' : ''}`}
+                onClick={() => setUniverseStrategy('gainers')}
+                aria-pressed={universeStrategy === 'gainers'}
+              >Gainers 24h</button>
             </div>
+            <button className="btn" style={{ border: '2px solid #333' }} onClick={copyRawAll} aria-label="Copy RAW dataset (all alts)" title={rawCopied ? 'Zkopírováno' : 'Copy RAW dataset'} disabled={rawLoading}>
+              {rawLoading ? 'Stahuji…' : (rawCopied ? 'RAW zkopírováno ✓' : 'Copy RAW (vše)')}
+            </button>
           </div>
           {/* Per-coin copy buttons below header for clarity */}
           <div className="coins-grid">
