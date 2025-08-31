@@ -31,16 +31,18 @@ function pushRecord(rec: EvalRecord) {
 
 function nowISO(): string { return new Date().toISOString() }
 
-async function oneCycle(): Promise<void> {
+async function oneCycle(): Promise<{ total: number; keep: number; counts: Record<string, number> } | void> {
   try {
     const orders: OrderLite[] = await getOpenOrders()
     if (!orders || orders.length === 0) {
       console.info(JSON.stringify({ level:'info', type:'WATCHDOG_EVAL_SUMMARY', ts: nowISO(), count: 0 }))
-      return
+      return { total: 0, keep: 0, counts: {} }
     }
     const symbols = Array.from(new Set(orders.map(o => String(o.symbol||'')).filter(Boolean)))
     const [marks, atrs] = await Promise.all([ getMarks(symbols), getAtrH1(symbols) ])
     let cancelCandidates = 0
+    let keepCount = 0
+    const reasonCounts: Record<string, number> = {}
     for (const o of orders) {
       const tsMs = Number.isFinite(o.updateTime as any) ? Number(o.updateTime) : (Number.isFinite(o.time as any) ? Number(o.time) : null)
       const age_min = tsMs ? Math.max(0, Math.round((Date.now() - tsMs) / 60000)) : null
@@ -67,6 +69,8 @@ async function oneCycle(): Promise<void> {
 
       const wouldCancel = decision.action === 'cancel'
       if (wouldCancel) cancelCandidates++
+      else keepCount++
+      if (decision.reason) reasonCounts[decision.reason] = (reasonCounts[decision.reason] || 0) + (wouldCancel ? 1 : 0)
 
       const rec: EvalRecord = {
         tsISO: nowISO(),
@@ -91,9 +95,11 @@ async function oneCycle(): Promise<void> {
         allowCancelFlag: WATCHDOG_ALLOW_CANCEL
       }))
     }
-    console.info(JSON.stringify({ level:'info', type:'WATCHDOG_EVAL_SUMMARY', ts: nowISO(), count: orders.length, cancelCandidates }))
+    console.info(JSON.stringify({ level:'info', type:'WATCHDOG_EVAL_SUMMARY', ts: nowISO(), count: orders.length, cancelCandidates, keepCount, reasons: reasonCounts }))
+    return { total: orders.length, keep: keepCount, counts: reasonCounts }
   } catch (e: any) {
     console.error(JSON.stringify({ level:'error', type:'WATCHDOG_ERROR', ts: nowISO(), error: e?.message || 'unknown' }))
+    ;(globalThis as any).__watchdog_meta = { ...(globalThis as any).__watchdog_meta, lastError: e?.message || 'unknown' }
   }
 }
 
@@ -107,8 +113,17 @@ async function main() {
     return
   }
   // immediate run then interval
-  await oneCycle()
-  setInterval(oneCycle, Math.max(5, WATCHDOG_INTERVAL_SEC) * 1000)
+  const t0 = Date.now()
+  const r = await oneCycle()
+  ;(globalThis as any).__watchdog_meta = { lastRunISO: nowISO(), lastRunDurationMs: Date.now() - t0, lastError: null }
+  ;(globalThis as any).__watchdog_run_once = async () => {
+    const t = Date.now(); const out = await oneCycle(); (globalThis as any).__watchdog_meta = { lastRunISO: new Date().toISOString(), lastRunDurationMs: Date.now() - t, lastError: null }; return out || { total: 0, keep: 0, counts: {} }
+  }
+  setInterval(async () => {
+    const t = Date.now()
+    await oneCycle()
+    ;(globalThis as any).__watchdog_meta = { lastRunISO: nowISO(), lastRunDurationMs: Date.now() - t, lastError: null }
+  }, Math.max(5, WATCHDOG_INTERVAL_SEC) * 1000)
 }
 
 main().catch(()=>{})

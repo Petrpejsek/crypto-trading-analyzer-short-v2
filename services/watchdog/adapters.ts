@@ -7,10 +7,28 @@ const sleep = (ms: number) => new Promise(res => setTimeout(res, ms))
 let lastAtrCallAt = 0
 
 export async function getOpenOrders(): Promise<OrderLite[]> {
-  // Prefer server-side Binance wrapper: GET /binance openOrders není proxováno; použijeme Binance API přes server pokud přidáme vlastní endpoint.
-  // Zatím: přímo volání Binance all open orders by vyžadovalo auth; proto placeholder – počítáme, že server přidá proxy.
-  // Pro kostru vrať prázdný list.
-  return []
+  try {
+    const r = await undiciFetch('http://localhost:8788/internal/binance/open-orders')
+    if (!r.ok) {
+      const code = r.status
+      console.error(JSON.stringify({ level:'error', type:'WATCHDOG_ERROR', ts: new Date().toISOString(), error:`open_orders_http_${code}` }))
+      return []
+    }
+    const j: any = await r.json().catch(()=>null)
+    const items = Array.isArray(j?.items) ? j.items : []
+    return items.map((o: any) => ({
+      symbol: String(o?.symbol||''),
+      orderId: o?.orderId,
+      type: String(o?.type||''),
+      side: String(o?.side||''),
+      time: Number(o?.time||0),
+      price: o?.price,
+      stopPrice: o?.stopPrice
+    }))
+  } catch (e: any) {
+    console.error(JSON.stringify({ level:'error', type:'WATCHDOG_ERROR', ts: new Date().toISOString(), error: e?.message || 'open_orders_fetch_failed' }))
+    return []
+  }
 }
 
 export async function getMarks(symbols: string[]): Promise<Record<string, { mark: number | null }>> {

@@ -134,6 +134,11 @@ class BinanceFuturesAPI {
     return Array.isArray(res) ? res : []
   }
 
+  async getAllOpenOrders(): Promise<any[]> {
+    const res = await this.request('GET', '/fapi/v1/openOrders')
+    return Array.isArray(res) ? res : []
+  }
+
   async getMarkPrice(symbol: string): Promise<number> {
     const r = await this.request('GET', '/fapi/v1/premiumIndex', { symbol })
     const p = Number(r?.markPrice)
@@ -176,6 +181,11 @@ export async function fetchMarkPrice(symbol: string): Promise<number> {
 export async function fetchLastTradePrice(symbol: string): Promise<number> {
   const api = getBinanceAPI()
   return api.getLastPrice(symbol)
+}
+
+export async function fetchAllOpenOrders(): Promise<any[]> {
+  const api = getBinanceAPI()
+  return api.getAllOpenOrders()
 }
 
 // Initialize only when needed to avoid startup errors

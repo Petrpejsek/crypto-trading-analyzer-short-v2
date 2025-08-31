@@ -11,7 +11,7 @@ import { decideMarketStrict } from '../services/decider/market_decider_gpt'
 import { runFinalPicker as runFinalPickerServer } from '../services/decider/final_picker_gpt'
 import { runHotScreener } from '../services/decider/hot_screener_gpt'
 import { runEntryStrategy } from '../services/decider/entry_strategy_gpt'
-import { executeHotTradingOrders, type PlaceOrdersRequest, fetchMarkPrice, fetchLastTradePrice } from '../services/trading/binance_futures'
+import { executeHotTradingOrders, type PlaceOrdersRequest, fetchMarkPrice, fetchLastTradePrice, fetchAllOpenOrders } from '../services/trading/binance_futures'
 import { preflightCompact } from '../services/decider/market_compact'
 import deciderCfg from '../config/decider.json'
 import { startAltH1Collector } from './ws/collector_alt_h1'
@@ -71,16 +71,72 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+    if (url.pathname === '/internal/binance/open-orders' && req.method === 'GET') {
+      // Guard: only in DEBUG_API or localhost origin
+      if (!isDebugApi()) { res.statusCode = 404; res.end('Not found'); return }
+      // Basic in-process rate limit + cache (2-3s cache; 1 call per 5s)
+      const key = '__open_orders_cache__'
+      const now = Date.now()
+      const state: any = (globalThis as any)[key] || { at: 0, data: null, lastCallAt: 0 }
+      const CACHE_MS = 2500
+      const RL_MS = 5000
+      if (state.data && (now - state.at) < CACHE_MS) {
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, cached: true, items: state.data }))
+        return
+      }
+      if ((now - state.lastCallAt) < RL_MS) {
+        res.statusCode = 429
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, code: 'rate_limited' }))
+        return
+      }
+      try {
+        const items = await fetchAllOpenOrders()
+        const slim = (Array.isArray(items) ? items : []).map((o: any) => ({
+          symbol: o?.symbol,
+          orderId: o?.orderId,
+          type: o?.type,
+          side: o?.side,
+          price: o?.price ?? null,
+          time: o?.time ?? o?.updateTime ?? null,
+          status: o?.status ?? null
+        }))
+        ;(globalThis as any)[key] = { at: now, data: slim, lastCallAt: now }
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, cached: false, items: slim }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
     if (url.pathname === '/api/health') {
       res.statusCode = 200
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({ ok: true }))
       return
     }
+    if (url.pathname === '/api/watchdog/health' && req.method === 'GET') {
+      res.statusCode = 200
+      res.setHeader('content-type', 'application/json')
+      const enabled = (() => { try { const v = String(process.env.WATCHDOG_ENABLED||'false').toLowerCase(); return v==='true'||v==='1'||v==='yes' } catch { return false } })()
+      const mode = String(process.env.WATCHDOG_MODE || 'shadow')
+      const allowCancel = (()=>{ try { const v=String(process.env.WATCHDOG_ALLOW_CANCEL||'false').toLowerCase(); return v==='true'||v==='1'||v==='yes' } catch { return false } })()
+      const meta = (globalThis as any).__watchdog_meta || {}
+      res.end(JSON.stringify({ ok: true, enabled, mode, allowCancel, lastRunISO: meta.lastRunISO ?? null, lastRunDurationMs: meta.lastRunDurationMs ?? null, lastError: meta.lastError ?? null }))
+      return
+    }
     if (url.pathname === '/api/watchdog/last-evals' && req.method === 'GET') {
       res.statusCode = 200
       res.setHeader('content-type', 'application/json')
-      const records = ((globalThis as any).__watchdog_last_evals || [])
+      const qLimit = Number(url.searchParams.get('limit') || '')
+      const limit = Number.isFinite(qLimit) && qLimit > 0 ? Math.min(1000, qLimit) : 100
+      const all = ((globalThis as any).__watchdog_last_evals || [])
+      const records = Array.isArray(all) ? all.slice(-limit) : []
       const enabled = (() => { try { const v = String(process.env.WATCHDOG_ENABLED||'false').toLowerCase(); return v==='true'||v==='1'||v==='yes' } catch { return false } })()
       const mode = String(process.env.WATCHDOG_MODE || 'shadow')
       res.end(JSON.stringify({ ok: true, enabled, mode, records }))
@@ -93,11 +149,17 @@ const server = http.createServer(async (req, res) => {
         return
       }
       try {
-        // Skeleton: zatím jen placeholder – žádné mazání ani zásah
-        ;(globalThis as any).__watchdog_last_evals = Array.isArray((globalThis as any).__watchdog_last_evals) ? (globalThis as any).__watchdog_last_evals : []
+        const runFn = (globalThis as any).__watchdog_run_once
+        if (typeof runFn !== 'function') {
+          res.statusCode = 500
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'watchdog_not_ready' }))
+          return
+        }
+        const r = await runFn()
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, ran: false, reason: 'not_implemented' }))
+        res.end(JSON.stringify({ ok: true, ...r }))
       } catch (e: any) {
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')
