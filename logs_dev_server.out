@@ -25,3 +25,7 @@ Emitted 'error' event on Server instance at:
 }
 
 Node.js v22.12.0
+[dotenv@17.2.1] injecting env (2) from .env.local -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild
+OPENAI_API_KEY missing/invalid
+Server listening on http://localhost:8788
+[HOT_SCREENER_GPT_ERR] { http_status: 401, http_msg: 'no_api_key', body_keys: null }

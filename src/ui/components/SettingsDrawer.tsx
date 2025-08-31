@@ -60,6 +60,25 @@ export const SettingsDrawer: React.FC<Props & { finalPickerStatus?: 'idle'|'load
   const [overrideNoTradeRisk, setOverrideNoTradeRisk] = React.useState<number>(() => { try { const v = Number(localStorage.getItem('override_no_trade_risk_pct')); return Number.isFinite(v) ? v : 0.10 } catch { return 0.10 } })
   const [noTradeConfFloor, setNoTradeConfFloor] = React.useState<number>(() => { try { const v = Number(localStorage.getItem('no_trade_confidence_floor')); return Number.isFinite(v) ? v : 0.65 } catch { return 0.65 } })
   const [maxLeverage, setMaxLeverage] = React.useState<number>(() => { try { const v = Number(localStorage.getItem('max_leverage')); return Number.isFinite(v) ? v : 20 } catch { return 20 } })
+  // Hot trading settings
+  const [conservativeBuffer, setConservativeBuffer] = React.useState<number>(() => {
+    try { return Number(localStorage.getItem('conservative_entry_buffer')) || 0.1 } catch { return 0.1 }
+  })
+  const [aggressiveBuffer, setAggressiveBuffer] = React.useState<number>(() => {
+    try { return Number(localStorage.getItem('aggressive_entry_buffer')) || 0.3 } catch { return 0.3 }
+  })
+  const [maxPerCoin, setMaxPerCoin] = React.useState<number>(() => {
+    try { return Number(localStorage.getItem('max_per_coin_usdt')) || 500 } catch { return 500 }
+  })
+  const [maxCoins, setMaxCoins] = React.useState<number>(() => {
+    try { return Number(localStorage.getItem('max_coins_count')) || 5 } catch { return 5 }
+  })
+  const [defaultStrategy, setDefaultStrategy] = React.useState<'conservative' | 'aggressive'>(() => {
+    try { return (localStorage.getItem('default_hot_strategy') as any) || 'conservative' } catch { return 'conservative' }
+  })
+  const [defaultTPLevel, setDefaultTPLevel] = React.useState<'tp1' | 'tp2' | 'tp3'>(() => {
+    try { return (localStorage.getItem('default_tp_level') as any) || 'tp2' } catch { return 'tp2' }
+  })
   const [confirmReset, setConfirmReset] = React.useState(false)
 
   const persist = () => {
@@ -76,6 +95,13 @@ export const SettingsDrawer: React.FC<Props & { finalPickerStatus?: 'idle'|'load
       localStorage.setItem('override_no_trade_risk_pct', String(Math.max(0, Math.min(1, overrideNoTradeRisk))))
       localStorage.setItem('no_trade_confidence_floor', String(Math.max(0.5, Math.min(0.9, noTradeConfFloor))))
       localStorage.setItem('max_leverage', String(Math.max(1, Math.min(125, Math.round(maxLeverage)))))
+      // Hot trading settings
+      localStorage.setItem('conservative_entry_buffer', String(Math.max(0, Math.min(10, conservativeBuffer))))
+      localStorage.setItem('aggressive_entry_buffer', String(Math.max(0, Math.min(10, aggressiveBuffer))))
+      localStorage.setItem('max_per_coin_usdt', String(Math.max(10, maxPerCoin)))
+      localStorage.setItem('max_coins_count', String(Math.max(1, Math.min(20, maxCoins))))
+      localStorage.setItem('default_hot_strategy', defaultStrategy)
+      localStorage.setItem('default_tp_level', defaultTPLevel)
       window.dispatchEvent(new Event('app-settings-changed'))
     } catch {}
   }
@@ -94,6 +120,13 @@ export const SettingsDrawer: React.FC<Props & { finalPickerStatus?: 'idle'|'load
       localStorage.setItem('no_trade_confidence_floor', '0.65')
       localStorage.setItem('max_leverage', '20')
       localStorage.setItem('go_now_enabled', '1')
+      // Hot trading defaults
+      localStorage.setItem('conservative_entry_buffer', '0.1')
+      localStorage.setItem('aggressive_entry_buffer', '0.3')
+      localStorage.setItem('max_per_coin_usdt', '500')
+      localStorage.setItem('max_coins_count', '5')
+      localStorage.setItem('default_hot_strategy', 'conservative')
+      localStorage.setItem('default_tp_level', 'tp2')
       window.dispatchEvent(new Event('app-settings-changed'))
       setConfirmReset(false)
     } catch {}
@@ -177,9 +210,77 @@ export const SettingsDrawer: React.FC<Props & { finalPickerStatus?: 'idle'|'load
               <input type="number" min={100} step={100} value={equity} onChange={e=>setEquity(Number(e.target.value))} />
             </label>
           </div>
+          <h4 className="mt-12" style={{ margin: '8px 0' }}>Hot Trading Settings</h4>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap: 12 }}>
+            <label style={{ display:'flex', flexDirection:'column', gap:6, fontSize:12 }}>
+              <span style={{ color:'var(--muted)' }}>Conservative buffer %</span>
+              <input 
+                type="number" 
+                min={0} 
+                max={5} 
+                step={0.1} 
+                value={conservativeBuffer} 
+                onChange={e=>setConservativeBuffer(Number(e.target.value))}
+                title="Procento nad minimum entry pro konzervativní strategii"
+              />
+            </label>
+            <label style={{ display:'flex', flexDirection:'column', gap:6, fontSize:12 }}>
+              <span style={{ color:'var(--muted)' }}>Aggressive buffer %</span>
+              <input 
+                type="number" 
+                min={0} 
+                max={5} 
+                step={0.1} 
+                value={aggressiveBuffer} 
+                onChange={e=>setAggressiveBuffer(Number(e.target.value))}
+                title="Procento nad minimum entry pro agresivní strategii"
+              />
+            </label>
+            <label style={{ display:'flex', flexDirection:'column', gap:6, fontSize:12 }}>
+              <span style={{ color:'var(--muted)' }}>Max per coin ($)</span>
+              <input 
+                type="number" 
+                min={10} 
+                step={10} 
+                value={maxPerCoin} 
+                onChange={e=>setMaxPerCoin(Number(e.target.value))}
+                title="Maximální částka na jeden coin"
+              />
+            </label>
+            <label style={{ display:'flex', flexDirection:'column', gap:6, fontSize:12 }}>
+              <span style={{ color:'var(--muted)' }}>Max coins count</span>
+              <input 
+                type="number" 
+                min={1} 
+                max={20} 
+                step={1} 
+                value={maxCoins} 
+                onChange={e=>setMaxCoins(Number(e.target.value))}
+                title="Maximální počet coinů současně"
+              />
+            </label>
+            <label style={{ display:'flex', flexDirection:'column', gap:6, fontSize:12 }}>
+              <span style={{ color:'var(--muted)' }}>Default strategy</span>
+              <select value={defaultStrategy} onChange={e=>setDefaultStrategy(e.target.value as any)}>
+                <option value="conservative">Conservative</option>
+                <option value="aggressive">Aggressive</option>
+              </select>
+            </label>
+            <label style={{ display:'flex', flexDirection:'column', gap:6, fontSize:12 }}>
+              <span style={{ color:'var(--muted)' }}>Default TP level</span>
+              <select value={defaultTPLevel} onChange={e=>setDefaultTPLevel(e.target.value as any)}>
+                <option value="tp1">TP1</option>
+                <option value="tp2">TP2</option>
+                <option value="tp3">TP3</option>
+              </select>
+            </label>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
+            Total max exposure: ${(maxPerCoin * maxCoins).toLocaleString()}
+          </div>
           <div className="row gap-8" style={{ marginTop: 12 }}>
             <button className="btn" onClick={persist}>Save</button>
-            <button className="btn" onClick={()=>{ setSidePolicy('long_only'); setMaxPicks(6); setPreset('Momentum'); setExecutionMode(false); setGoNowEnabled(true); setConfGoNow(0.6); setOverrideNoTrade(false); setOverrideNoTradeRisk(0.10); setNoTradeConfFloor(0.65); setMaxLeverage(20); setEquity(10000); setTimeout(persist, 0) }}>Reset defaults (local)</button>
+            <button className="btn" onClick={()=>{ setSidePolicy('long_only'); setMaxPicks(6); setPreset('Momentum'); setExecutionMode(false); setGoNowEnabled(true); setConfGoNow(0.6); setOverrideNoTrade(false); setOverrideNoTradeRisk(0.10); setNoTradeConfFloor(0.65); setMaxLeverage(20); setEquity(10000); setConservativeBuffer(0.1); setAggressiveBuffer(0.3); setMaxPerCoin(500); setMaxCoins(5); setDefaultStrategy('conservative'); setDefaultTPLevel('tp2'); setTimeout(persist, 0) }}>Reset defaults (local)</button>
             <button className="btn" onClick={()=>setConfirmReset(true)}>Reset to defaults</button>
           </div>
         </div>

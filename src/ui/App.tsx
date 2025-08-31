@@ -37,6 +37,8 @@ type FinalPickInput = {
   candidates: Array<Record<string, any>>
 }
 import CandidatesPreview from './components/CandidatesPreview';
+import { HotScreener, type HotPick } from './components/HotScreener';
+import { EntryControls, type EntryStrategyData, type CoinControl } from './components/EntryControls';
 
 export const App: React.FC = () => {
   const [snapshot, setSnapshot] = useState<MarketRawSnapshot | null>(null);
@@ -81,6 +83,30 @@ export const App: React.FC = () => {
   });
   useEffect(() => { try { localStorage.setItem('forceCandidates', forceCandidates ? '1' : '0') } catch {} }, [forceCandidates]);
 
+  // Hot trading state
+  const [hotPicks, setHotPicks] = useState<HotPick[]>([])
+  const [hotScreenerStatus, setHotScreenerStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [selectedHotSymbols, setSelectedHotSymbols] = useState<string[]>([])
+  const [entryStrategies, setEntryStrategies] = useState<EntryStrategyData[]>([])
+  const [entryControlsStatus, setEntryControlsStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [coinControls, setCoinControls] = useState<CoinControl[]>([])
+  const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({})
+  // TODO: future – add markPrice map if needed
+  const [placingOrders, setPlacingOrders] = useState(false)
+
+  // Load hot trading settings from localStorage
+  const hotTradingSettings = useMemo(() => ({
+    conservativeBuffer: (() => { try { return Number(localStorage.getItem('conservative_entry_buffer')) || 0.1 } catch { return 0.1 } })(),
+    aggressiveBuffer: (() => { try { return Number(localStorage.getItem('aggressive_entry_buffer')) || 0.3 } catch { return 0.3 } })(),
+    maxPerCoin: (() => { try { return Number(localStorage.getItem('max_per_coin_usdt')) || 500 } catch { return 500 } })(),
+    maxCoins: (() => { try { return Number(localStorage.getItem('max_coins_count')) || 5 } catch { return 5 } })(),
+    defaultStrategy: (() => { try { return (localStorage.getItem('default_hot_strategy') as any) || 'conservative' } catch { return 'conservative' } })(),
+    defaultTPLevel: (() => { try { return (localStorage.getItem('default_tp_level') as any) || 'tp2' } catch { return 'tp2' } })(),
+    // New defaults requested: leverage x15, amount $20
+    defaultLeverage: (() => { try { return Number(localStorage.getItem('default_leverage')) || 15 } catch { return 15 } })(),
+    defaultAmount: (() => { try { return Number(localStorage.getItem('default_amount_usdt')) || 20 } catch { return 20 } })()
+  }), [])
+
   const symbolsLoaded = useMemo(() => {
     if (!snapshot) return 0;
     const core = ['BTCUSDT', 'ETHUSDT'];
@@ -107,8 +133,26 @@ export const App: React.FC = () => {
     }
   }
 
+  // Globální helper: retry pro dočasné chyby (502/503/504) a network abort/timeout
+  const fetchWithRetry = async (input: string, init: RequestInit = {}, tries = 3, baseDelayMs = 400): Promise<Response> => {
+    let lastErr: any
+    for (let i = 0; i < tries; i++) {
+      try {
+        const res = await fetch(input, init)
+        if (res.ok) return res
+        if (![502,503,504].includes(res.status)) return res
+      } catch (e: any) {
+        lastErr = e
+      }
+      const jitter = Math.floor(Math.random() * 200)
+      await new Promise(r => setTimeout(r, baseDelayMs + i * 300 + jitter))
+    }
+    if (lastErr) throw lastErr
+    return fetch(input, init)
+  }
+
   const coinsSource = useMemo(() => {
-    // Show rawCoins (50) if available, fallback to snapshot.universe (28)
+    // Show rawCoins (50) if available, fallback to snapshot.universe (48)
     if (rawCoins && Array.isArray(rawCoins) && rawCoins.length > 0) return rawCoins
     return snapshot?.universe || []
   }, [rawCoins, snapshot])
@@ -171,7 +215,9 @@ export const App: React.FC = () => {
         } finally { clearTimeout(to) }
       }
 
-      const snapUrl = `/api/snapshot${universeStrategy === 'gainers' ? '?universe=gainers' : ''}`
+      // removed: local fetchWithRetry (using module-level helper)
+
+      const snapUrl = `/api/snapshot${universeStrategy === 'gainers' ? '?universe=gainers&topN=50' : '?topN=50'}`
       const snap = await fetchJsonWithTimeout<MarketRawSnapshot>(snapUrl, { timeoutMs: 25000 })
       if (!snap.ok) {
         if (snap.json) { setErrorPayload(snap.json); throw new Error((snap.json as any)?.error || `HTTP ${snap.status}`) }
@@ -390,6 +436,27 @@ export const App: React.FC = () => {
 
   const onExportFeatures = () => { if (features) downloadJson(features, 'features') };
 
+  // Safe clipboard write: requires focused document in modern browsers
+  const writeClipboardSafely = async (text: string) => {
+    try {
+      const hasFocus = (() => { try { return typeof document !== 'undefined' && typeof document.hasFocus === 'function' ? document.hasFocus() : true } catch { return true } })()
+      if (!hasFocus) {
+        try { window.focus() } catch {}
+        await new Promise(res => setTimeout(res, 120))
+        const focusedNow = (() => { try { return typeof document !== 'undefined' && typeof document.hasFocus === 'function' ? document.hasFocus() : true } catch { return true } })()
+        if (!focusedNow) {
+          const err = new Error('document_not_focused') as any
+          err.code = 'document_not_focused'
+          throw err
+        }
+      }
+      await navigator.clipboard.writeText(text)
+    } catch (e: any) {
+      if (String(e?.code || e?.message || '').includes('document_not_focused')) throw e
+      throw new Error(e?.message || 'write failed')
+    }
+  }
+
   const copyCoin = async (symbol: string) => {
     const sym = String(symbol || '')
     console.log('[COPY_COIN] Clicked symbol:', sym)
@@ -401,7 +468,7 @@ export const App: React.FC = () => {
       const q = universeStrategy === 'gainers' ? '?universe=gainers' : ''
       const sep = q ? '&' : '?'
       console.log('[COPY_COIN] Fetching:', `/api/intraday_any?symbol=${encodeURIComponent(sym)}`)
-      const res = await fetch(`/api/intraday_any?symbol=${encodeURIComponent(sym)}`)
+      const res = await fetchWithRetry(`/api/intraday_any?symbol=${encodeURIComponent(sym)}`)
       if (res.ok) {
         const json: any = await res.json()
         const assets: any[] = Array.isArray(json?.assets) ? json.assets : []
@@ -409,18 +476,19 @@ export const App: React.FC = () => {
         console.log('[COPY_COIN] Found asset:', asset?.symbol || 'none')
         if (asset) {
           try {
-            await navigator.clipboard.writeText(JSON.stringify(asset, null, 2))
+            await writeClipboardSafely(JSON.stringify(asset, null, 2))
           } catch (e: any) {
-            setError(`Clipboard error: ${e?.message || 'write failed'}`)
+            const msg = String(e?.code || e?.message || '') === 'document_not_focused' ? 'Please focus this tab and click again.' : (e?.message || 'write failed')
+            setError(`Clipboard error: ${msg}`)
             return
           }
           setCopiedSymbol(sym)
           window.setTimeout(() => setCopiedSymbol(null), 1200)
         } else {
-          setError(`${sym} not available in current universe (only 28 alts loaded). Try "Run now" first.`)
+          setError(`${sym} not available in current universe (only 48 alts loaded). Try "Run now" first.`)
         }
       } else {
-        let msg = `HTTP ${res.status} for /api/intraday?symbol=${sym}`
+        let msg = `HTTP ${res.status} for /api/intraday_any?symbol=${sym}`
         try { const j = await res.json(); if (j?.error) msg = `${j.error} (${res.status}) for ${sym}` } catch {}
         setError(msg)
       }
@@ -432,7 +500,7 @@ export const App: React.FC = () => {
     setRawLoading(true)
     try {
       const q = `${universeStrategy === 'gainers' ? 'universe=gainers&' : ''}topN=50`
-      const res = await fetch(`/api/metrics?${q}`)
+      const res = await fetchWithRetry(`/api/metrics?${q}`)
       if (!res.ok) {
         setError(`Server error: HTTP ${res.status}`)
         return
@@ -445,7 +513,18 @@ export const App: React.FC = () => {
         return
       }
       
-      const coins = Array.isArray(json?.coins) ? json.coins : []
+      let coins = Array.isArray(json?.coins) ? json.coins : []
+      // Dedup on client as safeguard
+      try {
+        const seen = new Set<string>()
+        coins = coins.filter((c:any) => {
+          const s = String(c?.symbol||'')
+          if (!s) return false
+          if (seen.has(s)) return false
+          seen.add(s)
+          return true
+        })
+      } catch {}
       if (coins.length === 0) {
         setError('No coins data received from server')
         return
@@ -485,18 +564,220 @@ export const App: React.FC = () => {
           return
         }
         
-        await navigator.clipboard.writeText(jsonString)
+        await writeClipboardSafely(jsonString)
       } catch (e: any) {
-        setError(`Clipboard error: ${e?.message || 'write failed'}`)
+        const msg = String(e?.code || e?.message || '') === 'document_not_focused' ? 'Please focus this tab and click again.' : (e?.message || 'write failed')
+        setError(`Clipboard error: ${msg}`)
         return
       }
       
       setRawCopied(true)
       window.setTimeout(() => setRawCopied(false), 1400)
+
+      // Auto-trigger hot screener
+      await runHotScreener(coins)
     } catch (e: any) {
       setError(`Network error: ${e?.message || 'request failed'}`)
     } finally { 
       setRawLoading(false) 
+    }
+  }
+
+  // Hot trading functions
+  const runHotScreener = async (coins: any[]) => {
+    setHotScreenerStatus('loading')
+    setHotPicks([])
+    setSelectedHotSymbols([])
+    
+    try {
+      const input = {
+        coins,
+        strategy: universeStrategy
+      }
+
+      const res = await fetch('/api/hot_screener', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input)
+      })
+
+      if (!res.ok) {
+        let code = `HTTP ${res.status}`
+        try { const j = await res.json(); if (j && typeof j === 'object') code = j.code || j?.meta?.http_error || code } catch {}
+        throw new Error(String(code))
+      }
+
+      const result = await res.json()
+      
+      if (!result.ok) {
+        throw new Error(result.code || 'Unknown error')
+      }
+
+      const hotPicks = result.data.hot_picks || []
+      setHotPicks(hotPicks)
+      
+      // Auto-select pouze "🟢 Super Hot" picks
+      const superHotSymbols = hotPicks
+        .filter((pick: any) => pick.rating === '🟢 Super Hot')
+        .map((pick: any) => pick.symbol)
+      setSelectedHotSymbols(superHotSymbols)
+      
+      setHotScreenerStatus('success')
+    } catch (e: any) {
+      setError(`Hot screener error: ${e?.message || 'unknown'}`)
+      setHotScreenerStatus('error')
+    }
+  }
+
+  const runEntryAnalysis = async () => {
+    if (selectedHotSymbols.length === 0) return
+
+    setEntryControlsStatus('loading')
+    setEntryStrategies([])
+    setCoinControls([])
+
+    try {
+      const strategies: EntryStrategyData[] = []
+      const priceMap: Record<string, number> = {}
+      
+      for (const symbol of selectedHotSymbols) {
+        // Get detailed asset data
+        const assetRes = await fetchWithRetry(`/api/intraday_any?symbol=${encodeURIComponent(symbol)}`)
+        if (!assetRes.ok) continue
+
+        const assetData = await assetRes.json()
+        const assets = Array.isArray(assetData?.assets) ? assetData.assets : []
+        const asset = assets.find((a: any) => a?.symbol === symbol)
+        
+        if (!asset) continue
+        try { const p = Number(asset?.price); if (Number.isFinite(p) && p > 0) priceMap[symbol] = p } catch {}
+
+        // Run entry strategy analysis
+        const strategyRes = await fetch('/api/entry_strategy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbol,
+            asset_data: asset
+          })
+        })
+
+        if (!strategyRes.ok) continue
+
+        const strategyResult = await strategyRes.json()
+        
+        if (strategyResult.ok && strategyResult.data) {
+          strategies.push(strategyResult.data)
+        }
+      }
+
+      setEntryStrategies(strategies)
+      setCurrentPrices(priceMap)
+
+      // Initialize coin controls
+      const controls: CoinControl[] = strategies.map(strategy => ({
+        symbol: strategy.symbol,
+        include: true,
+        side: 'LONG',
+        strategy: hotTradingSettings.defaultStrategy,
+        tpLevel: hotTradingSettings.defaultTPLevel,
+        orderType: hotTradingSettings.defaultStrategy === 'conservative' ? 'limit' : 'stop_limit',
+        amount: (hotTradingSettings as any).defaultAmount ?? 20,
+        leverage: (hotTradingSettings as any).defaultLeverage ?? 15,
+        useCustomBuffer: false
+      }))
+
+      setCoinControls(controls)
+      setEntryControlsStatus('success')
+    } catch (e: any) {
+      setError(`Entry analysis error: ${e?.message || 'unknown'}`)
+      setEntryControlsStatus('error')
+    }
+  }
+
+  const handleCoinControlChange = (symbol: string, updates: Partial<CoinControl>) => {
+    setCoinControls(prev => prev.map(control => 
+      control.symbol === symbol 
+        ? { ...control, ...updates }
+        : control
+    ))
+  }
+
+  const prepareOrders = async () => {
+    try {
+      setPlacingOrders(true)
+      const includedControls = coinControls.filter(c => c.include)
+      if (includedControls.length === 0) { alert('No coins selected'); return }
+      // Map selected plan to numeric entry/SL/TP
+      const findPlan = (symbol: string, strategy: 'conservative'|'aggressive') => {
+        const s = entryStrategies.find(es => es.symbol === symbol)
+        if (!s) return null
+        return strategy === 'conservative' ? s.conservative : s.aggressive
+      }
+      const parsePriceLike = (v: string | number | null | undefined): number | null => {
+        if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? v : null
+        if (typeof v === 'string') {
+          const cleaned = v.replace(/,/g, '')
+          // Prefer decimal numbers; otherwise take the LAST numeric token
+          const dec = cleaned.match(/\d+\.\d+/g)
+          if (dec && dec.length > 0) {
+            const n = Number(dec[dec.length - 1])
+            return Number.isFinite(n) && n > 0 ? n : null
+          }
+          const all = cleaned.match(/\d+(?:\.\d+)?/g)
+          if (all && all.length > 0) {
+            const n = Number(all[all.length - 1])
+            return Number.isFinite(n) && n > 0 ? n : null
+          }
+          return null
+        }
+        return null
+      }
+      // Only include symbols explicitly checked (include===true). This avoids stray orders
+      // Deduplicate by symbol – poslední nastavení vítězí
+      const mapped = includedControls.map(c => {
+          const plan = findPlan(c.symbol, c.strategy)
+          const entry = parsePriceLike(plan?.entry ?? null)
+          const sl = parsePriceLike(plan?.sl ?? null)
+          const tpVal = parsePriceLike(plan ? (plan as any)[c.tpLevel] : null)
+          return {
+            symbol: c.symbol,
+            side: (c.side || 'LONG') as any,
+            strategy: c.strategy,
+            tpLevel: c.tpLevel,
+            orderType: c.orderType || (c.strategy === 'conservative' ? 'limit' : 'stop_limit'),
+            amount: c.amount,
+            leverage: c.leverage,
+            useBuffer: c.useCustomBuffer === true,
+            bufferPercent: c.useCustomBuffer ? (c.customBuffer ?? 0) : undefined,
+            entry: entry ?? undefined,
+            sl: sl ?? 0,
+            tp: tpVal ?? 0
+          }
+        })
+      const uniqMap = new Map<string, any>()
+      for (const o of mapped) uniqMap.set(o.symbol, o)
+      const payload = { orders: Array.from(uniqMap.values()) }
+
+      const res = await fetch('/api/place_orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const json = await res.json().catch(()=>null)
+      if (!res.ok || !json?.success) {
+        const firstErr = Array.isArray(json?.orders) ? json.orders.find((o:any)=>o?.status==='error') : null
+        const msg = json?.error || firstErr?.error || firstErr?.status || `HTTP ${res.status}`
+        console.error('[PLACE_ORDERS_FAIL]', { status: res.status, response: json })
+        alert(`Order submit failed: ${msg}`)
+        return
+      }
+      console.log('[PLACE_ORDERS_OK]', json)
+      alert(`Orders submitted OK: ${Array.isArray(json?.orders) ? json.orders.length : payload.orders.length}`)
+    } catch (e: any) {
+      alert(`Order submit error: ${e?.message || 'unknown'}`)
+    } finally {
+      setPlacingOrders(false)
     }
   }
 
@@ -683,6 +964,33 @@ export const App: React.FC = () => {
           ) : null}
         </>
       )}
+      {/* Hot Trading Components */}
+      <HotScreener 
+        hotPicks={hotPicks}
+        status={hotScreenerStatus}
+        selectedSymbols={selectedHotSymbols}
+        onSelectionChange={setSelectedHotSymbols}
+        onAnalyzeSelected={runEntryAnalysis}
+      />
+
+      {entryStrategies.length > 0 && (
+        <EntryControls 
+          entryStrategies={entryStrategies}
+          coinControls={coinControls}
+          onControlChange={handleCoinControlChange}
+          status={entryControlsStatus}
+          currentPrices={currentPrices}
+          globalBuffers={{
+            conservative: hotTradingSettings.conservativeBuffer,
+            aggressive: hotTradingSettings.aggressiveBuffer
+          }}
+          maxPerCoin={hotTradingSettings.maxPerCoin}
+          maxCoins={hotTradingSettings.maxCoins}
+          onPrepareOrders={prepareOrders}
+          placing={placingOrders}
+        />
+      )}
+
       {/* Preview only table when picks are not ready or execution mode is off */}
       {candidates.length > 0 && (finalPickerStatus !== 'success' || !(localStorage.getItem('execution_mode') === '1')) ? (
         <CandidatesPreview list={candidates as any} finalPickerStatus={finalPickerStatus} executionMode={localStorage.getItem('execution_mode') === '1'} />

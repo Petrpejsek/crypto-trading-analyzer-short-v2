@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hot Picks Response",
+  "description": "Schema for GPT-5 hot screener response",
+  "version": "1.0.0",
+  "type": "object",
+  "properties": {
+    "hot_picks": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "pattern": "^[A-Z0-9]+USDT$",
+            "description": "Trading symbol ending with USDT"
+          },
+          "rating": {
+            "type": "string",
+            "enum": ["🟢 Super Hot", "🟡 Zajímavý"],
+            "description": "Hot rating with emoji"
+          },
+          "confidence": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 200,
+            "description": "Confidence level and reasoning"
+          },
+          "reasoning": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 500,
+            "description": "Detailed reasoning for the pick"
+          }
+        },
+        "required": ["symbol", "rating", "confidence", "reasoning"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["hot_picks"],
+  "additionalProperties": false
+}
+
+

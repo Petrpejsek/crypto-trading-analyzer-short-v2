@@ -1052,3 +1052,1632 @@ AggregateError [ECONNREFUSED]:
 10:39:48 PM [vite] (client) hmr update /src/ui/components/BtcInfoPanel.tsx
 10:39:48 PM [vite] (client) hmr update /src/ui/components/BtcInfoPanel.tsx
 10:39:56 PM [vite] (client) hmr update /src/ui/App.tsx
+
+  VITE v6.3.5  ready in 337 ms
+
+  ➜  Local:   http://localhost:4200/
+  ➜  press h + enter to show help
+
+  VITE v6.3.5  ready in 271 ms
+
+  ➜  Local:   http://localhost:4200/
+  ➜  press h + enter to show help
+3:45:34 PM [vite] (client) hmr update /src/ui/App.tsx
+3:56:02 PM [vite] (client) hmr update /src/ui/App.tsx
+5:49:22 PM [vite] .env.local changed, restarting server...
+5:49:22 PM [vite] server restarted.
+5:49:28 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+5:49:28 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+5:49:36 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+5:49:36 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+5:49:44 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+5:49:44 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+5:57:40 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+5:57:40 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+5:57:45 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+5:57:45 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+5:57:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+5:57:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:01:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:01:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:01:47 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:01:47 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:01:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:01:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:00 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:00 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:05 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:05 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:12 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:12 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:17 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:17 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:22 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:22 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:27 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:27 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:34 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:34 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:39 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:39 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:45 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:45 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:50 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:50 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:02:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:03:10 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:03:10 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:03:15 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:03:15 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:03:27 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:03:28 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:03:36 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:03:36 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:30 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:30 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:34 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:34 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:38 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:38 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:42 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:42 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:46 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:46 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:50 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:50 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:54 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:54 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:58 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:09:59 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:03 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:03 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:07 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:07 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:11 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:11 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:15 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:15 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:19 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:19 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:23 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:23 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:27 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:27 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:31 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:31 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:35 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:35 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:39 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:39 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:47 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:47 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:51 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:51 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:59 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:10:59 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:03 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:03 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:07 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:07 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:11 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:11 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:15 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:15 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:19 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:19 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:23 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:23 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:27 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:27 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:31 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:31 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:35 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:35 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:39 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:39 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:47 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:47 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:51 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:51 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:59 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:11:59 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:03 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:03 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:07 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:07 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:11 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:11 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:15 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:15 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:19 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:19 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:23 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:23 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:27 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:27 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:31 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:31 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:35 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:35 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:39 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:39 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:47 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:47 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:51 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:51 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:55 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:59 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:12:59 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:03 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:03 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:07 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:07 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:11 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:11 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:15 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:15 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:19 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:19 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:23 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:23 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:27 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:27 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:29 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:29 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:33 PM [vite] http proxy error: /api/metrics?universe=gainers&topN=50
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:33 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:33 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:37 PM [vite] http proxy error: /api/metrics?universe=gainers&topN=50
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:37 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:37 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:38 PM [vite] http proxy error: /api/metrics?universe=gainers&topN=50
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:41 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:41 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:45 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:45 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:49 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:49 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:53 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:53 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:57 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:13:57 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:01 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:01 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:05 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:05 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:09 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:09 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:13 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:13 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:17 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:17 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:21 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:21 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:25 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:25 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:29 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:29 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:33 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:33 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:37 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:37 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:41 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:41 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:45 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:45 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:49 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:49 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:53 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:53 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:57 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:14:57 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:01 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:01 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:05 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:05 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:09 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:09 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:13 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:13 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:17 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:17 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:21 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:21 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:25 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:25 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:29 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:29 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:33 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:33 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:37 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:37 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:41 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:41 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:45 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:45 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:49 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:49 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:53 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:53 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:57 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:15:57 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:01 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:02 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:06 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:06 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:10 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:10 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:14 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:14 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:18 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:18 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:22 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:22 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:26 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:26 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:30 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:30 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:34 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:34 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:38 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:38 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:42 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:42 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:46 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:46 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:50 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:50 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:54 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:54 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:58 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:16:58 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:17:02 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:17:02 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:17:06 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+6:17:06 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+10:24:57 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+10:28:41 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+10:28:41 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+10:48:19 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+10:48:19 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+10:51:44 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+10:51:44 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+11:07:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+11:07:43 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+11:16:12 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+11:16:12 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+11:25:17 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+11:25:17 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+11:40:58 PM [vite] (client) hmr update /src/ui/App.tsx
+11:41:18 PM [vite] (client) hmr update /src/ui/App.tsx
+11:54:25 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+11:54:25 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+12:10:40 AM [vite] (client) hmr update /src/ui/App.tsx
+12:10:59 AM [vite] (client) hmr update /src/ui/App.tsx
+12:16:04 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:16:35 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:16:59 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:19:28 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:19:37 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:19:37 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:19:55 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:28:30 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:28:46 AM [vite] (client) hmr update /src/ui/components/HotScreener.tsx
+12:28:59 AM [vite] (client) hmr update /src/ui/components/HotScreener.tsx
+12:29:00 AM [vite] (client) hmr update /src/ui/components/HotScreener.tsx
+12:29:44 AM [vite] (client) hmr update /src/ui/components/HotScreener.tsx
+12:30:07 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:30:07 AM [vite] (client) hmr update /src/ui/components/HotScreener.tsx
+12:35:12 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:35:48 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:36:15 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:44:58 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:45:15 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:45:48 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:50:27 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:50:44 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:51:03 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:51:37 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:53:42 AM [vite] (client) hmr update /src/ui/App.tsx
+12:54:11 AM [vite] (client) hmr update /src/ui/App.tsx
+12:58:43 AM [vite] (client) hmr update /src/ui/App.tsx
+12:59:17 AM [vite] (client) hmr update /src/ui/App.tsx
+1:08:05 AM [vite] .env.local changed, restarting server...
+1:08:05 AM [vite] server restarted.
+1:13:44 AM [vite] .env.local changed, restarting server...
+1:13:44 AM [vite] server restarted.
+1:21:28 AM [vite] (client) hmr update /src/ui/App.tsx
+1:22:31 AM [vite] (client) hmr update /src/ui/App.tsx
+1:29:27 AM [vite] (client) hmr update /src/ui/App.tsx
+1:29:31 AM [vite] (client) hmr update /src/ui/App.tsx
+1:33:04 AM [vite] (client) hmr update /src/ui/App.tsx
+1:33:34 AM [vite] (client) hmr update /src/ui/App.tsx
+1:36:02 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+1:38:49 AM [vite] (client) hmr update /src/ui/App.tsx
+1:41:13 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+1:41:13 AM [vite] (client) hmr update /src/ui/App.tsx
+1:46:44 AM [vite] (client) hmr update /src/ui/App.tsx
+1:47:20 AM [vite] (client) hmr update /src/ui/App.tsx
+1:58:06 AM [vite] .env.local changed, restarting server...
+1:58:06 AM [vite] server restarted.
+2:03:15 AM [vite] (client) hmr update /src/ui/App.tsx
+2:03:23 AM [vite] (client) hmr update /src/ui/App.tsx
+2:08:51 AM [vite] (client) hmr update /src/ui/App.tsx
+2:09:08 AM [vite] (client) hmr update /src/ui/App.tsx
+9:34:38 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+9:34:54 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+9:42:24 AM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+9:42:24 AM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+9:45:56 AM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+9:45:56 AM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+9:56:33 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+9:56:53 AM [vite] (client) hmr update /src/ui/App.tsx
+10:02:49 AM [vite] (client) hmr update /src/ui/App.tsx
+10:02:49 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+10:18:30 AM [vite] (client) hmr update /src/ui/App.tsx
+10:18:50 AM [vite] (client) hmr update /src/ui/App.tsx
+10:20:43 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+10:21:46 AM [vite] (client) hmr update /src/ui/App.tsx
+10:21:57 AM [vite] (client) hmr update /src/ui/App.tsx
+10:22:14 AM [vite] (client) hmr update /src/ui/App.tsx
+10:22:14 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+10:31:15 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+10:31:31 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+10:49:22 AM [vite] (client) hmr update /src/ui/App.tsx
+10:49:23 AM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/App.tsx: Missing catch or finally clause. (702:4)
+
+  700 |
+  701 |   const prepareOrders = async () => {
+> 702 |     try {
+      |     ^
+  703 |       const includedControls = coinControls.filter(c => c.include)
+  704 |       if (includedControls.length === 0) { alert('No coins selected'); return }
+  705 |       // Map selected plan to numeric entry/SL/TP
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/App.tsx:702:4
+  700|  
+  701|    const prepareOrders = async () => {
+  702|      try {
+     |      ^
+  703|        const includedControls = coinControls.filter(c => c.include)
+  704|        if (includedControls.length === 0) { alert('No coins selected'); return }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.parseTryStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13229:12)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12809:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseAsyncArrowFromCallExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11264:10)
+      at TypeScriptParserMixin.parseAsyncArrowFromCallExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9786:18)
+      at TypeScriptParserMixin.parseCoverCallAndAsyncArrowHead (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11194:27)
+      at TypeScriptParserMixin.parseSubscript (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11120:19)
+      at TypeScriptParserMixin.parseSubscript (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9358:18)
+      at TypeScriptParserMixin.parseSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11094:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11085:17)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseVar (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13389:91)
+      at TypeScriptParserMixin.parseVarStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13235:10)
+      at TypeScriptParserMixin.parseVarStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9498:31)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12856:23)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11691:12)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+10:50:06 AM [vite] (client) hmr update /src/ui/App.tsx
+10:50:06 AM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/App.tsx: Missing catch or finally clause. (702:4)
+
+  700 |
+  701 |   const prepareOrders = async () => {
+> 702 |     try {
+      |     ^
+  703 |       const includedControls = coinControls.filter(c => c.include)
+  704 |       if (includedControls.length === 0) { alert('No coins selected'); return }
+  705 |       // Map selected plan to numeric entry/SL/TP
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/App.tsx:702:4
+  700|  
+  701|    const prepareOrders = async () => {
+  702|      try {
+     |      ^
+  703|        const includedControls = coinControls.filter(c => c.include)
+  704|        if (includedControls.length === 0) { alert('No coins selected'); return }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.parseTryStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13229:12)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12809:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseAsyncArrowFromCallExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11264:10)
+      at TypeScriptParserMixin.parseAsyncArrowFromCallExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9786:18)
+      at TypeScriptParserMixin.parseCoverCallAndAsyncArrowHead (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11194:27)
+      at TypeScriptParserMixin.parseSubscript (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11120:19)
+      at TypeScriptParserMixin.parseSubscript (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9358:18)
+      at TypeScriptParserMixin.parseSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11094:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11085:17)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseVar (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13389:91)
+      at TypeScriptParserMixin.parseVarStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13235:10)
+      at TypeScriptParserMixin.parseVarStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9498:31)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12856:23)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11691:12)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+10:50:21 AM [vite] (client) Pre-transform error: /Users/petrliesner/trader-new-new-new/src/ui/App.tsx: Missing catch or finally clause. (702:4)
+
+  700 |
+  701 |   const prepareOrders = async () => {
+> 702 |     try {
+      |     ^
+  703 |       const includedControls = coinControls.filter(c => c.include)
+  704 |       if (includedControls.length === 0) { alert('No coins selected'); return }
+  705 |       // Map selected plan to numeric entry/SL/TP
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/App.tsx:702:4
+  700|  
+  701|    const prepareOrders = async () => {
+  702|      try {
+     |      ^
+  703|        const includedControls = coinControls.filter(c => c.include)
+  704|        if (includedControls.length === 0) { alert('No coins selected'); return }
+10:50:21 AM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/App.tsx: Missing catch or finally clause. (702:4)
+
+  700 |
+  701 |   const prepareOrders = async () => {
+> 702 |     try {
+      |     ^
+  703 |       const includedControls = coinControls.filter(c => c.include)
+  704 |       if (includedControls.length === 0) { alert('No coins selected'); return }
+  705 |       // Map selected plan to numeric entry/SL/TP
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/App.tsx:702:4
+  700|  
+  701|    const prepareOrders = async () => {
+  702|      try {
+     |      ^
+  703|        const includedControls = coinControls.filter(c => c.include)
+  704|        if (includedControls.length === 0) { alert('No coins selected'); return }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.parseTryStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13229:12)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12809:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseAsyncArrowFromCallExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11264:10)
+      at TypeScriptParserMixin.parseAsyncArrowFromCallExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9786:18)
+      at TypeScriptParserMixin.parseCoverCallAndAsyncArrowHead (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11194:27)
+      at TypeScriptParserMixin.parseSubscript (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11120:19)
+      at TypeScriptParserMixin.parseSubscript (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9358:18)
+      at TypeScriptParserMixin.parseSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11094:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11085:17)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseVar (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13389:91)
+      at TypeScriptParserMixin.parseVarStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13235:10)
+      at TypeScriptParserMixin.parseVarStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9498:31)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12856:23)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11691:12)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+10:52:30 AM [vite] Internal server error: /Users/petrliesner/trader-new-new-new/src/ui/App.tsx: Missing catch or finally clause. (702:4)
+
+  700 |
+  701 |   const prepareOrders = async () => {
+> 702 |     try {
+      |     ^
+  703 |       const includedControls = coinControls.filter(c => c.include)
+  704 |       if (includedControls.length === 0) { alert('No coins selected'); return }
+  705 |       // Map selected plan to numeric entry/SL/TP
+  Plugin: vite:react-babel
+  File: /Users/petrliesner/trader-new-new-new/src/ui/App.tsx:702:4
+  700|  
+  701|    const prepareOrders = async () => {
+  702|      try {
+     |      ^
+  703|        const includedControls = coinControls.filter(c => c.include)
+  704|        if (includedControls.length === 0) { alert('No coins selected'); return }
+      at constructor (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:367:19)
+      at TypeScriptParserMixin.raise (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:6630:19)
+      at TypeScriptParserMixin.parseTryStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13229:12)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12809:21)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseAsyncArrowFromCallExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11264:10)
+      at TypeScriptParserMixin.parseAsyncArrowFromCallExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9786:18)
+      at TypeScriptParserMixin.parseCoverCallAndAsyncArrowHead (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11194:27)
+      at TypeScriptParserMixin.parseSubscript (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11120:19)
+      at TypeScriptParserMixin.parseSubscript (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9358:18)
+      at TypeScriptParserMixin.parseSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11094:19)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11085:17)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+      at TypeScriptParserMixin.parseExprOps (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10904:23)
+      at TypeScriptParserMixin.parseMaybeConditional (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10881:23)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10831:21)
+      at TypeScriptParserMixin.parseMaybeAssign (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9806:20)
+      at /Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:39
+      at TypeScriptParserMixin.allowInAnd (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12427:16)
+      at TypeScriptParserMixin.parseMaybeAssignAllowIn (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10800:17)
+      at TypeScriptParserMixin.parseVar (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13389:91)
+      at TypeScriptParserMixin.parseVarStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13235:10)
+      at TypeScriptParserMixin.parseVarStatement (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9498:31)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12856:23)
+      at TypeScriptParserMixin.parseStatementContent (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9532:18)
+      at TypeScriptParserMixin.parseStatementLike (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12772:17)
+      at TypeScriptParserMixin.parseStatementListItem (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12752:17)
+      at TypeScriptParserMixin.parseBlockOrModuleBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13321:61)
+      at TypeScriptParserMixin.parseBlockBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13314:10)
+      at TypeScriptParserMixin.parseBlock (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:13302:10)
+      at TypeScriptParserMixin.parseFunctionBody (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12106:24)
+      at TypeScriptParserMixin.parseArrowExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:12081:10)
+      at TypeScriptParserMixin.parseParenAndDistinguishExpression (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11691:12)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11331:23)
+      at TypeScriptParserMixin.parseExprAtom (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:4797:20)
+      at TypeScriptParserMixin.parseExprSubscripts (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11081:23)
+      at TypeScriptParserMixin.parseUpdate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11066:21)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:11046:23)
+      at TypeScriptParserMixin.parseMaybeUnary (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:9857:18)
+      at TypeScriptParserMixin.parseMaybeUnaryOrPrivate (/Users/petrliesner/trader-new-new-new/node_modules/@babel/parser/lib/index.js:10899:61)
+10:53:23 AM [vite] (client) hmr update /src/ui/App.tsx
+10:53:42 AM [vite] (client) hmr update /src/ui/App.tsx
+11:32:04 AM [vite] (client) hmr update /src/ui/App.tsx
+11:32:26 AM [vite] (client) hmr update /src/ui/App.tsx
+11:40:51 AM [vite] (client) hmr update /src/ui/App.tsx
+11:41:12 AM [vite] (client) hmr update /src/ui/App.tsx
+11:56:13 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+11:56:13 AM [vite] (client) hmr update /src/ui/App.tsx
+11:56:13 AM [vite] (client) hmr update /src/ui/components/HotScreener.tsx
+11:56:13 AM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+11:56:13 AM [vite] (client) hmr update /src/ui/App.tsx
+12:00:56 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+12:00:56 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+12:00:59 PM [vite] http proxy error: /api/place_orders
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+12:01:03 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+12:01:03 PM [vite] http proxy error: /api/ws/health
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+12:01:05 PM [vite] http proxy error: /api/place_orders
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1122:18)
+    at afterConnectMultiple (node:net:1689:7)
+12:17:31 PM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:17:55 PM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:25:11 PM [vite] (client) hmr update /src/ui/App.tsx
+12:25:37 PM [vite] (client) hmr update /src/ui/App.tsx
+12:28:55 PM [vite] (client) hmr update /src/ui/App.tsx
+12:29:40 PM [vite] (client) hmr update /src/ui/App.tsx
+12:55:09 PM [vite] (client) hmr update /src/ui/App.tsx
+12:55:27 PM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+12:55:55 PM [vite] (client) hmr update /src/ui/App.tsx
+12:55:55 PM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+1:00:27 PM [vite] (client) hmr update /src/ui/components/HotScreener.tsx
+1:00:54 PM [vite] (client) hmr update /src/ui/components/HotScreener.tsx
+1:04:27 PM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+1:05:18 PM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+1:05:45 PM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+1:10:55 PM [vite] (client) hmr update /src/ui/components/HotScreener.tsx
+1:11:25 PM [vite] (client) hmr update /src/ui/components/HotScreener.tsx
+1:14:54 PM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+1:15:12 PM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+1:15:38 PM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+1:26:54 PM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+1:27:07 PM [vite] (client) hmr update /src/ui/App.tsx
+1:27:25 PM [vite] (client) hmr update /src/ui/components/EntryControls.tsx
+1:27:25 PM [vite] (client) hmr update /src/ui/App.tsx

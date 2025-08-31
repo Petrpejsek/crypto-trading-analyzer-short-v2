@@ -1,0 +1,114 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Entry Strategy Response",
+  "description": "Schema for GPT-5 entry strategy response",
+  "version": "1.0.0",
+  "type": "object",
+  "properties": {
+    "symbol": {
+      "type": "string",
+      "pattern": "^[A-Z0-9]+USDT$",
+      "description": "Trading symbol ending with USDT"
+    },
+    "conservative": {
+      "type": "object",
+      "properties": {
+        "entry": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 100,
+          "description": "Entry price or range with description"
+        },
+        "sl": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 50,
+          "description": "Stop loss price"
+        },
+        "tp1": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 50,
+          "description": "Take profit 1 price"
+        },
+        "tp2": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 50,
+          "description": "Take profit 2 price"
+        },
+        "tp3": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 50,
+          "description": "Take profit 3 price"
+        },
+        "risk": {
+          "type": "string",
+          "enum": ["Nízké", "Střední", "Vysoké"],
+          "description": "Risk level"
+        },
+        "reasoning": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 300,
+          "description": "Reasoning for conservative strategy"
+        }
+      },
+      "required": ["entry", "sl", "tp1", "tp2", "tp3", "risk", "reasoning"],
+      "additionalProperties": false
+    },
+    "aggressive": {
+      "type": "object",
+      "properties": {
+        "entry": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 100,
+          "description": "Entry price or range with description"
+        },
+        "sl": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 50,
+          "description": "Stop loss price"
+        },
+        "tp1": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 50,
+          "description": "Take profit 1 price"
+        },
+        "tp2": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 50,
+          "description": "Take profit 2 price"
+        },
+        "tp3": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 50,
+          "description": "Take profit 3 price"
+        },
+        "risk": {
+          "type": "string",
+          "enum": ["Nízké", "Střední", "Vysoké"],
+          "description": "Risk level"
+        },
+        "reasoning": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 300,
+          "description": "Reasoning for aggressive strategy"
+        }
+      },
+      "required": ["entry", "sl", "tp1", "tp2", "tp3", "risk", "reasoning"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["symbol", "conservative", "aggressive"],
+  "additionalProperties": false
+}
+
+

@@ -9,6 +9,9 @@ import { performance } from 'node:perf_hooks'
 import http from 'node:http'
 import { decideMarketStrict } from '../services/decider/market_decider_gpt'
 import { runFinalPicker as runFinalPickerServer } from '../services/decider/final_picker_gpt'
+import { runHotScreener } from '../services/decider/hot_screener_gpt'
+import { runEntryStrategy } from '../services/decider/entry_strategy_gpt'
+import { executeHotTradingOrders, type PlaceOrdersRequest, fetchMarkPrice, fetchLastTradePrice } from '../services/trading/binance_futures'
 import { preflightCompact } from '../services/decider/market_compact'
 import deciderCfg from '../config/decider.json'
 import { startAltH1Collector } from './ws/collector_alt_h1'
@@ -206,7 +209,21 @@ const server = http.createServer(async (req, res) => {
         
         // Fetch data for any symbol directly - use minimal universe to avoid UNIVERSE_INCOMPLETE
         const { buildMarketRawSnapshot } = await import('./fetcher/binance')
-        const snap = await buildMarketRawSnapshot({ universeStrategy: 'volume', desiredTopN: 1, includeSymbols: [symbol] })
+        // Retry wrapper pro občasné Abort/timeout chyby
+        const retry = async <T>(fn: ()=>Promise<T>, attempts=2): Promise<T> => {
+          let lastErr: any
+          for (let i=0;i<=attempts;i++) {
+            try { return await fn() } catch (e:any) {
+              lastErr = e
+              const name = String(e?.name||'').toLowerCase()
+              const msg = String(e?.message||'').toLowerCase()
+              const abortLike = name.includes('abort') || msg.includes('abort') || msg.includes('timeout')
+              if (!abortLike || i===attempts) throw e
+            }
+          }
+          throw lastErr
+        }
+        const snap = await retry(() => buildMarketRawSnapshot({ universeStrategy: 'volume', desiredTopN: 1, includeSymbols: [symbol] }))
         
         // Find the symbol in universe or btc/eth
         let targetItem: any = null
@@ -277,9 +294,13 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify(out))
       } catch (e: any) {
-        res.statusCode = 500
+        const name = String(e?.name||'').toLowerCase()
+        const msg = String(e?.message||'').toLowerCase()
+        const abortLike = name.includes('abort') || msg.includes('abort') || msg.includes('timeout')
+        res.statusCode = abortLike ? 503 : 500
+        if (abortLike) res.setHeader('Retry-After', '1')
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+        res.end(JSON.stringify({ error: abortLike ? 'UNAVAILABLE_TEMPORARILY' : (e?.message || 'unknown') }))
       }
       return
     }
@@ -438,7 +459,21 @@ const server = http.createServer(async (req, res) => {
         const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
         const universeStrategy = uniParam === 'gainers' ? 'gainers' : 'volume'
         const topN = Number(url.searchParams.get('topN') || '')
-        const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined })
+        // Retry wrapper pro dočasné chyby (Abort/timeout)
+        const retry = async <T>(fn: ()=>Promise<T>, attempts=2): Promise<T> => {
+          let lastErr: any
+          for (let i=0; i<=attempts; i++) {
+            try { return await fn() } catch (e:any) {
+              lastErr = e
+              const name = String(e?.name||'').toLowerCase()
+              const msg = String(e?.message||'').toLowerCase()
+              const abortLike = name.includes('abort') || msg.includes('abort') || msg.includes('timeout')
+              if (!abortLike || i===attempts) throw e
+            }
+          }
+          throw lastErr
+        }
+        const snap = await retry(() => buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined }))
         type Bar = { time: string; open: number; high: number; low: number; close: number; volume: number }
         const toIsoNoMs = (isoLike: string): string => {
           const s = String(isoLike || '')
@@ -471,12 +506,22 @@ const server = http.createServer(async (req, res) => {
             funding_8h_pct: u.funding_8h_pct ?? null
           }
         }
-        const coinsCore: any[] = []
-        const btc = (snap as any)?.btc
-        const eth = (snap as any)?.eth
-        if (btc && btc.klines) coinsCore.push(mapItem({ ...btc, symbol: 'BTCUSDT' }))
-        if (eth && eth.klines) coinsCore.push(mapItem({ ...eth, symbol: 'ETHUSDT' }))
-        const coins = coinsCore.concat((snap.universe || []).map(mapItem))
+        // OPRAVA: Respektuj universe strategy - pro gainers nevkládej BTC/ETH pokud nejsou top gainers
+        let coins: any[] = []
+        const universeCoins = (snap.universe || []).map(mapItem)
+        
+        if (universeStrategy === 'gainers') {
+          // Pro gainers pouze actual gainers z universe, bez vynuceného BTC/ETH
+          coins = universeCoins
+        } else {
+          // Pro volume zachovat původní logiku s BTC/ETH na začátku
+          const coinsCore: any[] = []
+          const btc = (snap as any)?.btc
+          const eth = (snap as any)?.eth
+          if (btc && btc.klines) coinsCore.push(mapItem({ ...btc, symbol: 'BTCUSDT' }))
+          if (eth && eth.klines) coinsCore.push(mapItem({ ...eth, symbol: 'ETHUSDT' }))
+          coins = coinsCore.concat(universeCoins)
+        }
         // OPRAVA: Použití konzistentní výpočetní funkce pro /api/metrics
         const regime = {
           BTCUSDT: { 
@@ -488,6 +533,16 @@ const server = http.createServer(async (req, res) => {
             m15_change_pct: calculateKlineChangePercent((snap as any)?.eth?.klines?.M15 || [], 2) 
           }
         }
+        // Deduplicate coins by symbol while preserving order (first occurrence wins)
+        const seen = new Set<string>()
+        const dedupCoins = coins.filter((c: any) => {
+          const sym = String(c?.symbol || '')
+          if (!sym) return false
+          if (seen.has(sym)) return false
+          seen.add(sym)
+          return true
+        })
+
         const out = {
           policy: {
             max_hold_minutes: (snap as any)?.policy?.max_hold_minutes ?? null,
@@ -498,15 +553,93 @@ const server = http.createServer(async (req, res) => {
           market_type: (snap as any)?.market_type || 'perp',
           regime,
           timestamp: toIsoNoMs((snap as any)?.timestamp || new Date().toISOString()),
-          coins
+          coins: dedupCoins
         }
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify(out))
       } catch (e: any) {
-        res.statusCode = 500
+        const name = String(e?.name||'').toLowerCase()
+        const msg = String(e?.message||'').toLowerCase()
+        const abortLike = name.includes('abort') || msg.includes('abort') || msg.includes('timeout')
+        res.statusCode = abortLike ? 503 : 500
+        if (abortLike) res.setHeader('Retry-After', '1')
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+        res.end(JSON.stringify({ error: abortLike ? 'UNAVAILABLE_TEMPORARILY' : (e?.message || 'unknown') }))
+      }
+      return
+    }
+
+    if (url.pathname === '/api/place_orders' && req.method === 'POST') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        const chunks: Buffer[] = []
+        for await (const ch of req) chunks.push(ch as Buffer)
+        const bodyStr = Buffer.concat(chunks).toString('utf8')
+        const parsed = bodyStr ? JSON.parse(bodyStr) : null as PlaceOrdersRequest
+        
+        // Validate input
+        if (!parsed.orders || !Array.isArray(parsed.orders) || parsed.orders.length === 0) {
+          throw new Error('Missing or invalid orders array')
+        }
+        
+        // Validate each order
+        for (const order of parsed.orders) {
+          if (!order.symbol || typeof order.symbol !== 'string') {
+            throw new Error('Missing or invalid symbol in order')
+          }
+          if (!order.side || !['LONG','SHORT'].includes(order.side as any)) {
+            throw new Error('Invalid side - must be LONG or SHORT')
+          }
+          if (!order.strategy || !['conservative', 'aggressive'].includes(order.strategy)) {
+            throw new Error('Invalid strategy - must be conservative or aggressive')
+          }
+          if (!order.tpLevel || !['tp1', 'tp2', 'tp3'].includes(order.tpLevel)) {
+            throw new Error('Invalid tpLevel - must be tp1, tp2, or tp3')
+          }
+          if (!order.amount || typeof order.amount !== 'number' || order.amount <= 0) {
+            throw new Error('Invalid amount - must be positive number')
+          }
+          if (!order.leverage || typeof order.leverage !== 'number' || order.leverage < 1 || order.leverage > 125) {
+            throw new Error('Invalid leverage - must be between 1 and 125')
+          }
+          if (typeof (order as any).sl !== 'number' || !Number.isFinite((order as any).sl) || (order as any).sl <= 0) {
+            throw new Error('Missing or invalid SL')
+          }
+          if (typeof (order as any).tp !== 'number' || !Number.isFinite((order as any).tp) || (order as any).tp <= 0) {
+            throw new Error('Missing or invalid TP')
+          }
+        }
+        
+        // Deduplicate by symbol – server-side safety
+        const seen = new Set<string>()
+        parsed.orders = parsed.orders.filter((o:any)=>{
+          const sym = String(o?.symbol||'')
+          if (!sym || seen.has(sym)) return false
+          seen.add(sym)
+          return true
+        })
+        console.log(`[PLACE_ORDERS] Processing ${parsed.orders.length} orders`)
+        try { console.info('[PLACE_ORDERS_REQ]', { sample: parsed.orders.slice(0,3) }) } catch {}
+        const result = await executeHotTradingOrders(parsed)
+        if (!result?.success) {
+          try {
+            const firstErr = Array.isArray((result as any)?.orders)
+              ? (result as any).orders.find((o: any) => o?.status === 'error')
+              : null
+            ;(result as any).error = firstErr?.error || 'order_error'
+          } catch {}
+        }
+        try { console.info('[PLACE_ORDERS_RES]', { success: (result as any)?.success, count: Array.isArray((result as any)?.orders) ? (result as any).orders.length : null }) } catch {}
+        
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(result))
+      } catch (e: any) {
+        console.error('[PLACE_ORDERS_ERROR]', e.message)
+        res.statusCode = 400
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
       }
       return
     }
@@ -687,6 +820,83 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+
+    if (url.pathname === '/api/hot_screener' && req.method === 'POST') {
+      try {
+        const chunks: Buffer[] = []
+        for await (const ch of req) chunks.push(ch as Buffer)
+        const bodyStr = Buffer.concat(chunks).toString('utf8')
+        const input = bodyStr ? JSON.parse(bodyStr) : null
+        
+        if (!input || typeof input !== 'object' || !Array.isArray(input.coins)) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, code: 'bad_request', latencyMs: 0, data: { hot_picks: [] } }))
+          return
+        }
+
+        // Debug: inbound request summary
+        try {
+          console.info('[HS_API_REQ]', { coins: Array.isArray(input.coins) ? input.coins.length : null, strategy: input.strategy || null, bytes: Buffer.byteLength(bodyStr, 'utf8') })
+        } catch {}
+
+        const hsRes = await runHotScreener(input)
+
+        // Debug: outbound result summary
+        try {
+          const meta = (hsRes as any)?.meta || {}
+          const metaOut = { request_id: meta.request_id ?? null, http_status: meta.http_status ?? null, http_error: meta.http_error ?? null, prompt_hash: meta.prompt_hash ?? null, schema_version: meta.schema_version ?? null }
+          const picks = Array.isArray((hsRes as any)?.data?.hot_picks) ? (hsRes as any).data.hot_picks.length : null
+          console.info('[HS_API_RES]', { ok: hsRes.ok, code: hsRes.code || null, latencyMs: hsRes.latencyMs, picks, meta: metaOut })
+        } catch {}
+
+        const hsStatus = (() => {
+          if (hsRes.ok) return 200
+          const metaStatus = Number((hsRes as any)?.meta?.http_status)
+          if (Number.isFinite(metaStatus) && metaStatus > 0) return metaStatus
+          const code = (hsRes as any)?.code
+          // Map validation to 422, unknown to 500
+          if (code === 'schema' || code === 'invalid_json' || code === 'empty_output') return 422
+          return 500
+        })()
+        res.statusCode = hsStatus
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(hsRes))
+      } catch (e: any) {
+        try { console.error('[HS_API_ERR]', { message: e?.message || 'unknown' }) } catch {}
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, code: 'unknown', latencyMs: 0, data: { hot_picks: [] }, meta: { error: e?.message || 'unknown' } }))
+      }
+      return
+    }
+
+    if (url.pathname === '/api/entry_strategy' && req.method === 'POST') {
+      try {
+        const chunks: Buffer[] = []
+        for await (const ch of req) chunks.push(ch as Buffer)
+        const bodyStr = Buffer.concat(chunks).toString('utf8')
+        const input = bodyStr ? JSON.parse(bodyStr) : null
+        
+        if (!input || typeof input !== 'object' || !input.symbol || !input.asset_data) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, code: 'bad_request', latencyMs: 0, data: null }))
+          return
+        }
+
+        const esRes = await runEntryStrategy(input)
+        res.statusCode = esRes.ok ? 200 : 422
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(esRes))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, code: 'unknown', latencyMs: 0, data: null, meta: { error: e?.message || 'unknown' } }))
+      }
+      return
+    }
+
     res.statusCode = 404
     res.end('Not found')
   } catch (e: any) {
