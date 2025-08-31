@@ -1,4 +1,5 @@
-// QA routes for watchdog (kostra) – GET /api/watchdog/last-evals, POST /api/watchdog/run-now
+// QA routes – implementováno v server/index.ts přímo pro minimalismus
+// Tento soubor ponechán pro budoucí modularizaci.
 
 export {};
 
