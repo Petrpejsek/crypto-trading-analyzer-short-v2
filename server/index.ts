@@ -11,7 +11,8 @@ import { decideMarketStrict } from '../services/decider/market_decider_gpt'
 import { runFinalPicker as runFinalPickerServer } from '../services/decider/final_picker_gpt'
 import { runHotScreener } from '../services/decider/hot_screener_gpt'
 import { runEntryStrategy } from '../services/decider/entry_strategy_gpt'
-import { executeHotTradingOrders, type PlaceOrdersRequest, fetchMarkPrice, fetchLastTradePrice } from '../services/trading/binance_futures'
+import { executeHotTradingOrders, type PlaceOrdersRequest, fetchMarkPrice, fetchLastTradePrice, fetchAllOpenOrders, fetchPositions } from '../services/trading/binance_futures'
+import { ttlGet, ttlSet, makeKey } from './lib/ttlCache'
 import { preflightCompact } from '../services/decider/market_compact'
 import deciderCfg from '../config/decider.json'
 import { startAltH1Collector } from './ws/collector_alt_h1'
@@ -48,6 +49,15 @@ function isDebugApi(): boolean {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', 'http://localhost')
+    const hasRealBinanceKeys = (): boolean => {
+      try {
+        const k = String(process.env.BINANCE_API_KEY || '')
+        const s = String(process.env.BINANCE_SECRET_KEY || '')
+        if (!k || !s) return false
+        if (k.includes('mock') || s.includes('mock')) return false
+        return true
+      } catch { return false }
+    }
     if (url.pathname === '/api/mark' && req.method === 'GET') {
       try {
         const sym = String(url.searchParams.get('symbol') || '')
@@ -68,6 +78,102 @@ const server = http.createServer(async (req, res) => {
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    if (url.pathname === '/api/open_orders' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        if (!hasRealBinanceKeys()) {
+          res.statusCode = 401
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ error: 'missing_binance_keys' }))
+          return
+        }
+        const key = makeKey('/api/open_orders')
+        const cached = ttlGet<any>(key)
+        if (cached) {
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify(cached))
+          return
+        }
+        const raw = await fetchAllOpenOrders()
+        const orders = Array.isArray(raw) ? raw.map((o: any) => ({
+          orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0,
+          symbol: String(o?.symbol || ''),
+          side: String(o?.side || ''),
+          type: String(o?.type || ''),
+          qty: (() => { const n = Number(o?.origQty ?? o?.quantity ?? o?.qty); return Number.isFinite(n) ? n : null })(),
+          price: (() => { const n = Number(o?.price); return Number.isFinite(n) && n > 0 ? n : null })(),
+          stopPrice: (() => { const n = Number(o?.stopPrice); return Number.isFinite(n) && n > 0 ? n : null })(),
+          timeInForce: o?.timeInForce ? String(o.timeInForce) : null,
+          reduceOnly: Boolean(o?.reduceOnly ?? false),
+          closePosition: Boolean(o?.closePosition ?? false),
+          updatedAt: (() => { const t = Number(o?.updateTime); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })()
+        })) : []
+        const body = { ok: true, count: orders.length, orders }
+        ttlSet(key, body, 1500)
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(body))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'binance_error' }))
+      }
+      return
+    }
+    if (url.pathname === '/api/positions' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        if (!hasRealBinanceKeys()) {
+          res.statusCode = 401
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ error: 'missing_binance_keys' }))
+          return
+        }
+        const key = makeKey('/api/positions')
+        const cached = ttlGet<any>(key)
+        if (cached) {
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify(cached))
+          return
+        }
+        const raw = await fetchPositions()
+        const positionsRaw = Array.isArray(raw) ? raw : []
+        const positions = positionsRaw
+          .map((p: any) => {
+            const amt = Number(p?.positionAmt)
+            const size = Number.isFinite(amt) ? Math.abs(amt) : 0
+            const entry = Number(p?.entryPrice)
+            const mark = Number(p?.markPrice)
+            const pnl = Number(p?.unRealizedProfit ?? p?.unrealizedPnl)
+            const lev = Number(p?.leverage)
+            const side = (typeof p?.positionSide === 'string' && p.positionSide) ? String(p.positionSide) : (Number.isFinite(amt) ? (amt >= 0 ? 'LONG' : 'SHORT') : '')
+            const upd = Number(p?.updateTime)
+            return {
+              symbol: String(p?.symbol || ''),
+              positionSide: side || null,
+              size: Number.isFinite(size) ? size : 0,
+              entryPrice: Number.isFinite(entry) ? entry : null,
+              markPrice: Number.isFinite(mark) ? mark : null,
+              unrealizedPnl: Number.isFinite(pnl) ? pnl : null,
+              leverage: Number.isFinite(lev) ? lev : null,
+              updatedAt: Number.isFinite(upd) && upd > 0 ? new Date(upd).toISOString() : null
+            }
+          })
+          .filter((p: any) => Number.isFinite(p.size) && p.size > 0)
+        const body = { ok: true, count: positions.length, positions }
+        ttlSet(key, body, 1500)
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(body))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'binance_error' }))
       }
       return
     }

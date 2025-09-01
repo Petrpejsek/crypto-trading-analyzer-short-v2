@@ -24,7 +24,19 @@ export default defineConfig({
   preview: {
     host: 'localhost',
     port: 4200,
-    strictPort: true
+    strictPort: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8788',
+        changeOrigin: true
+      },
+      '/binance': {
+        target: 'https://fapi.binance.com',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/binance/, '')
+      }
+    }
   }
 });
 

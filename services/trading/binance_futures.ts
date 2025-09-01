@@ -188,6 +188,11 @@ export async function fetchAllOpenOrders(): Promise<any[]> {
   return api.getAllOpenOrders()
 }
 
+export async function fetchPositions(): Promise<any[]> {
+  const api = getBinanceAPI()
+  return api.getPositions()
+}
+
 // Initialize only when needed to avoid startup errors
 let binanceAPI: BinanceFuturesAPI | null = null
 
@@ -255,8 +260,13 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
         const priceFilter = (info.filters || []).find((f: any) => f.filterType === 'PRICE_FILTER')
         const rawTick = priceFilter?.tickSize
         const tickSize = Number(rawTick)
+        const minPrice = Number(priceFilter?.minPrice)
+        const maxPrice = Number(priceFilter?.maxPrice)
         if (!Number.isFinite(tickSize) || tickSize <= 0) {
           throw new Error('tick_mismatch:missing_price_filter')
+        }
+        if (!Number.isFinite(minPrice) || minPrice <= 0) {
+          throw new Error('min_price_missing')
         }
         const tickDecimals = (() => {
           const s = String(rawTick)
@@ -268,12 +278,19 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
           const q = p / tickSize
           if (Math.abs(q - Math.round(q)) > 1e-9) throw new Error(`${label}_tick_mismatch`)
         }
+        const assertBounds = (p: number, label: string) => {
+          if (!Number.isFinite(p) || p <= 0) throw new Error(`${label}_invalid`)
+          if (p < minPrice - 1e-12) throw new Error(`${label}_lt_min:${minPrice}`)
+          if (Number.isFinite(maxPrice) && maxPrice > 0 && p > (maxPrice + 1e-12)) throw new Error(`${label}_gt_max:${maxPrice}`)
+        }
         const fmt = (p: number) => p.toFixed(tickDecimals)
 
         const slNum = Number(order.sl)
         const tpNum = Number(order.tp)
         assertOnTick(slNum, 'sl')
         assertOnTick(tpNum, 'tp')
+        assertBounds(slNum, 'sl')
+        assertBounds(tpNum, 'tp')
         const slPrice = fmt(slNum)
         const tpPrice = fmt(tpNum)
 
@@ -311,36 +328,31 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
           if (!hasEntry) throw new Error('limit_entry_missing')
           const entryVal = Number(order.entry)
           assertOnTick(entryVal, 'entry')
+          assertBounds(entryVal, 'entry')
           const entryPx = fmt(entryVal)
+          try { console.info('[ORDER_VALUES]', { symbol: order.symbol, mode: 'LIMIT', entry: entryPx, sl: slPrice, tp: tpPrice }) } catch {}
           qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, Number(entryPx))
           entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'LIMIT', price: entryPx, timeInForce: 'GTC', quantity: qtyForEntry, positionSide })
         } else if (resolvedType === 'stop') {
           if (!hasEntry) throw new Error('stop_entry_missing')
           const trigVal = Number(order.entry)
           assertOnTick(trigVal, 'entry')
+          assertBounds(trigVal, 'entry')
           const trig = fmt(trigVal)
-          // If entry trigger je už aktivní (mark >= entry pro LONG; mark <= entry pro SHORT), přepni na MARKET
-          const entryWouldTrigger = sideLong ? (markPrice >= Number(trig)) : (markPrice <= Number(trig))
-          if (entryWouldTrigger) {
-            qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, markPrice)
-            entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'MARKET', quantity: qtyForEntry, positionSide })
-          } else {
-            qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, Number(trig))
-            entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'STOP', stopPrice: trig, price: trig, timeInForce: 'GTC', quantity: qtyForEntry, positionSide, workingType: 'MARK_PRICE' })
-          }
+          // STRICT: žádný fallback na MARKET – STOP_MARKET přesně na GPT triggeru
+          try { console.info('[ORDER_VALUES]', { symbol: order.symbol, mode: 'STOP_MARKET', entry: trig, sl: slPrice, tp: tpPrice }) } catch {}
+          qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, Number(trig))
+          entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'STOP_MARKET', stopPrice: trig, workingType: 'MARK_PRICE', quantity: qtyForEntry, positionSide })
         } else if (resolvedType === 'stop_limit') {
           if (!hasEntry) throw new Error('stop_limit_entry_missing')
           const trigVal = Number(order.entry)
           assertOnTick(trigVal, 'entry')
+          assertBounds(trigVal, 'entry')
           const trig = fmt(trigVal)
-          const entryWouldTrigger = sideLong ? (markPrice >= Number(trig)) : (markPrice <= Number(trig))
-          if (entryWouldTrigger) {
-            qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, markPrice)
-            entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'MARKET', quantity: qtyForEntry, positionSide })
-          } else {
-            qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, Number(trig))
-            entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'STOP', stopPrice: trig, price: trig, timeInForce: 'GTC', quantity: qtyForEntry, positionSide, workingType: 'MARK_PRICE' })
-          }
+          // STRICT: žádný fallback na MARKET – STOP (stop-limit) na GPT triggeru
+          try { console.info('[ORDER_VALUES]', { symbol: order.symbol, mode: 'STOP_LIMIT', entry: trig, sl: slPrice, tp: tpPrice }) } catch {}
+          qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, Number(trig))
+          entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'STOP', stopPrice: trig, price: trig, timeInForce: 'GTC', quantity: qtyForEntry, positionSide, workingType: 'MARK_PRICE' })
         } else {
           // MARKET je povolen pouze pokud klient poslal 'market'
           qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, markPrice)
@@ -384,6 +396,18 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
       try {
         if (raw.includes('-4045') || /reach\s+max\s+stop\s+order\s+limit/i.test(raw)) {
           friendly = 'binance_limit_stop_orders: Reach max stop order limit. Zrušte otevřené STOP/TP/SL příkazy nebo snižte počet.'
+        } else if (/-4013/.test(raw) || /price\s+less\s+than\s+min\s+price/i.test(raw) || /_lt_min:/i.test(raw)) {
+          friendly = 'price_lt_min: Cena je pod minimální cenou pro symbol (PRICE_FILTER.minPrice). Upravte vstup (GPT) na ≥ minPrice.'
+        } else if (/_gt_max:/i.test(raw) || /price\s+greater\s+than\s+max\s+price/i.test(raw)) {
+          friendly = 'price_gt_max: Cena je nad maximální cenou pro symbol (PRICE_FILTER.maxPrice).'
+        } else if (/tick_mismatch/i.test(raw)) {
+          friendly = 'tick_mismatch: Cena musí být násobkem tickSize. Upravte vstup dle exchange tickSize.'
+        } else if (/sl_would_trigger|tp_would_trigger/i.test(raw)) {
+          friendly = 'protection_trigger: SL/TP by se okamžitě aktivoval podle MARK. Upravte hodnoty.'
+        } else if (/order_type_invalid/i.test(raw)) {
+          friendly = 'order_type_invalid: Nepodporovaný typ příkazu.'
+        } else if (/min_price_missing/i.test(raw)) {
+          friendly = 'min_price_missing: Nebyl načten minPrice z exchangeInfo. Zkuste znovu.'
         }
       } catch {}
       console.error(`[BINANCE_ORDER_ERROR] ${order.symbol}:`, raw)

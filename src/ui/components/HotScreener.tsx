@@ -13,9 +13,10 @@ export type HotScreenerProps = {
   onSelectionChange: (selectedSymbols: string[]) => void
   selectedSymbols: string[]
   onAnalyzeSelected: () => void
+  blockedSymbols?: string[]
 }
 
-export function HotScreener({ hotPicks, status, onSelectionChange, selectedSymbols, onAnalyzeSelected }: HotScreenerProps) {
+export function HotScreener({ hotPicks, status, onSelectionChange, selectedSymbols, onAnalyzeSelected, blockedSymbols = [] }: HotScreenerProps) {
   const [executing, setExecuting] = React.useState(false)
   const [autoAnalyze, setAutoAnalyze] = React.useState<boolean>(() => {
     try { return localStorage.getItem('auto_analyze') === '1' } catch { return false }
@@ -113,6 +114,7 @@ export function HotScreener({ hotPicks, status, onSelectionChange, selectedSymbo
                       checked={selectedSymbols.includes(pick.symbol)}
                       onChange={() => handleToggle(pick.symbol)}
                       style={{ cursor: 'pointer' }}
+                      title={blockedSymbols.includes(pick.symbol) ? 'Blocked by open position/order' : undefined}
                     />
                     <span style={{ fontWeight: 600, fontSize: 14 }}>
                       #{index + 1} {pick.symbol}

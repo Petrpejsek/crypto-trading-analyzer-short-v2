@@ -234,7 +234,7 @@ export function EntryControls({
                     <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
                       <span style={{ color: 'var(--muted)' }}>Typ příkazu</span>
                       <select 
-                        value={control.orderType || (control.strategy === 'conservative' ? 'limit' : 'market')}
+                        value={control.orderType || (control.strategy === 'conservative' ? 'limit' : 'stop_limit')}
                         onChange={(e) => handleControlUpdate(strategy.symbol, 'orderType', e.target.value as any)}
                         disabled={!control.include}
                       >

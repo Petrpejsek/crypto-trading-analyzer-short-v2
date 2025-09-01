@@ -39,6 +39,7 @@ type FinalPickInput = {
 import CandidatesPreview from './components/CandidatesPreview';
 import { HotScreener, type HotPick } from './components/HotScreener';
 import { EntryControls, type EntryStrategyData, type CoinControl } from './components/EntryControls';
+import OrdersPanel from './components/OrdersPanel';
 
 export const App: React.FC = () => {
   const [snapshot, setSnapshot] = useState<MarketRawSnapshot | null>(null);
@@ -87,6 +88,7 @@ export const App: React.FC = () => {
   const [hotPicks, setHotPicks] = useState<HotPick[]>([])
   const [hotScreenerStatus, setHotScreenerStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [selectedHotSymbols, setSelectedHotSymbols] = useState<string[]>([])
+  const [blockedSymbols, setBlockedSymbols] = useState<string[]>([])
   const [entryStrategies, setEntryStrategies] = useState<EntryStrategyData[]>([])
   const [entryControlsStatus, setEntryControlsStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [coinControls, setCoinControls] = useState<CoinControl[]>([])
@@ -640,11 +642,56 @@ export const App: React.FC = () => {
       const hotPicks = result.data.hot_picks || []
       setHotPicks(hotPicks)
       
-      // Auto-select pouze "🟢 Super Hot" picks
-      const superHotSymbols = hotPicks
+      // Auto-select pouze "🟢 Super Hot" picks, ale vynecháme symboly,
+      // které mají otevřené pozice nebo čekající objednávky (duplicitní analýza nechceme)
+      const superHotSymbols: string[] = hotPicks
         .filter((pick: any) => pick.rating === '🟢 Super Hot')
-        .map((pick: any) => pick.symbol)
-      setSelectedHotSymbols(superHotSymbols)
+        .map((pick: any) => String(pick.symbol || ''))
+        .filter(Boolean)
+
+      const normalize = (s: string): string => {
+        try { return String(s || '').toUpperCase().replace('/', '') } catch { return s }
+      }
+      const getBlockedSymbols = async (): Promise<Set<string>> => {
+        const blocked = new Set<string>()
+        const [oRes, pRes] = await Promise.all([
+          fetchWithRetry('/api/open_orders'),
+          fetchWithRetry('/api/positions')
+        ])
+        if (!oRes.ok) {
+          throw new Error(`open_orders_block_check:${oRes.status}`)
+        }
+        if (!pRes.ok) {
+          throw new Error(`positions_block_check:${pRes.status}`)
+        }
+        const oJson: any = await oRes.json()
+        const pJson: any = await pRes.json()
+        const oList = Array.isArray(oJson?.orders) ? oJson.orders : []
+        for (const o of oList) {
+          const sym = normalize(String(o?.symbol || ''))
+          const reduceOnly = Boolean(o?.reduceOnly)
+          const closePosition = Boolean(o?.closePosition)
+          // Block only entry-like orders (not pure exit orders)
+          if (sym && !(reduceOnly || closePosition)) blocked.add(sym)
+        }
+        const pList = Array.isArray(pJson?.positions) ? pJson.positions : []
+        for (const p of pList) {
+          const size = Number(p?.size)
+          const sym = normalize(String(p?.symbol || ''))
+          if (sym && Number.isFinite(size) && size > 0) blocked.add(sym)
+        }
+        return blocked
+      }
+      try {
+        const blocked = await getBlockedSymbols()
+        const filtered = superHotSymbols.filter(s => !blocked.has(normalize(s)))
+        setSelectedHotSymbols(filtered)
+        setBlockedSymbols(Array.from(blocked))
+      } catch {
+        // Keep original selection to avoid flow changes when block-check fails
+        setSelectedHotSymbols(superHotSymbols)
+        setBlockedSymbols([])
+      }
       
       setHotScreenerStatus('success')
     } catch (e: any) {
@@ -719,6 +766,22 @@ export const App: React.FC = () => {
     }
   }
 
+  // Auto-spuštění Entry Analysis po úspěšném Hot Screeneru, pokud je zapnuté Auto Prepare
+  const lastAutoAnalyzeKeyRef = useRef<string>('')
+  useEffect(() => {
+    try {
+      const auto = localStorage.getItem('auto_prepare') === '1'
+      if (!auto) return
+      if (hotScreenerStatus !== 'success') return
+      if (!Array.isArray(selectedHotSymbols) || selectedHotSymbols.length === 0) return
+      const key = [...selectedHotSymbols].sort().join(',')
+      if (!key || key === lastAutoAnalyzeKeyRef.current) return
+      lastAutoAnalyzeKeyRef.current = key
+      // Spustit synchronizačně, ale bez čekání na UI thread
+      void runEntryAnalysis()
+    } catch {}
+  }, [hotScreenerStatus, selectedHotSymbols])
+
   const handleCoinControlChange = (symbol: string, updates: Partial<CoinControl>) => {
     setCoinControls(prev => prev.map(control => 
       control.symbol === symbol 
@@ -745,22 +808,43 @@ export const App: React.FC = () => {
       }
       const parsePriceLike = (v: string | number | null | undefined): number | null => {
         if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? v : null
-        if (typeof v === 'string') {
-          const cleaned = v.replace(/,/g, '')
-          // Prefer decimal numbers; otherwise take the LAST numeric token
-          const dec = cleaned.match(/\d+\.\d+/g)
-          if (dec && dec.length > 0) {
-            const n = Number(dec[dec.length - 1])
+        if (typeof v !== 'string') return null
+        try {
+          let s = v
+          // Remove parentheses content and percents
+          s = s.replace(/\((.*?)\)/g, ' ')
+          s = s.replace(/-?\d+(?:[\.,]\d+)?\s*%/g, ' ')
+          // Normalize en dash and remove obvious labels/ratios that inject small integers
+          s = s.replace(/–/g, '-')
+          s = s.replace(/\bTP\s*\d+\b/gi, 'TP')
+          s = s.replace(/\b\d+\s*[:xX]\s*\d+\b/g, ' ') // ratios like 2:1 or 1x3
+          s = s.replace(/\b\d+(?:[\.,]\d+)?\s*[rR]\b/g, ' ') // 2R, 1.5R
+          // Remove digits glued to letters (e.g., TP2, V2) to avoid picking those integers
+          s = s.replace(/[A-Za-z]+\d+(?=\b)/g, (m) => m.replace(/\d+/g, ''))
+          // Find numeric tokens (supports thousand separators and comma/dot decimals)
+          const re = /\d{1,3}(?:[\s,]\d{3})*(?:[\.,]\d+)?|\d+(?:[\.,]\d+)?/g
+          const matches = s.match(re)
+          if (!matches || matches.length === 0) return null
+          const normalizeNumber = (str: string): number | null => {
+            let t = str.trim()
+            const lastComma = t.lastIndexOf(',')
+            const lastDot = t.lastIndexOf('.')
+            const decIsComma = lastComma > lastDot
+            if (decIsComma) {
+              t = t.replace(/[\s\.]/g, '').replace(',', '.')
+            } else {
+              t = t.replace(/[\s,]/g, '')
+            }
+            const n = Number(t)
             return Number.isFinite(n) && n > 0 ? n : null
           }
-          const all = cleaned.match(/\d+(?:\.\d+)?/g)
-          if (all && all.length > 0) {
-            const n = Number(all[all.length - 1])
-            return Number.isFinite(n) && n > 0 ? n : null
+          // FIRST numeric token (left edge)
+          for (const m of matches) {
+            const n = normalizeNumber(m)
+            if (n !== null) return n
           }
           return null
-        }
-        return null
+        } catch { return null }
       }
       // Only include symbols explicitly checked (include===true). This avoids stray orders
       // Deduplicate by symbol – poslední nastavení vítězí
@@ -769,6 +853,7 @@ export const App: React.FC = () => {
           const entry = parsePriceLike(plan?.entry ?? null)
           const sl = parsePriceLike(plan?.sl ?? null)
           const tpVal = parsePriceLike(plan ? (plan as any)[c.tpLevel] : null)
+          try { console.info('[ORDER_PARSE]', { symbol: c.symbol, strategy: c.strategy, tpLevel: c.tpLevel, raw: { entry: plan?.entry, sl: plan?.sl, tp: plan ? (plan as any)[c.tpLevel] : null }, parsed: { entry, sl, tp: tpVal } }) } catch {}
           return {
             symbol: c.symbol,
             side: (c.side || 'LONG') as any,
@@ -784,6 +869,31 @@ export const App: React.FC = () => {
             tp: tpVal ?? 0
           }
         })
+      // STRICT 1:1 preflight – ověř, že parsed hodnoty přesně odpovídají 1. číslu z GPT stringů
+      {
+        const diffs: string[] = []
+        for (const c of includedControls) {
+          const plan = findPlan(c.symbol, c.strategy)
+          if (!plan) continue
+          const expEntry = parsePriceLike(plan.entry)
+          const expSL = parsePriceLike(plan.sl)
+          const expTP = parsePriceLike((plan as any)[c.tpLevel])
+          const got = mapped.find(m => m.symbol === c.symbol)
+          if (!got) continue
+          const add = (label: string, exp: any, val: any) => {
+            const ex = Number(exp); const va = Number(val)
+            if (!(Number.isFinite(ex) && Number.isFinite(va))) return
+            if (Math.abs(ex - va) > 1e-12) diffs.push(`${c.symbol} ${label}: expected ${ex} from GPT, got ${va}`)
+          }
+          add('ENTRY', expEntry, got.entry)
+          add('SL', expSL, got.sl)
+          add(String(c.tpLevel).toUpperCase(), expTP, got.tp)
+        }
+        if (diffs.length > 0) {
+          setError(`STRICT 1:1: Mismatch detekován – objednávky neodeslány.\n${diffs.join('\n')}`)
+          return
+        }
+      }
       const uniqMap = new Map<string, any>()
       for (const o of mapped) uniqMap.set(o.symbol, o)
       let orders = Array.from(uniqMap.values())
@@ -803,8 +913,8 @@ export const App: React.FC = () => {
         }
       }
       if (invalid.length) {
-        setError(`Vynechávám nevalidní podle MARK:\n${invalid.join('\n')}`)
-        orders = orders.filter(o => !invalidSymbols.has(o.symbol))
+        // Only warn; do NOT filter out orders. Server enforces MARK guards strictly.
+        setError(`Upozornění (MARK guard klient):\n${invalid.join('\n')}\nObjednávky odeslány – server zvaliduje přesně.`)
       }
       if (orders.length === 0) return
       const payload = { orders }
@@ -1042,6 +1152,7 @@ export const App: React.FC = () => {
         selectedSymbols={selectedHotSymbols}
         onSelectionChange={setSelectedHotSymbols}
         onAnalyzeSelected={runEntryAnalysis}
+        blockedSymbols={blockedSymbols}
       />
 
       {entryStrategies.length > 0 && (
@@ -1093,6 +1204,8 @@ export const App: React.FC = () => {
           />
         </>
       ) : null}
+      {/* Orders & Positions overview at the very bottom */}
+      <OrdersPanel />
         </>
       )}
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} lastSnapshot={snapshot} lastRunAt={lastRunAt} finalPickerStatus={finalPickerStatus} finalPicksCount={finalPicks.length} posture={(decision?.flag as any) ?? 'NO-TRADE'} />
