@@ -346,8 +346,9 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
           qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, markPrice)
           entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'MARKET', quantity: qtyForEntry, positionSide })
         }
-        const slRes = await api.placeOrder({ symbol: order.symbol, side: exitSide, type: 'STOP_MARKET', stopPrice: slPrice, workingType: 'MARK_PRICE', timeInForce: 'GTC', quantity: qtyForEntry, positionSide, reduceOnly: true })
-        const tpRes = await api.placeOrder({ symbol: order.symbol, side: exitSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice, workingType: 'MARK_PRICE', timeInForce: 'GTC', quantity: qtyForEntry, positionSide, reduceOnly: true })
+        // Binance UM Futures: reduceOnly není povoleno pro STOP_MARKET/TP_MARKET – použij closePosition
+        const slRes = await api.placeOrder({ symbol: order.symbol, side: exitSide, type: 'STOP_MARKET', stopPrice: slPrice, workingType: 'MARK_PRICE', closePosition: true, positionSide })
+        const tpRes = await api.placeOrder({ symbol: order.symbol, side: exitSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice, workingType: 'MARK_PRICE', closePosition: true, positionSide })
 
         results.push({
           symbol: order.symbol,
