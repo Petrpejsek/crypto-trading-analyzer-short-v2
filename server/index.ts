@@ -605,7 +605,7 @@ const server = http.createServer(async (req, res) => {
           }
           throw lastErr
         }
-        const snap = await retry(() => buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined }))
+        const snap = await retry(() => buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh: true }))
         type Bar = { time: string; open: number; high: number; low: number; close: number; volume: number }
         const toIsoNoMs = (isoLike: string): string => {
           const s = String(isoLike || '')

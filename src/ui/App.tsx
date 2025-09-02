@@ -1007,28 +1007,8 @@ export const App: React.FC = () => {
   // No auto-run on load; wait for explicit user click
 
   useEffect(() => {
-    try {
-      const sRaw = localStorage.getItem('m1Snapshot');
-      const fRaw = localStorage.getItem('m2Features');
-      const dRaw = localStorage.getItem('m3Decision');
-      const setRaw = localStorage.getItem('m4SignalSet');
-      const lastRun = localStorage.getItem('lastRunAt');
-      // Restore RAW coins if present for current strategy
-      // no restore of rawCoins from localStorage: always fetch fresh
-      if (sRaw) setSnapshot(JSON.parse(sRaw));
-      if (fRaw) {
-        const feats = JSON.parse(fRaw);
-        setFeatures(feats);
-        try {
-          if (dRaw) setDecision(JSON.parse(dRaw)); else {
-            const dec = decideFromFeatures(feats);
-            setDecision(dec);
-          }
-          if (setRaw) setSignalSet(JSON.parse(setRaw));
-        } catch {}
-      }
-      if (lastRun) setLastRunAt(lastRun);
-    } catch {}
+    // Disable restore of market pipeline artifacts: always fresh per run
+    // Keep only UI telemetry elsewhere
   }, []);
 
   // Keyboard shortcuts: DISABLED auto-run on 'r' key to prevent accidental runs
