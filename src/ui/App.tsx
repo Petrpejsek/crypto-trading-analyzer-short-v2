@@ -42,6 +42,8 @@ import { EntryControls, type EntryStrategyData, type CoinControl } from './compo
 import OrdersPanel from './components/OrdersPanel';
 
 export const App: React.FC = () => {
+  // TTL for locally cached raw coin list (avoid stale list on ~5m pipeline)
+  const RAW_COINS_TTL_MS = 4 * 60 * 1000;
   const [snapshot, setSnapshot] = useState<MarketRawSnapshot | null>(null);
   const [features, setFeatures] = useState<FeaturesSnapshot | null>(null);
   const [featuresMs, setFeaturesMs] = useState<number | null>(null);
@@ -67,68 +69,50 @@ export const App: React.FC = () => {
   const [rawLoading, setRawLoading] = useState(false);
   const [loadingSymbol, setLoadingSymbol] = useState<string | null>(null);
   const [rawCoins, setRawCoins] = useState<any[] | null>(null);
-  const [universeStrategy, setUniverseStrategy] = useState<'volume' | 'gainers'>(() => {
-    try { return (localStorage.getItem('universe_strategy') as any) === 'gainers' ? 'gainers' : 'volume' } catch { return 'volume' }
-  });
-  useEffect(() => { try { localStorage.setItem('universe_strategy', universeStrategy) } catch {} }, [universeStrategy])
+  const [rawCoinsTs, setRawCoinsTs] = useState<number | null>(null);
+  const [universeStrategy, setUniverseStrategy] = useState<'volume' | 'gainers'>(() => 'gainers');
   const prevStrategyRef = useRef(universeStrategy)
   useEffect(() => {
     if (prevStrategyRef.current !== universeStrategy) {
       setRawCoins(null)
+      setRawCoinsTs(null)
       try { localStorage.removeItem('rawCoins') } catch {}
     }
     prevStrategyRef.current = universeStrategy
   }, [universeStrategy])
-  const [forceCandidates, setForceCandidates] = useState<boolean>(() => {
-    try { return localStorage.getItem('forceCandidates') === '1' } catch { return true }
-  });
-  useEffect(() => { try { localStorage.setItem('forceCandidates', forceCandidates ? '1' : '0') } catch {} }, [forceCandidates]);
+  const [forceCandidates, setForceCandidates] = useState<boolean>(true);
 
   // Hot trading state
   const [hotPicks, setHotPicks] = useState<HotPick[]>([])
   const [hotScreenerStatus, setHotScreenerStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [selectedHotSymbols, setSelectedHotSymbols] = useState<string[]>([])
   const [blockedSymbols, setBlockedSymbols] = useState<string[]>([])
+  // Store GPT entry inputs per symbol to enable copying selected payloads
+  const [entryInputsBySymbol, setEntryInputsBySymbol] = useState<Record<string, { symbol: string; asset_data: any }>>({})
   const [entryStrategies, setEntryStrategies] = useState<EntryStrategyData[]>([])
   const [entryControlsStatus, setEntryControlsStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [coinControls, setCoinControls] = useState<CoinControl[]>([])
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({})
   // TODO: future – add markPrice map if needed
   const [placingOrders, setPlacingOrders] = useState(false)
-  const [defaultPreset, setDefaultPreset] = useState<'conservative'|'aggressive'>(()=>{
-    try { return (localStorage.getItem('default_preset') as any) === 'aggressive' ? 'aggressive' : 'conservative' } catch { return 'conservative' }
-  })
-  useEffect(()=>{ try { localStorage.setItem('default_preset', defaultPreset) } catch {} }, [defaultPreset])
+  const [defaultPreset, setDefaultPreset] = useState<'conservative'|'aggressive'>('conservative')
 
   // Global defaults controlled in HeaderBar
-  const [defaultSide, setDefaultSide] = useState<'LONG'|'SHORT'>(()=>{
-    try { return (localStorage.getItem('default_side') as any) === 'SHORT' ? 'SHORT' : 'LONG' } catch { return 'LONG' }
-  })
-  useEffect(()=>{ try { localStorage.setItem('default_side', defaultSide) } catch {} }, [defaultSide])
-  const [defaultTPLevel, setDefaultTPLevel] = useState<'tp1'|'tp2'|'tp3'>(()=>{
-    try { const v = (localStorage.getItem('default_tp_level') as any) || 'tp2'; return (['tp1','tp2','tp3'] as const).includes(v) ? v as any : 'tp2' } catch { return 'tp2' }
-  })
-  useEffect(()=>{ try { localStorage.setItem('default_tp_level', defaultTPLevel) } catch {} }, [defaultTPLevel])
-  const [defaultAmount, setDefaultAmount] = useState<number>(()=>{
-    try { const n = Number(localStorage.getItem('default_amount_usdt')); return Number.isFinite(n) && n > 0 ? n : 20 } catch { return 20 }
-  })
-  useEffect(()=>{ try { localStorage.setItem('default_amount_usdt', String(defaultAmount)) } catch {} }, [defaultAmount])
-  const [defaultLeverage, setDefaultLeverage] = useState<number>(()=>{
-    try { const n = Number(localStorage.getItem('default_leverage')); return Number.isFinite(n) && n > 0 ? n : 15 } catch { return 15 }
-  })
-  useEffect(()=>{ try { localStorage.setItem('default_leverage', String(defaultLeverage)) } catch {} }, [defaultLeverage])
+  const [defaultSide, setDefaultSide] = useState<'LONG'|'SHORT'>('LONG')
+  const [defaultTPLevel, setDefaultTPLevel] = useState<'tp1'|'tp2'|'tp3'>('tp2')
+  const [defaultAmount, setDefaultAmount] = useState<number>(20)
+  const [defaultLeverage, setDefaultLeverage] = useState<number>(15)
 
   // Load hot trading settings from localStorage
   const hotTradingSettings = useMemo(() => ({
-    conservativeBuffer: (() => { try { return Number(localStorage.getItem('conservative_entry_buffer')) || 0.1 } catch { return 0.1 } })(),
-    aggressiveBuffer: (() => { try { return Number(localStorage.getItem('aggressive_entry_buffer')) || 0.3 } catch { return 0.3 } })(),
-    maxPerCoin: (() => { try { return Number(localStorage.getItem('max_per_coin_usdt')) || 500 } catch { return 500 } })(),
-    maxCoins: (() => { try { return Number(localStorage.getItem('max_coins_count')) || 5 } catch { return 5 } })(),
-    defaultStrategy: (() => { try { return (localStorage.getItem('default_hot_strategy') as any) || 'conservative' } catch { return 'conservative' } })(),
-    defaultTPLevel: (() => { try { return (localStorage.getItem('default_tp_level') as any) || 'tp2' } catch { return 'tp2' } })(),
-    // New defaults requested: leverage x15, amount $20
-    defaultLeverage: (() => { try { return Number(localStorage.getItem('default_leverage')) || 15 } catch { return 15 } })(),
-    defaultAmount: (() => { try { return Number(localStorage.getItem('default_amount_usdt')) || 20 } catch { return 20 } })()
+    conservativeBuffer: 0.1,
+    aggressiveBuffer: 0.3,
+    maxPerCoin: 500,
+    maxCoins: 5,
+    defaultStrategy: 'conservative',
+    defaultTPLevel: 'tp2',
+    defaultLeverage: 15,
+    defaultAmount: 20
   }), [])
 
   const symbolsLoaded = useMemo(() => {
@@ -176,10 +160,15 @@ export const App: React.FC = () => {
   }
 
   const coinsSource = useMemo(() => {
-    // Show rawCoins (50) if available, fallback to snapshot.universe (48)
-    if (rawCoins && Array.isArray(rawCoins) && rawCoins.length > 0) return rawCoins
-    return snapshot?.universe || []
-  }, [rawCoins, snapshot])
+    // Prefer rawCoins (50) only if they are fresh; otherwise fallback to current snapshot.universe (48)
+    const freshRaw = (() => {
+      if (!rawCoins || !Array.isArray(rawCoins) || rawCoins.length === 0) return null
+      const ts = rawCoinsTs ?? null
+      if (!Number.isFinite(ts as any)) return null
+      return (Date.now() - (ts as number)) <= RAW_COINS_TTL_MS ? rawCoins : null
+    })()
+    return freshRaw || snapshot?.universe || []
+  }, [rawCoins, rawCoinsTs, snapshot])
   
   const columns = 3
   const displayCoins = useMemo(() => {
@@ -440,15 +429,7 @@ export const App: React.FC = () => {
       // console table summary
       // eslint-disable-next-line no-console
       console.table({ durationMs: Math.round((data as any).duration_ms ?? (data as any).latency_ms ?? 0), featuresMs: Math.round(dt), symbols: data.universe.length, setups: (signalSet as any)?.setups?.length ?? 0 });
-      // persist
-      try {
-        localStorage.setItem('m1Snapshot', JSON.stringify(data));
-        localStorage.setItem('m2Features', JSON.stringify(feats));
-        localStorage.setItem('m3Decision', JSON.stringify(dec));
-        localStorage.setItem('m4SignalSet', JSON.stringify(signalSet));
-        try { localStorage.setItem('m4FinalPicker', localStorage.getItem('m4FinalPicker') || '') } catch {}
-        localStorage.setItem('lastRunAt', String(new Date().toISOString()));
-      } catch {}
+      // no persist: always fresh data per run (no localStorage caching of market data)
     } catch (e: any) {
       setError(e?.message ?? 'Unknown error');
     } finally {
@@ -554,9 +535,9 @@ export const App: React.FC = () => {
         return
       }
       
-      // Update UI state immediately (even if clipboard fails later)
+      // Update UI state (no localStorage persistence of rawCoins)
       setRawCoins(coins)
-      try { localStorage.setItem('rawCoins', JSON.stringify({ strategy: universeStrategy, coins, timestamp: Date.now() })) } catch {}
+      setRawCoinsTs(Date.now())
       
       // OPRAVA: Validované BTC/ETH regime calculations
       try {
@@ -606,6 +587,30 @@ export const App: React.FC = () => {
       setError(`Network error: ${e?.message || 'request failed'}`)
     } finally { 
       setRawLoading(false) 
+    }
+  }
+
+  // Copy GPT payloads for currently selected hot symbols (requires Analyze selected to have fetched inputs)
+  const [selectedCopied, setSelectedCopied] = useState(false)
+  const copySelectedEntryInputs = async () => {
+    try {
+      if (!Array.isArray(selectedHotSymbols) || selectedHotSymbols.length === 0) {
+        setError('No selected symbols. Select at least one Super Hot coin.');
+        return
+      }
+      const payloads = selectedHotSymbols
+        .map(sym => entryInputsBySymbol[sym])
+        .filter(Boolean)
+      if (payloads.length === 0) {
+        setError('No entry inputs available. Run Analyze selected first.');
+        return
+      }
+      const text = JSON.stringify(payloads, null, 2)
+      await writeClipboardSafely(text)
+      setSelectedCopied(true)
+      window.setTimeout(()=>setSelectedCopied(false), 1200)
+    } catch (e: any) {
+      setError(`Clipboard error: ${e?.message || 'write failed'}`)
     }
   }
 
@@ -709,6 +714,7 @@ export const App: React.FC = () => {
 
     try {
       const strategies: EntryStrategyData[] = []
+      const payloadsToCopy: Array<{ symbol: string; asset_data: any }> = []
       const priceMap: Record<string, number> = {}
       
       for (const symbol of selectedHotSymbols) {
@@ -721,7 +727,12 @@ export const App: React.FC = () => {
         const asset = assets.find((a: any) => a?.symbol === symbol)
         
         if (!asset) continue
+        // Collect exact GPT payload per symbol for auto-copy
+        payloadsToCopy.push({ symbol, asset_data: asset })
         try { const p = Number(asset?.price); if (Number.isFinite(p) && p > 0) priceMap[symbol] = p } catch {}
+
+        // Remember input payload (for copy-selected)
+        setEntryInputsBySymbol(prev => ({ ...prev, [symbol]: { symbol, asset_data: asset } }))
 
         // Run entry strategy analysis
         const strategyRes = await fetch('/api/entry_strategy', {
@@ -740,6 +751,20 @@ export const App: React.FC = () => {
         if (strategyResult.ok && strategyResult.data) {
           strategies.push(strategyResult.data)
         }
+      }
+
+      // Auto-copy exact payloads that are sent to /api/entry_strategy
+      try {
+        if (payloadsToCopy.length === 0) {
+          setError('Analyze Selected: no asset_data to copy for selected symbols.')
+        } else {
+          const text = JSON.stringify(payloadsToCopy, null, 2)
+          await writeClipboardSafely(text)
+          setSelectedCopied(true)
+          window.setTimeout(()=>setSelectedCopied(false), 1200)
+        }
+      } catch (e: any) {
+        setError(`Clipboard error: ${e?.message || 'write failed'}`)
       }
 
       setEntryStrategies(strategies)
@@ -848,27 +873,45 @@ export const App: React.FC = () => {
       }
       // Only include symbols explicitly checked (include===true). This avoids stray orders
       // Deduplicate by symbol – poslední nastavení vítězí
+      // Parse numeric ENTRY/SL/TP strictly – if any missing, stop and show error
       const mapped = includedControls.map(c => {
-          const plan = findPlan(c.symbol, c.strategy)
-          const entry = parsePriceLike(plan?.entry ?? null)
-          const sl = parsePriceLike(plan?.sl ?? null)
-          const tpVal = parsePriceLike(plan ? (plan as any)[c.tpLevel] : null)
-          try { console.info('[ORDER_PARSE]', { symbol: c.symbol, strategy: c.strategy, tpLevel: c.tpLevel, raw: { entry: plan?.entry, sl: plan?.sl, tp: plan ? (plan as any)[c.tpLevel] : null }, parsed: { entry, sl, tp: tpVal } }) } catch {}
-          return {
-            symbol: c.symbol,
-            side: (c.side || 'LONG') as any,
-            strategy: c.strategy,
-            tpLevel: c.tpLevel,
-            orderType: c.orderType || (c.strategy === 'conservative' ? 'limit' : 'stop_limit'),
-            amount: c.amount,
-            leverage: c.leverage,
-            useBuffer: c.useCustomBuffer === true,
-            bufferPercent: c.useCustomBuffer ? (c.customBuffer ?? 0) : undefined,
-            entry: entry ?? undefined,
-            sl: sl ?? 0,
-            tp: tpVal ?? 0
-          }
-        })
+        const plan = findPlan(c.symbol, c.strategy)
+        const entry = parsePriceLike(plan?.entry ?? null)
+        const sl = parsePriceLike(plan?.sl ?? null)
+        const tpVal = parsePriceLike(plan ? (plan as any)[c.tpLevel] : null)
+        try { console.info('[ORDER_PARSE]', { symbol: c.symbol, strategy: c.strategy, tpLevel: c.tpLevel, raw: { entry: plan?.entry, sl: plan?.sl, tp: plan ? (plan as any)[c.tpLevel] : null }, parsed: { entry, sl, tp: tpVal } }) } catch {}
+        return {
+          symbol: c.symbol,
+          side: (c.side || 'LONG') as any,
+          strategy: c.strategy,
+          tpLevel: c.tpLevel,
+          orderType: c.orderType || (c.strategy === 'conservative' ? 'limit' : 'stop_limit'),
+          amount: c.amount,
+          leverage: c.leverage,
+          useBuffer: c.useCustomBuffer === true,
+          bufferPercent: c.useCustomBuffer ? (c.customBuffer ?? 0) : undefined,
+          entry,
+          sl,
+          tp: tpVal
+        }
+      })
+
+      // Hard stop if any parsed numeric is missing/invalid (no fallbacks)
+      {
+        const badNum: string[] = []
+        for (const o of mapped) {
+          const issues: string[] = []
+          if (!(typeof o.entry === 'number' && Number.isFinite(o.entry) && o.entry > 0)) issues.push('ENTRY')
+          if (!(typeof o.sl === 'number' && Number.isFinite(o.sl) && o.sl > 0)) issues.push('SL')
+          if (!(typeof o.tp === 'number' && Number.isFinite(o.tp) && o.tp > 0)) issues.push('TP')
+          if (issues.length) badNum.push(`${o.symbol}: missing ${issues.join(', ')}`)
+        }
+        if (badNum.length) {
+          setError(`Missing numeric values – orders not sent.\n${badNum.join('\n')}`)
+          setPlacingOrders(false)
+          return
+        }
+      }
       // STRICT 1:1 preflight – ověř, že parsed hodnoty přesně odpovídají 1. číslu z GPT stringů
       {
         const diffs: string[] = []
@@ -971,15 +1014,7 @@ export const App: React.FC = () => {
       const setRaw = localStorage.getItem('m4SignalSet');
       const lastRun = localStorage.getItem('lastRunAt');
       // Restore RAW coins if present for current strategy
-      try {
-        const rc = localStorage.getItem('rawCoins')
-        if (rc) {
-          const parsed = JSON.parse(rc)
-          const coins = Array.isArray(parsed?.coins) ? parsed.coins : (Array.isArray(parsed) ? parsed : null)
-          const st = (parsed && typeof parsed === 'object' && parsed.strategy) ? parsed.strategy : null
-          if (coins && (!st || st === universeStrategy)) setRawCoins(coins)
-        }
-      } catch {}
+      // no restore of rawCoins from localStorage: always fetch fresh
       if (sRaw) setSnapshot(JSON.parse(sRaw));
       if (fRaw) {
         const feats = JSON.parse(fRaw);
@@ -1097,9 +1132,14 @@ export const App: React.FC = () => {
                 aria-pressed={universeStrategy === 'gainers'}
               >Gainers 24h</button>
             </div>
-            <button className="btn" style={{ border: '2px solid #333' }} onClick={copyRawAll} aria-label="Copy RAW dataset (all alts)" title={rawCopied ? 'Zkopírováno' : 'Copy RAW dataset'} disabled={rawLoading}>
-              {rawLoading ? 'Stahuji…' : (rawCopied ? 'RAW zkopírováno ✓' : 'Copy RAW (vše)')}
-            </button>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <button className="btn" style={{ border: '2px solid #333' }} onClick={copyRawAll} aria-label="Copy RAW dataset (all alts)" title={rawCopied ? 'Zkopírováno' : 'Copy RAW dataset'} disabled={rawLoading}>
+                {rawLoading ? 'Stahuji…' : (rawCopied ? 'RAW zkopírováno ✓' : 'Copy RAW (vše)')}
+              </button>
+              <button className="btn" style={{ border: '2px solid #333' }} onClick={copySelectedEntryInputs} aria-label="Copy GPT payload (selected)" title={selectedCopied ? 'Zkopírováno' : 'Copy GPT inputs (selected)'}>
+                {selectedCopied ? 'Selected zkopírováno ✓' : 'Copy Selected'}
+              </button>
+            </div>
           </div>
           {/* Per-coin copy buttons below header for clarity */}
           <div className="coins-grid">

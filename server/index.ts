@@ -206,8 +206,9 @@ const server = http.createServer(async (req, res) => {
         // universeStrategy: volume (default) | gainers via query ?universe=gainers
         const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
         const universeStrategy = uniParam === 'gainers' ? 'gainers' : 'volume'
+        const fresh = String(url.searchParams.get('fresh') || '1') === '1'
         const topN = Number(url.searchParams.get('topN') || '')
-        const snapshot = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined })
+        const snapshot = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh })
         ;(snapshot as any).duration_ms = Math.round(performance.now() - t0)
         delete (snapshot as any).latency_ms
         const body = JSON.stringify(snapshot)
@@ -238,6 +239,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
         const universeStrategy = uniParam === 'gainers' ? 'gainers' : 'volume'
+        const fresh = String(url.searchParams.get('fresh') || '1') === '1'
         const topN = Number(url.searchParams.get('topN') || '')
         // If a symbol is requested, force-include it in the universe build so it can't be dropped
         const includeSymbols = (() => {
@@ -246,7 +248,7 @@ const server = http.createServer(async (req, res) => {
           const v = String(s).toUpperCase()
           return [v]
         })()
-        const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, includeSymbols })
+        const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, includeSymbols, fresh })
         type K = { time: string; open: number; high: number; low: number; close: number; volume: number }
         const toBars = (arr: any[], keep: number): K[] => {
           if (!Array.isArray(arr)) return []
@@ -352,7 +354,7 @@ const server = http.createServer(async (req, res) => {
           }
           throw lastErr
         }
-        const snap = await retry(() => buildMarketRawSnapshot({ universeStrategy: 'volume', desiredTopN: 1, includeSymbols: [symbol] }))
+        const snap = await retry(() => buildMarketRawSnapshot({ universeStrategy: 'volume', desiredTopN: 1, includeSymbols: [symbol], fresh: true }))
         
         // Find the symbol in universe or btc/eth
         let targetItem: any = null
@@ -440,7 +442,8 @@ const server = http.createServer(async (req, res) => {
         const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
         const universeStrategy = uniParam === 'gainers' ? 'gainers' : 'volume'
         const topN = Number(url.searchParams.get('topN') || '')
-        const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined })
+        const fresh = String(url.searchParams.get('fresh') || '1') === '1'
+        const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh })
         type Bar = { time: string; open: number; high: number; low: number; close: number; volume: number }
         const toIsoNoMs = (isoLike: string): string => {
           const s = String(isoLike || '')
@@ -865,9 +868,9 @@ const server = http.createServer(async (req, res) => {
       try {
         const mode = String(process.env.DECIDER_MODE || 'mock').toLowerCase()
         if (mode === 'gpt' && !process.env.OPENAI_API_KEY) {
-          res.statusCode = 200
+          res.statusCode = 401
           res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ flag: 'NO-TRADE', posture: 'RISK-OFF', market_health: 0, expiry_minutes: 30, reasons: ['gpt_error:no_api_key'], risk_cap: { max_concurrent: 0, risk_per_trade_max: 0 } }))
+          res.end(JSON.stringify({ ok: false, error: 'missing_openai_key' }))
           return
         }
         const chunks: Buffer[] = []
@@ -875,16 +878,16 @@ const server = http.createServer(async (req, res) => {
         const bodyStr = Buffer.concat(chunks).toString('utf8')
         const compact = bodyStr ? JSON.parse(bodyStr) : null
         if (!compact || typeof compact !== 'object') {
-          res.statusCode = 200
+          res.statusCode = 400
           res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ flag: 'NO-TRADE', posture: 'RISK-OFF', market_health: 0, expiry_minutes: 30, reasons: ['gpt_error:bad_request'], risk_cap: { max_concurrent: 0, risk_per_trade_max: 0 } }))
+          res.end(JSON.stringify({ ok: false, error: 'bad_request' }))
           return
         }
         const pf = preflightCompact(compact)
         if (!pf.ok) {
-          res.statusCode = 200
+          res.statusCode = 422
           res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ flag: 'NO-TRADE', posture: 'RISK-OFF', market_health: 0, expiry_minutes: 30, reasons: [`gpt_error:${pf.reason}`], risk_cap: { max_concurrent: 0, risk_per_trade_max: 0 } }))
+          res.end(JSON.stringify({ ok: false, error: `invalid_compact:${pf.reason}` }))
           return
         }
         const decision = await decideMarketStrict({ mode: mode as any, compact, features: {} as any, openaiKey: process.env.OPENAI_API_KEY || '', timeoutMs: (deciderCfg as any)?.timeoutMs || 8000 })
@@ -912,9 +915,9 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify(decision))
       } catch (e: any) {
-        res.statusCode = 200
+        res.statusCode = 500
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ flag: 'NO-TRADE', posture: 'RISK-OFF', market_health: 0, expiry_minutes: 30, reasons: [`gpt_error:${e?.code||e?.name||'unknown'}`], risk_cap: { max_concurrent: 0, risk_per_trade_max: 0 } }))
+        res.end(JSON.stringify({ ok: false, error: e?.code || e?.name || 'internal_error' }))
       }
       return
     }

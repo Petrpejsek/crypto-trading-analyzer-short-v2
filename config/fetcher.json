@@ -25,8 +25,8 @@
     "limit": 50
   },
   "universe": {
-    "topN": 30,
-    "strategy": "volume" 
+    "topN": 50,
+    "strategy": "gainers" 
   },
   "preferWSAltH1": false,
   "backfillH1Limit": 48,

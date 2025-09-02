@@ -43,7 +43,11 @@ async function httpGet(path: string, params?: Record<string, string | number>): 
   }
 }
 
-async function httpGetCached(path: string, params: Record<string, string | number> | undefined, ttlMs: number): Promise<any> {
+async function httpGetCached(path: string, params: Record<string, string | number> | undefined, ttlMs: number, fresh = false): Promise<any> {
+  if (fresh) {
+    // Skip cache entirely for fresh runs
+    return httpGet(path, params)
+  }
   const key = makeKey(path, params)
   const hit = ttlGet<any>(key)
   if (hit) return hit
@@ -91,8 +95,8 @@ async function getExchangeInfo(): Promise<ExchangeFilters> {
   return filters
 }
 
-async function getTopNUsdtSymbols(n: number): Promise<string[]> {
-  const data = await withRetry(() => httpGetCached('/fapi/v1/ticker/24hr', undefined, (config as any).cache?.ticker24hMs ?? 30000), config.retry)
+async function getTopNUsdtSymbols(n: number, fresh = false): Promise<string[]> {
+  const data = await withRetry(() => httpGetCached('/fapi/v1/ticker/24hr', undefined, (config as any).cache?.ticker24hMs ?? 30000, fresh), config.retry)
   const entries = Array.isArray(data) ? data : []
   const filtered = entries.filter((e: any) => e?.symbol?.endsWith('USDT'))
   const sorted = filtered.sort((a: any, b: any) => {
@@ -105,8 +109,8 @@ async function getTopNUsdtSymbols(n: number): Promise<string[]> {
   return unique.slice(0, n)
 }
 
-async function getTopGainersUsdtSymbols(n: number): Promise<string[]> {
-  const data = await withRetry(() => httpGetCached('/fapi/v1/ticker/24hr', undefined, (config as any).cache?.ticker24hMs ?? 30000), config.retry)
+async function getTopGainersUsdtSymbols(n: number, fresh = false): Promise<string[]> {
+  const data = await withRetry(() => httpGetCached('/fapi/v1/ticker/24hr', undefined, (config as any).cache?.ticker24hMs ?? 30000, fresh), config.retry)
   const entries = Array.isArray(data) ? data : []
   const filtered = entries.filter((e: any) => e?.symbol?.endsWith('USDT'))
   const sorted = filtered.sort((a: any, b: any) => {
@@ -123,8 +127,8 @@ async function getTopGainersUsdtSymbols(n: number): Promise<string[]> {
   return unique.slice(0, n)
 }
 
-async function getKlines(symbol: string, interval: string, limit: number): Promise<Kline[]> {
-  const run = () => httpGetCached('/fapi/v1/klines', { symbol, interval, limit }, (config as any).cache?.klinesMs ?? 30000)
+async function getKlines(symbol: string, interval: string, limit: number, fresh = false): Promise<Kline[]> {
+  const run = () => httpGetCached('/fapi/v1/klines', { symbol, interval, limit }, (config as any).cache?.klinesMs ?? 30000, fresh)
   let raw: any
   try {
     raw = await withRetry(run, config.retry)
@@ -350,7 +354,7 @@ async function ensureAtLeastOneH1ForAlts(symbols: string[], signal?: AbortSignal
   return
 }
 
-export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume'|'gainers'; desiredTopN?: number; includeSymbols?: string[] }): Promise<MarketRawSnapshot> {
+export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume'|'gainers'; desiredTopN?: number; includeSymbols?: string[]; fresh?: boolean }): Promise<MarketRawSnapshot> {
   const t0 = Date.now()
   const globalAc = new AbortController()
   const globalTimeout = setTimeout(() => globalAc.abort(), (config as any).globalDeadlineMs ?? 8000)
@@ -365,7 +369,8 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
   const effectiveAltTarget = hasIncludeSymbols ? Math.max(altTarget, altTarget + opts!.includeSymbols!.length) : altTarget
   // Pull a large candidate list (the endpoint returns all anyway). We oversample to reliably fill 28 H1-ready alts.
   const strategy = (opts?.universeStrategy || (config as any)?.universe?.strategy || 'volume') as 'volume'|'gainers'
-  const baseList = strategy === 'gainers' ? await getTopGainersUsdtSymbols(Math.max(200, desired * 10)) : await getTopNUsdtSymbols(Math.max(200, desired * 10))
+  const fresh = Boolean(opts?.fresh)
+  const baseList = strategy === 'gainers' ? await getTopGainersUsdtSymbols(Math.max(200, desired * 10), fresh) : await getTopNUsdtSymbols(Math.max(200, desired * 10), fresh)
   const extendedCandidates = baseList
   const allAltCandidates = extendedCandidates.filter(s => s !== 'BTCUSDT' && s !== 'ETHUSDT' && filteredSymbols.includes(s))
   // Normalize includeSymbols and force them to the front of the alt list (if supported on futures USDT)
@@ -484,8 +489,8 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
   const altIntervals: string[] = (config as any).klinesAlt ?? ['1h']
   const intervalKey = (itv: string) => (itv === '4h' ? 'H4' : itv === '1h' ? 'H1' : itv === '15m' ? 'M15' : itv === '5m' ? 'M5' : itv)
   const addK = (sym: string, itv: string) => klinesTasks.push(async () => {
-    const cache = await getBarsFromCache(sym, itv as any, config.candles)
-    const k = cache.length >= config.candles ? cache : await getKlines(sym, itv, config.candles)
+    const cache = fresh ? [] : await getBarsFromCache(sym, itv as any, config.candles)
+    const k = cache.length >= config.candles ? cache : await getKlines(sym, itv, config.candles, fresh)
     return { key: `${sym === 'BTCUSDT' ? 'btc' : sym === 'ETHUSDT' ? 'eth' : sym}.${intervalKey(itv)}`, k }
   })
   for (const itv of coreIntervals) addK('BTCUSDT', itv)
@@ -496,7 +501,7 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
       klinesTasks.push(async () => {
         if (key === 'H1' && (config as any).preferWSAltH1 === false) {
           const limit = (config as any).backfillH1Limit ?? 7
-          const raw = await httpGetCached('/fapi/v1/klines', { symbol: sym, interval: '1h', limit }, (config as any).cache?.klinesMs ?? 30000)
+          const raw = await httpGetCached('/fapi/v1/klines', { symbol: sym, interval: '1h', limit }, (config as any).cache?.klinesMs ?? 30000, fresh)
           const arr: Kline[] = Array.isArray(raw) ? raw.map((k: any) => ({ openTime: toUtcIso(k[0])!, open: toNumber(k[1])!, high: toNumber(k[2])!, low: toNumber(k[3])!, close: toNumber(k[4])!, volume: toNumber(k[5])!, closeTime: toUtcIso(k[6])! })) : []
           // Preserve existing backfill/top-up data if REST cache returns empty
           uniKlines[sym] = uniKlines[sym] || {}
@@ -507,8 +512,8 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
           const base = (arr.length > 0) ? arr : ((uniKlines[sym] as any).H1 || [])
           return { key: `${sym}.${key}`, k: base.slice(-config.candles) }
         }
-        const cached = await getBarsFromCache(sym, itv as any, config.candles)
-        const k = cached.length >= config.candles ? cached : await getKlines(sym, itv, config.candles)
+        const cached = fresh ? [] : await getBarsFromCache(sym, itv as any, config.candles)
+        const k = cached.length >= config.candles ? cached : await getKlines(sym, itv, config.candles, fresh)
         uniKlines[sym] = uniKlines[sym] || {}
         ;(uniKlines[sym] as any)[key] = k
         return { key: `${sym}.${key}`, k }
@@ -552,7 +557,7 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
   const latencyMs = Date.now() - t0
 
   const tickerMap = await (async () => {
-    const raw = await withRetry(() => httpGet('/fapi/v1/ticker/24hr'), config.retry)
+    const raw = await withRetry(() => httpGetCached('/fapi/v1/ticker/24hr', undefined, (config as any).cache?.ticker24hMs ?? 30000, fresh), config.retry)
     const out: Record<string, { volume24h_usd?: number; lastPrice?: number; closeTimeMs?: number; priceChange?: number; priceChangePercent?: number; volume?: number }> = {}
     for (const t of raw) {
       const sym = t?.symbol
