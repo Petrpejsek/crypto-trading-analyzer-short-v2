@@ -11,7 +11,7 @@ import { decideMarketStrict } from '../services/decider/market_decider_gpt'
 import { runFinalPicker as runFinalPickerServer } from '../services/decider/final_picker_gpt'
 import { runHotScreener } from '../services/decider/hot_screener_gpt'
 import { runEntryStrategy } from '../services/decider/entry_strategy_gpt'
-import { executeHotTradingOrders, type PlaceOrdersRequest, fetchMarkPrice, fetchLastTradePrice, fetchAllOpenOrders, fetchPositions } from '../services/trading/binance_futures'
+import { executeHotTradingOrders, type PlaceOrdersRequest, fetchMarkPrice, fetchLastTradePrice, fetchAllOpenOrders, fetchPositions, cancelOrder } from '../services/trading/binance_futures'
 import { ttlGet, ttlSet, makeKey } from './lib/ttlCache'
 import { preflightCompact } from '../services/decider/market_compact'
 import deciderCfg from '../config/decider.json'
@@ -41,6 +41,70 @@ wsCollector.start()
 setCollector(wsCollector)
 // Start Alt H1 collector prewarm
 startAltH1Collector({ symbols: [], onBar: () => {} })
+
+// Ephemeral in-memory store of last place_orders request/response for diagnostics
+let __lastPlaceOrders: { request: any; result: any } | null = null
+const __lastEntryBySymbol: Record<string, { input: any; output: any }> = {}
+
+// Trading settings (in-memory)
+let __pendingCancelAgeMin: number = 0 // minutes; 0 = Off
+let __sweeperDidAutoCancel: boolean = false // one-shot client handshake flag
+let __sweeperRunning = false
+let __sweeperTimer: NodeJS.Timeout | null = null
+
+function hasRealBinanceKeysGlobal(): boolean {
+  try {
+    const k = String(process.env.BINANCE_API_KEY || '')
+    const s = String(process.env.BINANCE_SECRET_KEY || '')
+    if (!k || !s) return false
+    if (k.includes('mock') || s.includes('mock')) return false
+    return true
+  } catch { return false }
+}
+
+async function sweepStaleOrdersOnce(): Promise<void> {
+  if (__sweeperRunning) return
+  if (!hasRealBinanceKeysGlobal()) return
+  if (!Number.isFinite(__pendingCancelAgeMin) || __pendingCancelAgeMin <= 0) return
+  __sweeperRunning = true
+  try {
+    const now = Date.now()
+    const ageMs = __pendingCancelAgeMin * 60 * 1000
+    const raw = await fetchAllOpenOrders()
+    const candidates = (Array.isArray(raw) ? raw : []).map((o: any) => ({
+      symbol: String(o?.symbol || ''),
+      orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0,
+      createdAtMs: (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? t : null })()
+    }))
+    .filter(o => o.symbol && o.orderId && Number.isFinite(o.createdAtMs as any))
+    .filter(o => (now - (o.createdAtMs as number)) > ageMs)
+
+    if (candidates.length === 0) return
+
+    let anyCancelled = false
+    const maxParallel = 4
+    for (let i = 0; i < candidates.length; i += maxParallel) {
+      const batch = candidates.slice(i, i + maxParallel)
+      const res = await Promise.allSettled(batch.map(c => cancelOrder(c.symbol, c.orderId)))
+      for (const r of res) {
+        if (r.status === 'fulfilled') anyCancelled = true
+      }
+    }
+    if (anyCancelled) {
+      __sweeperDidAutoCancel = true
+      try { ttlSet(makeKey('/api/open_orders'), null as any, 1) } catch {}
+    }
+  } catch (e) {
+    try { console.error('[SWEEPER_ERROR]', (e as any)?.message || e) } catch {}
+  } finally {
+    __sweeperRunning = false
+  }
+}
+
+function startOrderSweeper(): void {
+  if (__sweeperTimer) return
+  __sweeperTimer = setInterval(() => { sweepStaleOrdersOnce().catch(()=>{}) }, 5000)
+}
 
 function isDebugApi(): boolean {
   try { const v = String(process.env.DEBUG_API || '').toLowerCase(); return v === 'true' || v === '1' || v === 'yes'; } catch { return false }
@@ -81,6 +145,70 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+    if (url.pathname === '/api/trading/settings' && req.method === 'PUT') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        const chunks: Buffer[] = []
+        for await (const ch of req) chunks.push(ch as Buffer)
+        const bodyStr = Buffer.concat(chunks).toString('utf8')
+        const parsed = bodyStr ? JSON.parse(bodyStr) : null
+        const vRaw = parsed?.pending_cancel_age_min
+        const vNum = Number(vRaw)
+        if (!Number.isFinite(vNum) || vNum < 0) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'bad_pending_cancel_age_min' }))
+          return
+        }
+        __pendingCancelAgeMin = Math.floor(vNum)
+        // If client acknowledged and disabled, clear handshake flag
+        if (__pendingCancelAgeMin === 0) __sweeperDidAutoCancel = false
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, pending_cancel_age_min: __pendingCancelAgeMin }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    if (url.pathname === '/api/order' && req.method === 'DELETE') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        if (!hasRealBinanceKeysGlobal()) {
+          res.statusCode = 401
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ error: 'missing_binance_keys' }))
+          return
+        }
+        const symbolRaw = url.searchParams.get('symbol')
+        const orderIdRaw = url.searchParams.get('orderId')
+        if (!symbolRaw || !orderIdRaw) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'missing_symbol_or_orderId' }))
+          return
+        }
+        const symbol = String(symbolRaw).toUpperCase()
+        const orderId = Number(orderIdRaw)
+        if (!Number.isFinite(orderId) || orderId <= 0) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'bad_orderId' }))
+          return
+        }
+        const r = await cancelOrder(symbol, orderId)
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, result: r }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
     if (url.pathname === '/api/open_orders' && req.method === 'GET') {
       res.setHeader('Cache-Control', 'no-store')
       try {
@@ -91,15 +219,10 @@ const server = http.createServer(async (req, res) => {
           return
         }
         const key = makeKey('/api/open_orders')
-        const cached = ttlGet<any>(key)
-        if (cached) {
-          res.statusCode = 200
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify(cached))
-          return
-        }
-        const raw = await fetchAllOpenOrders()
-        const orders = Array.isArray(raw) ? raw.map((o: any) => ({
+        let base: any = ttlGet<any>(key)
+        if (!base) {
+          const raw = await fetchAllOpenOrders()
+          const orders = Array.isArray(raw) ? raw.map((o: any) => ({
           orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0,
           symbol: String(o?.symbol || ''),
           side: String(o?.side || ''),
@@ -110,17 +233,34 @@ const server = http.createServer(async (req, res) => {
           timeInForce: o?.timeInForce ? String(o.timeInForce) : null,
           reduceOnly: Boolean(o?.reduceOnly ?? false),
           closePosition: Boolean(o?.closePosition ?? false),
+          positionSide: (typeof o?.positionSide === 'string' && o.positionSide) ? String(o.positionSide) : null,
+          createdAt: (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })(),
           updatedAt: (() => { const t = Number(o?.updateTime); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })()
         })) : []
-        const body = { ok: true, count: orders.length, orders }
-        ttlSet(key, body, 1500)
+          const body = { ok: true, count: orders.length, orders }
+          ttlSet(key, body, 1500)
+          base = body
+        }
+        const response = { ...base, auto_cancelled_due_to_age: __sweeperDidAutoCancel }
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify(body))
+        res.end(JSON.stringify(response))
       } catch (e: any) {
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: false, error: e?.message || 'binance_error' }))
+      }
+      return
+    }
+    if (url.pathname === '/api/trading/settings' && req.method === 'GET') {
+      try {
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, pending_cancel_age_min: __pendingCancelAgeMin }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
       }
       return
     }
@@ -754,6 +894,7 @@ const server = http.createServer(async (req, res) => {
         console.log(`[PLACE_ORDERS] Processing ${parsed.orders.length} orders`)
         try { console.info('[PLACE_ORDERS_REQ]', { sample: parsed.orders.slice(0,3) }) } catch {}
         const result = await executeHotTradingOrders(parsed)
+        try { __lastPlaceOrders = { request: parsed, result } } catch {}
         if (!result?.success) {
           try {
             const firstErr = Array.isArray((result as any)?.orders)
@@ -769,10 +910,20 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify(result))
       } catch (e: any) {
         console.error('[PLACE_ORDERS_ERROR]', e.message)
+        try { __lastPlaceOrders = { request: null, result: { success: false, error: e?.message || 'unknown' } } } catch {}
         res.statusCode = 400
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
       }
+      return
+    }
+
+    // Ephemeral debug: return last place_orders request/response
+    if (url.pathname === '/api/debug/last_place_orders' && req.method === 'GET') {
+      const out = __lastPlaceOrders ? { ok: true, ...__lastPlaceOrders } : { ok: false, message: 'none' }
+      res.statusCode = 200
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify(out))
       return
     }
     
@@ -972,6 +1123,8 @@ const server = http.createServer(async (req, res) => {
           console.info('[HS_API_REQ]', { coins: Array.isArray(input.coins) ? input.coins.length : null, strategy: input.strategy || null, bytes: Buffer.byteLength(bodyStr, 'utf8') })
         } catch {}
 
+        // Ensure temperature override via env (default to 0.2)
+        try { if (!process.env.HOT_SCREENER_TEMPERATURE) process.env.HOT_SCREENER_TEMPERATURE = '0.2' } catch {}
         const hsRes = await runHotScreener(input)
 
         // Debug: outbound result summary
@@ -1018,6 +1171,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         const esRes = await runEntryStrategy(input)
+        try { if (esRes?.ok && esRes?.data?.symbol) __lastEntryBySymbol[esRes.data.symbol] = { input, output: esRes } } catch {}
         res.statusCode = esRes.ok ? 200 : 422
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify(esRes))
@@ -1026,6 +1180,15 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: false, code: 'unknown', latencyMs: 0, data: null, meta: { error: e?.message || 'unknown' } }))
       }
+      return
+    }
+
+    if (url.pathname === '/api/debug/entry_last' && req.method === 'GET') {
+      const sym = String(url.searchParams.get('symbol') || '')
+      const out = sym && __lastEntryBySymbol[sym] ? { ok: true, ...__lastEntryBySymbol[sym] } : { ok: false, message: 'none' }
+      res.statusCode = 200
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify(out))
       return
     }
 
@@ -1040,6 +1203,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`)
+  try { startOrderSweeper() } catch (e) { console.error('[SWEEPER_START_ERR]', (e as any)?.message || e) }
 })
 
 

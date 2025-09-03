@@ -56,16 +56,33 @@ class BinanceFuturesAPI {
 
   private async request(method: string, endpoint: string, params: Record<string, any> = {}): Promise<any> {
     const timestamp = Date.now()
-    const queryParams: Record<string,string> = { ...Object.fromEntries(Object.entries(params).map(([k,v]) => [k, String(v)])), timestamp: String(timestamp) }
+    // Filter out undefined/null/false values and ALWAYS drop reduceOnly
+    const filteredParams = Object.fromEntries(
+      Object.entries(params)
+        .filter(([k, v]) => {
+          if (k === 'reduceOnly') return false
+          if (v === undefined || v === null) return false
+          if (typeof v === 'boolean' && v === false) return false
+          return true
+        })
+        .map(([k, v]) => [k, String(v)])
+    ) as Record<string, string>
+    const queryParams: Record<string,string> = { ...filteredParams, timestamp: String(timestamp) }
     const queryString = new URLSearchParams(queryParams).toString()
     const signature = this.sign(queryString)
     const url = `${this.baseURL}${endpoint}?${queryString}&signature=${signature}`
 
     const DEBUG = String(process.env.DEBUG_BINANCE ?? '1').toLowerCase() !== '0'
     if (DEBUG) {
-      const safe = { method, endpoint, params: { ...params, timestamp: '<ts>' } }
+      const safe = { method, endpoint, params: { ...params, timestamp: '<ts>' }, filtered_keys: Object.keys(filteredParams) }
       // eslint-disable-next-line no-console
       console.info('[BINANCE_REQ]', safe)
+      if (method === 'POST' && endpoint === '/fapi/v1/order') {
+        try {
+          // eslint-disable-next-line no-console
+          console.info('[BINANCE_ORDER_REQ_PARAMS]', filteredParams)
+        } catch {}
+      }
     }
 
     const response = await fetch(url, {
@@ -193,6 +210,11 @@ export async function fetchPositions(): Promise<any[]> {
   return api.getPositions()
 }
 
+export async function cancelOrder(symbol: string, orderId: number | string): Promise<any> {
+  const api = getBinanceAPI()
+  return (api as any).request('DELETE', '/fapi/v1/order', { symbol, orderId })
+}
+
 // Initialize only when needed to avoid startup errors
 let binanceAPI: BinanceFuturesAPI | null = null
 
@@ -219,6 +241,34 @@ async function waitForStopOrdersCleared(symbol: string, timeoutMs = 4000): Promi
   }
 }
 
+async function waitForPositionSize(symbol: string, {
+  sideLong,
+  positionSide
+}: { sideLong: boolean; positionSide?: 'LONG' | 'SHORT' }, timeoutMs = 5000): Promise<number> {
+  const api = getBinanceAPI()
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const positions = await api.getPositions()
+      const pos = (Array.isArray(positions) ? positions : []).find((p: any) => String(p?.symbol) === symbol)
+      if (pos) {
+        const amt = Number(pos.positionAmt)
+        const ps = String(pos.positionSide || '').toUpperCase()
+        if (positionSide) {
+          if (ps === positionSide && Number.isFinite(amt) && Math.abs(amt) > 0) return Math.abs(amt)
+        } else {
+          // One-way mode: sign encodes side
+          if (Number.isFinite(amt) && Math.abs(amt) > 0) {
+            if ((sideLong && amt > 0) || (!sideLong && amt < 0)) return Math.abs(amt)
+          }
+        }
+      }
+    } catch {}
+    await sleep(200)
+  }
+  return 0
+}
+
 export async function executeHotTradingOrders(request: PlaceOrdersRequest): Promise<any> {
   console.log('[BINANCE_ORDERS] Executing orders for', request.orders.length, 'symbols')
   
@@ -233,7 +283,18 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
 
   for (const order of request.orders) {
     try {
-      console.log(`[BINANCE_ORDER] Processing ${order.symbol} - ${order.side} - ${order.strategy} - ${order.tpLevel}`)
+              console.log(`[BINANCE_ORDER] Processing ${order.symbol} - ${order.side} - ${order.strategy} - ${order.tpLevel}`)
+        console.log(`[BINANCE_ORDER_VALUES] RAW from client: entry=${order.entry}, sl=${order.sl}, tp=${order.tp}`)
+      const dbg: any = {
+        symbol: order.symbol,
+        side: order.side,
+        strategy: order.strategy,
+        tpLevel: order.tpLevel,
+        requestedType: order.orderType || null,
+        entryRaw: (Number.isFinite(order.entry as any) ? Number(order.entry) : null),
+        slRaw: Number(order.sl),
+        tpRaw: Number(order.tp)
+      }
       
       // Check if real API keys are configured (not mock ones)
       const hasRealKeys = process.env.BINANCE_API_KEY && 
@@ -253,6 +314,8 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
 
         const lastPrice = await api.getLastPrice(order.symbol)
         const markPrice = await api.getMarkPrice(order.symbol)
+        dbg.lastPrice = lastPrice
+        dbg.markPrice = markPrice
         // Interpret 'amount' jako margin v USD; notional = amount * leverage
         const notionalUsd = order.amount * order.leverage
 
@@ -262,6 +325,9 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
         const tickSize = Number(rawTick)
         const minPrice = Number(priceFilter?.minPrice)
         const maxPrice = Number(priceFilter?.maxPrice)
+        dbg.tickSize = tickSize
+        dbg.minPrice = minPrice
+        dbg.maxPrice = Number.isFinite(maxPrice) ? maxPrice : null
         if (!Number.isFinite(tickSize) || tickSize <= 0) {
           throw new Error('tick_mismatch:missing_price_filter')
         }
@@ -283,34 +349,24 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
           if (p < minPrice - 1e-12) throw new Error(`${label}_lt_min:${minPrice}`)
           if (Number.isFinite(maxPrice) && maxPrice > 0 && p > (maxPrice + 1e-12)) throw new Error(`${label}_gt_max:${maxPrice}`)
         }
-        const fmt = (p: number) => p.toFixed(tickDecimals)
+        // STRICT 1:1: Pošli hodnoty přesně jak přišly z GPT bez zaokrouhlování
+        const fmt = (p: number) => String(p)
 
         const slNum = Number(order.sl)
         const tpNum = Number(order.tp)
-        assertOnTick(slNum, 'sl')
-        assertOnTick(tpNum, 'tp')
-        assertBounds(slNum, 'sl')
-        assertBounds(tpNum, 'tp')
+        // Základní validace bez tick/bounds kontrol (nechej na Binance)
+        if (!Number.isFinite(slNum) || slNum <= 0) throw new Error('sl_invalid')
+        if (!Number.isFinite(tpNum) || tpNum <= 0) throw new Error('tp_invalid')
         const slPrice = fmt(slNum)
         const tpPrice = fmt(tpNum)
+        // SL 1:1 s GPT hodnotou – žádný offset mezi stopPrice a limit price
+        const slLimitPrice = fmt(slNum)
+        dbg.sl = slNum
+        dbg.tp = tpNum
+        dbg.slFmt = slPrice
+        dbg.tpFmt = tpPrice
 
-        // Guard against immediate trigger (use MARK_PRICE because workingType='MARK_PRICE')
-        if (sideLong) {
-          // SL must be strictly < markPrice by at least 1 tick; TP must be strictly > markPrice by at least 1 tick
-          if (!((markPrice - slNum) > tickSize - 1e-12)) {
-            throw new Error(`sl_would_trigger: sl=${slNum} mark=${markPrice}`)
-          }
-          if (!((tpNum - markPrice) > tickSize - 1e-12)) {
-            throw new Error(`tp_would_trigger: tp=${tpNum} mark=${markPrice}`)
-          }
-        } else {
-          if (!((slNum - markPrice) > tickSize - 1e-12)) {
-            throw new Error(`sl_would_trigger: sl=${slNum} mark=${markPrice}`)
-          }
-          if (!((markPrice - tpNum) > tickSize - 1e-12)) {
-            throw new Error(`tp_would_trigger: tp=${tpNum} mark=${markPrice}`)
-          }
-        }
+        // No TP/SL mark-based guards: honor exact GPT values (exchange will handle immediate triggers)
 
         // Entry order mode (STRICT: nikdy nespadni na MARKET, pokud bylo vyžádáno LIMIT/STOP a chybí entry)
         const tRaw = String(order.orderType||'').toLowerCase()
@@ -320,6 +376,8 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
         }
         const resolvedType = tRaw as 'market'|'limit'|'stop'|'stop_limit'
         const hasEntry = Number.isFinite(order.entry)
+        dbg.resolvedType = resolvedType
+        dbg.hasEntry = hasEntry
         console.info('[ENTRY_ROUTING]', { symbol: order.symbol, requested: order.orderType || null, strategy: order.strategy, resolvedType, entry: order.entry, hasEntry })
 
         let entryRes: any
@@ -327,41 +385,80 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
         if (resolvedType === 'limit') {
           if (!hasEntry) throw new Error('limit_entry_missing')
           const entryVal = Number(order.entry)
-          assertOnTick(entryVal, 'entry')
-          assertBounds(entryVal, 'entry')
+          if (!Number.isFinite(entryVal) || entryVal <= 0) throw new Error('entry_invalid')
           const entryPx = fmt(entryVal)
+          // Removed marketability guard to allow EXACT 1:1 LIMIT entries as provided by GPT
           try { console.info('[ORDER_VALUES]', { symbol: order.symbol, mode: 'LIMIT', entry: entryPx, sl: slPrice, tp: tpPrice }) } catch {}
+          dbg.entryMode = 'LIMIT'
+          dbg.entryPrice = Number(entryPx)
           qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, Number(entryPx))
-          entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'LIMIT', price: entryPx, timeInForce: 'GTC', quantity: qtyForEntry, positionSide })
+          const entryParams: any = { symbol: order.symbol, side: entrySide, type: 'LIMIT', price: entryPx, timeInForce: 'GTC', quantity: qtyForEntry }
+          if (positionSide) entryParams.positionSide = positionSide
+          entryRes = await api.placeOrder(entryParams)
         } else if (resolvedType === 'stop') {
           if (!hasEntry) throw new Error('stop_entry_missing')
           const trigVal = Number(order.entry)
-          assertOnTick(trigVal, 'entry')
-          assertBounds(trigVal, 'entry')
+          if (!Number.isFinite(trigVal) || trigVal <= 0) throw new Error('entry_invalid')
           const trig = fmt(trigVal)
+          // Keep exact STOP_MARKET per GPT without additional guards (server still validates tick/min/max)
           // STRICT: žádný fallback na MARKET – STOP_MARKET přesně na GPT triggeru
           try { console.info('[ORDER_VALUES]', { symbol: order.symbol, mode: 'STOP_MARKET', entry: trig, sl: slPrice, tp: tpPrice }) } catch {}
+          dbg.entryMode = 'STOP_MARKET'
+          dbg.entryPrice = Number(trig)
           qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, Number(trig))
-          entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'STOP_MARKET', stopPrice: trig, workingType: 'MARK_PRICE', quantity: qtyForEntry, positionSide })
+          const entryParams: any = { symbol: order.symbol, side: entrySide, type: 'STOP_MARKET', stopPrice: trig, workingType: 'MARK_PRICE', quantity: qtyForEntry }
+          if (positionSide) entryParams.positionSide = positionSide
+          entryRes = await api.placeOrder(entryParams)
         } else if (resolvedType === 'stop_limit') {
           if (!hasEntry) throw new Error('stop_limit_entry_missing')
           const trigVal = Number(order.entry)
-          assertOnTick(trigVal, 'entry')
-          assertBounds(trigVal, 'entry')
+          if (!Number.isFinite(trigVal) || trigVal <= 0) throw new Error('entry_invalid')
           const trig = fmt(trigVal)
+          // Keep exact STOP (stop-limit) per GPT without immediate-trigger guard
           // STRICT: žádný fallback na MARKET – STOP (stop-limit) na GPT triggeru
           try { console.info('[ORDER_VALUES]', { symbol: order.symbol, mode: 'STOP_LIMIT', entry: trig, sl: slPrice, tp: tpPrice }) } catch {}
+          dbg.entryMode = 'STOP_LIMIT'
+          dbg.entryPrice = Number(trig)
           qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, Number(trig))
-          entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'STOP', stopPrice: trig, price: trig, timeInForce: 'GTC', quantity: qtyForEntry, positionSide, workingType: 'MARK_PRICE' })
+          const entryParams: any = { symbol: order.symbol, side: entrySide, type: 'STOP', stopPrice: trig, price: trig, timeInForce: 'GTC', quantity: qtyForEntry, workingType: 'MARK_PRICE' }
+          if (positionSide) entryParams.positionSide = positionSide
+          entryRes = await api.placeOrder(entryParams)
         } else {
           // MARKET je povolen pouze pokud klient poslal 'market'
           qtyForEntry = await api.calculateQuantity(order.symbol, notionalUsd, markPrice)
-          entryRes = await api.placeOrder({ symbol: order.symbol, side: entrySide, type: 'MARKET', quantity: qtyForEntry, positionSide })
+          dbg.entryMode = 'MARKET'
+          dbg.entryPrice = markPrice
+          const entryParams: any = { symbol: order.symbol, side: entrySide, type: 'MARKET', quantity: qtyForEntry }
+          if (positionSide) entryParams.positionSide = positionSide
+          entryRes = await api.placeOrder(entryParams)
         }
-        // Binance UM Futures: reduceOnly není povoleno pro STOP_MARKET/TP_MARKET – použij closePosition
-        const slRes = await api.placeOrder({ symbol: order.symbol, side: exitSide, type: 'STOP_MARKET', stopPrice: slPrice, workingType: 'MARK_PRICE', closePosition: true, positionSide })
-        const tpRes = await api.placeOrder({ symbol: order.symbol, side: exitSide, type: 'TAKE_PROFIT_MARKET', stopPrice: tpPrice, workingType: 'MARK_PRICE', closePosition: true, positionSide })
+        // EXIT ORDERS: založ hned po odeslání entry pomocí plánovaného qty
+        const qtyForExit = qtyForEntry
 
+        // OCO-like: použij CLOSE-POSITION triggery, ať se nevyskytuje reduceOnly
+        const slRes = await api.placeOrder({
+          symbol: order.symbol,
+          side: exitSide,
+          type: 'STOP_MARKET',
+          stopPrice: slPrice,
+          timeInForce: 'GTC',
+          workingType: 'MARK_PRICE',
+          closePosition: true,
+          positionSide
+        })
+        const tpRes = await api.placeOrder({
+          symbol: order.symbol,
+          side: exitSide,
+          type: 'TAKE_PROFIT_MARKET',
+          stopPrice: tpPrice,
+          timeInForce: 'GTC',
+          workingType: 'MARK_PRICE',
+          closePosition: true,
+          positionSide
+        })
+
+        let verifyOpen: any[] = []
+        try { verifyOpen = await api.getOpenOrders(order.symbol) } catch {}
         results.push({
           symbol: order.symbol,
           status: 'executed',
@@ -372,7 +469,9 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
           leverage: order.leverage,
           entry_order: entryRes,
           sl_order: slRes,
-          tp_order: tpRes
+          tp_order: tpRes,
+          open_orders_after: Array.isArray(verifyOpen) ? verifyOpen : [],
+          debug: dbg
         })
       } else {
         // Mock response when no real keys
@@ -386,7 +485,8 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
           leverage: order.leverage,
           sl: order.sl,
           tp: order.tp,
-          message: 'Mock order - Add BINANCE_API_KEY & BINANCE_SECRET_KEY to .env.local for real trading'
+          message: 'Mock order - Add BINANCE_API_KEY & BINANCE_SECRET_KEY to .env.local for real trading',
+          debug: dbg
         })
       }
       
@@ -414,7 +514,8 @@ export async function executeHotTradingOrders(request: PlaceOrdersRequest): Prom
       results.push({
         symbol: order.symbol,
         status: 'error',
-        error: friendly
+        error: friendly,
+        debug: { ...(typeof dbg === 'object' ? dbg : {}), errorRaw: raw }
       })
     }
   }

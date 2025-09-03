@@ -11,6 +11,8 @@ type OpenOrderUI = {
   timeInForce: string | null
   reduceOnly: boolean
   closePosition: boolean
+  positionSide?: 'LONG' | 'SHORT' | string | null
+  createdAt?: string | null
   updatedAt: string | null
 }
 
@@ -35,6 +37,9 @@ export const OrdersPanel: React.FC = () => {
   const [lastRefresh, setLastRefresh] = useState<string | null>(null)
   const timerRef = useRef<number | undefined>(undefined)
   const [marks, setMarks] = useState<Record<string, number>>({})
+  const [pendingCancelAgeMin, setPendingCancelAgeMin] = useState<number>(() => {
+    try { const v = localStorage.getItem('pending_cancel_age_min'); const n = v == null ? 0 : Number(v); return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0 } catch { return 0 }
+  })
 
   const fetchJson = async (input: string, init?: RequestInit & { timeoutMs?: number }): Promise<{ ok: boolean; status: number; json: any | null }> => {
     const ac = new AbortController()
@@ -71,6 +76,14 @@ export const OrdersPanel: React.FC = () => {
       const positionsArr: PositionUI[] = Array.isArray(pos.json?.positions) ? pos.json.positions : []
       setOrders(ordersArr)
       setPositions(positionsArr)
+      // Handshake: if server indicates auto-cancel happened, disable locally and on server
+      try {
+        if (ord.json && ord.json.auto_cancelled_due_to_age) {
+          localStorage.removeItem('pending_cancel_age_min')
+          setPendingCancelAgeMin(0)
+          await fetchJson('/api/trading/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pending_cancel_age_min: 0 }), timeoutMs: 6000 })
+        }
+      } catch {}
       // Refresh marks for BUY orders only (to gauge distance)
       await refreshMarksForOrders(ordersArr)
       setLastRefresh(new Date().toISOString())
@@ -128,6 +141,60 @@ export const OrdersPanel: React.FC = () => {
       if (v <= 1.5) return '#f59e0b' // amber (0.5–1.5%)
       return '#dc2626' // red (>1.5%)
     } catch { return undefined }
+  }
+
+  const ageMinutes = (iso: string | null | undefined): number | null => {
+    try {
+      if (!iso) return null
+      const t = new Date(iso).getTime()
+      if (!Number.isFinite(t)) return null
+      const diffMs = Date.now() - t
+      if (diffMs < 0) return 0
+      return Math.floor(diffMs / 60000)
+    } catch { return null }
+  }
+  const colorForAge = (min: number | null | undefined): string | undefined => {
+    try {
+      const v = Number(min)
+      if (!Number.isFinite(v)) return undefined
+      const x = Number(pendingCancelAgeMin)
+      if (Number.isFinite(x) && x > 0) {
+        if (v <= x) return '#16a34a'
+        if (v <= 2 * x) return '#f59e0b'
+        return '#dc2626'
+      } else {
+        if (v <= 40) return '#16a34a'
+        if (v <= 60) return '#f59e0b'
+        return '#dc2626'
+      }
+    } catch { return undefined }
+  }
+  const fmtAge = (min: number | null | undefined): string => {
+    try {
+      const v = Number(min)
+      if (!Number.isFinite(v)) return '-'
+      if (v < 60) return `${v}m`
+      const h = Math.floor(v / 60)
+      const m = v % 60
+      return m ? `${h}h ${m}m` : `${h}h`
+    } catch { return '-' }
+  }
+
+  const onChangePendingCancel = async (val: number) => {
+    try {
+      setPendingCancelAgeMin(val)
+      if (val > 0) localStorage.setItem('pending_cancel_age_min', String(val))
+      else localStorage.setItem('pending_cancel_age_min', '0')
+      const r = await fetch('/api/trading/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pending_cancel_age_min: val })
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(()=>null)
+        throw new Error(String(j?.error || `HTTP ${r.status}`))
+      }
+    } catch (e: any) {
+      setError(`pending_cancel_save_failed:${e?.message || 'unknown'}`)
+    }
   }
 
   const pickOrderTargetPrice = (o: OpenOrderUI): number | null => {
@@ -204,6 +271,17 @@ export const OrdersPanel: React.FC = () => {
           <span style={{ fontSize: 12, opacity: .8 }}>Auto refresh: {Math.round(POLL_MS/1000)}s</span>
           <button className="btn" onClick={load} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
           {lastRefresh ? (<span style={{ fontSize: 12, opacity: .7 }}>Last: {new Date(lastRefresh).toLocaleTimeString()}</span>) : null}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12, opacity: .8 }}>Pending cancel:</span>
+            <select value={pendingCancelAgeMin} onChange={e => onChangePendingCancel(Number(e.target.value))} style={{ fontSize: 12 }}>
+              <option value={0}>Off</option>
+              <option value={30}>30 min</option>
+              <option value={40}>40 min</option>
+              <option value={60}>60 min</option>
+              <option value={90}>90 min</option>
+              <option value={120}>120 min</option>
+            </select>
+          </div>
         </div>
       </div>
       {error ? (
@@ -291,6 +369,7 @@ export const OrdersPanel: React.FC = () => {
                   <th style={{ textAlign: 'left' }}>ID</th>
                   <th style={{ textAlign: 'left' }}>Symbol</th>
                   <th style={{ textAlign: 'left' }}>Side</th>
+                  <th style={{ textAlign: 'left' }}>Pos</th>
                   <th style={{ textAlign: 'left' }}>Type</th>
                   <th style={{ textAlign: 'right' }}>Qty</th>
                   <th style={{ textAlign: 'right' }}>Price</th>
@@ -300,6 +379,7 @@ export const OrdersPanel: React.FC = () => {
                   <th style={{ textAlign: 'left' }}>TIF</th>
                   <th style={{ textAlign: 'left' }}>Flags</th>
                   <th style={{ textAlign: 'left' }}>Updated</th>
+                  <th style={{ textAlign: 'left' }}>Age</th>
                 </tr>
               </thead>
               <tbody>
@@ -308,6 +388,7 @@ export const OrdersPanel: React.FC = () => {
                     <td>{o.orderId}</td>
                     <td>{o.symbol}</td>
                     <td>{o.side}</td>
+                    <td>{(() => { const ps = String(o.positionSide||''); if (!ps) return '-'; const col = ps==='LONG'?'#16a34a': ps==='SHORT'?'#dc2626': undefined; return <span style={{ color: col }}>{ps}</span> })()}</td>
                     <td>{o.type}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(o.qty, 4)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(o.price, 6)}</td>
@@ -328,6 +409,7 @@ export const OrdersPanel: React.FC = () => {
                     <td>{o.timeInForce || '-'}</td>
                     <td>{[o.reduceOnly ? 'reduceOnly' : null, o.closePosition ? 'closePosition' : null].filter(Boolean).join(', ') || '-'}</td>
                     <td>{o.updatedAt ? new Date(o.updatedAt).toLocaleTimeString() : '-'}</td>
+                    <td>{(() => { const min = ageMinutes(o.createdAt || null); const color = colorForAge(min); return <span style={{ color }}>{fmtAge(min)}</span> })()}</td>
                   </tr>
                 ))}
               </tbody>
