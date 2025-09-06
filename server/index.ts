@@ -71,6 +71,8 @@ function pushAudit(evt: AuditEvent): void {
 }
 let __sweeperRunning = false
 let __sweeperTimer: NodeJS.Timeout | null = null
+// Global backoff when Binance returns -1003 (temporary ban)
+let __binanceBackoffUntilMs: number = 0
 
 function hasRealBinanceKeysGlobal(): boolean {
   try {
@@ -86,6 +88,8 @@ async function sweepStaleOrdersOnce(): Promise<void> {
   if (__sweeperRunning) return
   if (!hasRealBinanceKeysGlobal()) return
   if (!Number.isFinite(__pendingCancelAgeMin) || __pendingCancelAgeMin <= 0) return
+  // During Binance backoff window, do not hit REST at all
+  if (Number(__binanceBackoffUntilMs) > Date.now()) return
   __sweeperRunning = true
   try {
     const now = Date.now()
@@ -228,14 +232,33 @@ const server = http.createServer(async (req, res) => {
           return v
         }
         const symbol = normalizeSymbol(sym)
+        if (Number(__binanceBackoffUntilMs) > Date.now()) {
+          const waitSec = Math.ceil((__binanceBackoffUntilMs - Date.now())/1000)
+          res.statusCode = 429
+          res.setHeader('Retry-After', String(Math.max(1, waitSec)))
+          res.end(JSON.stringify({ error: 'banned_until', until: __binanceBackoffUntilMs }))
+          return
+        }
         const [mark, last] = await Promise.all([fetchMarkPrice(symbol), fetchLastTradePrice(symbol)])
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ symbol, mark, last }))
       } catch (e: any) {
+        const msg = String(e?.message || '')
+        // Detect Binance -1003 ban and expose structured backoff for UI
+        const bannedMatch = msg.match(/banned\s+until\s+(\d{10,})/i)
+        if (bannedMatch && bannedMatch[1]) {
+          __binanceBackoffUntilMs = Number(bannedMatch[1])
+          res.statusCode = 429
+          const waitSec = Math.ceil((__binanceBackoffUntilMs - Date.now())/1000)
+          res.setHeader('Retry-After', String(Math.max(1, waitSec)))
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ error: 'banned_until', until: __binanceBackoffUntilMs }))
+          return
+        }
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+        res.end(JSON.stringify({ error: msg || 'unknown' }))
       }
       return
     }
@@ -484,8 +507,24 @@ const server = http.createServer(async (req, res) => {
       try {
         if (!hasRealBinanceKeys()) { res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_binance_keys' })); return }
         // WS user-data: pokud ještě nepřišla událost, vrátíme prázdná pole (NO REST fallback pro user-data)
-        const positionsRaw = isUserDataReady('positions') ? getPositionsInMemory() : []
-        const ordersRaw = isUserDataReady('orders') ? getOpenOrdersInMemory() : []
+        let positionsRaw = isUserDataReady('positions') ? getPositionsInMemory() : []
+        let ordersRaw = isUserDataReady('orders') ? getOpenOrdersInMemory() : []
+        let seededFromRest = false
+        // Cold-start seed via REST only if not in backoff window
+        try {
+          if (!(Number(__binanceBackoffUntilMs) > Date.now())) {
+            const needOrders = !Array.isArray(ordersRaw) || ordersRaw.length === 0
+            const needPositions = !Array.isArray(positionsRaw) || positionsRaw.length === 0
+            if ((needOrders || needPositions) && hasRealBinanceKeys()) {
+              const [o, p] = await Promise.allSettled([
+                needOrders ? fetchAllOpenOrders() : Promise.resolve(ordersRaw),
+                needPositions ? fetchPositions() : Promise.resolve(positionsRaw)
+              ])
+              if (o.status === 'fulfilled' && Array.isArray(o.value)) { ordersRaw = o.value as any[]; seededFromRest = true }
+              if (p.status === 'fulfilled' && Array.isArray(p.value)) { positionsRaw = p.value as any[]; seededFromRest = true }
+            }
+          }
+        } catch {}
         // Fast-path: průběžně uklízej waiting TP, pokud už není ENTRY a ani pozice
         try {
           const hasEntry = (o: any): boolean => String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT' && !(o?.reduceOnly || o?.closePosition)
@@ -516,22 +555,60 @@ const server = http.createServer(async (req, res) => {
         } catch {}
         // Spusť waiting TP processing pass na základě pozic (bez dalšího REST čtení)
         try { waitingTpProcessPassFromPositions(positionsRaw).catch(()=>{}) } catch {}
-        // Build marks map via REST for symbols present in orders/positions (keeps one client call)
+        // Build marks map via REST for a SMALL prioritized set to avoid rate limits
         const marks: Record<string, number> = {}
         try {
-          const symSet = new Set<string>()
-          const push = (s: any) => { const v = String(s||''); if (v) symSet.add(v) }
-          for (const o of (Array.isArray(ordersRaw)?ordersRaw:[])) push(o?.symbol)
-          for (const p of (Array.isArray(positionsRaw)?positionsRaw:[])) push(p?.symbol)
-          const arr = Array.from(symSet)
-          const limit = 4
-          for (let i=0;i<arr.length;i+=limit) {
-            const batch = arr.slice(i, i+limit)
-            const settled = await Promise.allSettled(batch.map(async (s)=>({ s, m: await fetchMarkPrice(String(s)) })))
-            for (const r of settled) {
-              if (r.status === 'fulfilled') {
-                const { s, m } = r.value as any
-                if (Number.isFinite(m)) marks[s] = Number(m)
+          if (Number(__binanceBackoffUntilMs) > Date.now()) { throw new Error(`banned until ${__binanceBackoffUntilMs}`) }
+          // 1) ENTRY orders (BUY LIMIT, not reduceOnly/closePosition)
+          const entrySymbols: string[] = []
+          try {
+            for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
+              try {
+                const isEntry = String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT' && !(o?.reduceOnly || o?.closePosition)
+                if (isEntry) entrySymbols.push(String(o?.symbol || ''))
+              } catch {}
+            }
+          } catch {}
+          // 2) Non-zero positions only
+          const posSymbols: string[] = []
+          try {
+            for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
+              try {
+                const sym = String(p?.symbol || '')
+                const amt = Number(p?.positionAmt)
+                if (sym && Number.isFinite(amt) && Math.abs(amt) > 0) posSymbols.push(sym)
+              } catch {}
+            }
+          } catch {}
+          // 3) Waiting TP symbols
+          const waitingListSafe = (()=>{ try { return getWaitingTpList() } catch { return [] } })()
+          const waitingSymbols: string[] = (Array.isArray(waitingListSafe) ? waitingListSafe : []).map((w:any)=>String(w?.symbol||'')).filter(Boolean)
+          // Priority: waiting -> entries -> positions, unique and hard cap
+          const ordered: string[] = []
+          const pushUniq = (s: string) => { const v = String(s||''); if (v && !ordered.includes(v)) ordered.push(v) }
+          for (const s of waitingSymbols) pushUniq(s)
+          for (const s of entrySymbols) pushUniq(s)
+          for (const s of posSymbols) pushUniq(s)
+          const MAX_MARKS = 24
+          const arr = ordered.slice(0, MAX_MARKS)
+          if (arr.length > 0) {
+            const limit = 4
+            for (let i = 0; i < arr.length; i += limit) {
+              const batch = arr.slice(i, i + limit)
+              const settled = await Promise.allSettled(batch.map(async (s)=>({ s, m: await fetchMarkPrice(String(s)) })))
+              for (const r of settled) {
+                if (r.status === 'fulfilled') {
+                  const { s, m } = r.value as any
+                  if (Number.isFinite(m)) marks[s] = Number(m)
+                } else {
+                  try {
+                    const msg = String(((r as any)?.reason?.message) || (r as any)?.reason || '')
+                    const bannedMatch = msg.match(/banned\s+until\s+(\d{10,})/i)
+                    if (bannedMatch && bannedMatch[1]) {
+                      __binanceBackoffUntilMs = Number(bannedMatch[1])
+                    }
+                  } catch {}
+                }
               }
             }
           }
