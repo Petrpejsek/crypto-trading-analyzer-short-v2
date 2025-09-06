@@ -87,7 +87,7 @@ function hasRealBinanceKeysGlobal(): boolean {
   } catch { return false }
 }
 
-async function sweepStaleOrdersOnce(): Promise<void> {
+async function sweepStaleOrdersOnce(): Promise<number> {
   if (__sweeperRunning) return
   if (!hasRealBinanceKeysGlobal()) return
   if (!Number.isFinite(__pendingCancelAgeMin) || __pendingCancelAgeMin <= 0) return
@@ -117,9 +117,9 @@ async function sweepStaleOrdersOnce(): Promise<void> {
       .filter(o => o.symbol && o.orderId && Number.isFinite(o.createdAtMs as any))
       .filter(o => (now - (o.createdAtMs as number)) > ageMs)
 
-    if (candidates.length === 0) return
+    if (candidates.length === 0) return 0
 
-    let anyCancelled = false
+    let cancelled = 0
     const maxParallel = 4
     for (let i = 0; i < candidates.length; i += maxParallel) {
       const batch = candidates.slice(i, i + maxParallel)
@@ -129,15 +129,18 @@ async function sweepStaleOrdersOnce(): Promise<void> {
         return r
       }))
       for (const r of res) {
-        if (r.status === 'fulfilled') anyCancelled = true
+        if (r.status === 'fulfilled') cancelled++
       }
     }
-    if (anyCancelled) {
+    if (cancelled > 0) {
       __sweeperDidAutoCancel = true
       try { ttlSet(makeKey('/api/open_orders'), null as any, 1) } catch {}
     }
+    try { console.error('[SWEEPER_PASS]', { age_min: __pendingCancelAgeMin, cancelled, candidates: candidates.length }) } catch {}
+    return cancelled
   } catch (e) {
     try { console.error('[SWEEPER_ERROR]', (e as any)?.message || e) } catch {}
+    return 0
   } finally {
     __sweeperRunning = false
   }
