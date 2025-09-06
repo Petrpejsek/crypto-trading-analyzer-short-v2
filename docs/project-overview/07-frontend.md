@@ -22,3 +22,4 @@
 - WS snapshot není seedován RESTem – UI respektuje prázdné seznamy, dokud WS není ready.
 
 
+

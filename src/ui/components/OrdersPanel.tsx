@@ -14,6 +14,8 @@ type OpenOrderUI = {
   positionSide?: 'LONG' | 'SHORT' | string | null
   createdAt?: string | null
   updatedAt: string | null
+  clientOrderId?: string | null
+  isExternal?: boolean
 }
 
 type WaitingOrderUI = {
@@ -235,7 +237,11 @@ export const OrdersPanel: React.FC = () => {
     try {
       const ok = window.confirm('Cancel ALL visible open orders?')
       if (!ok) return
-      const ids = orders.map(o => ({ symbol: o.symbol, id: o.orderId })).filter(x => x.id)
+      // Only internal orders are eligible for bulk-cancel
+      const ids = orders
+        .filter(o => !o.isExternal)
+        .map(o => ({ symbol: o.symbol, id: o.orderId }))
+        .filter(x => x.id)
       setCancellingIds(new Set(ids.map(x => x.id)))
       await Promise.allSettled(ids.map(x => fetch(`/api/order?symbol=${encodeURIComponent(x.symbol)}&orderId=${encodeURIComponent(String(x.id))}`, { method: 'DELETE' })))
       await load()
@@ -276,6 +282,8 @@ export const OrdersPanel: React.FC = () => {
     })
     return list
   }, [orders])
+
+  const isExternalOrder = (o: OpenOrderUI): boolean => Boolean((o as any)?.isExternal === true)
 
   const stableWaiting = useMemo(() => {
     const list = Array.isArray(waiting) ? [...waiting] : []
@@ -753,11 +761,18 @@ export const OrdersPanel: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {stableOrders.map((o) => (
-                  <tr key={o.orderId}>
+                {stableOrders.map((o) => {
+                  const ext = isExternalOrder(o)
+                  return (
+                  <tr key={o.orderId} style={ext ? { background: 'rgba(30,41,59,0.35)' } : undefined}>
                     <td>{o.orderId}</td>
                     <td>{o.symbol}</td>
-                    <td>{o.side}</td>
+                    <td>
+                      {o.side}
+                      {ext ? (
+                        <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 4px', borderRadius: 4, background: '#334155', color: '#e2e8f0' }}>external</span>
+                      ) : null}
+                    </td>
                     <td>{(() => { const ps = String(o.positionSide||''); if (!ps) return '-'; const col = ps==='LONG'?'#16a34a': ps==='SHORT'?'#dc2626': undefined; return <span style={{ color: col }}>{ps}</span> })()}</td>
                     <td>{o.type}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(o.qty, 4)}</td>
@@ -790,22 +805,26 @@ export const OrdersPanel: React.FC = () => {
                     <td>{o.timeInForce || '-'}</td>
                     <td>{[o.reduceOnly ? 'reduceOnly' : null, o.closePosition ? 'closePosition' : null].filter(Boolean).join(', ') || '-'}</td>
                     <td>
-                      {o.orderId ? (
-                        <button
-                          className="btn"
-                          onClick={() => cancelOne(o.symbol, o.orderId)}
-                          disabled={cancellingIds.has(o.orderId)}
-                          title="Cancel order"
-                          style={{ background: '#3a0d0d', border: '1px solid #6b1010', color: '#fff', padding: '0 6px', fontSize: 11 }}
-                        >
-                          {cancellingIds.has(o.orderId) ? '…' : 'Cancel'}
-                        </button>
-                      ) : '-'}
+                      {ext ? (
+                        <span style={{ fontSize: 11, opacity: .6 }}>—</span>
+                      ) : (
+                        o.orderId ? (
+                          <button
+                            className="btn"
+                            onClick={() => cancelOne(o.symbol, o.orderId)}
+                            disabled={cancellingIds.has(o.orderId)}
+                            title="Cancel order"
+                            style={{ background: '#3a0d0d', border: '1px solid #6b1010', color: '#fff', padding: '0 6px', fontSize: 11 }}
+                          >
+                            {cancellingIds.has(o.orderId) ? '…' : 'Cancel'}
+                          </button>
+                        ) : '-'
+                      )}
                     </td>
                     <td>{lastRefresh ? new Date(lastRefresh).toLocaleTimeString() : '-'}</td>
                     <td>{(() => { const min = ageMinutes(o.createdAt || null); const color = colorForAge(min); return <span style={{ color }}>{fmtAge(min)}</span> })()}</td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
           </div>

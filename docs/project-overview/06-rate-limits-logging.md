@@ -23,3 +23,4 @@
   - handshake logika: pokud dojde k auto-cancel, UI parametr se resetuje na 0.
 
 
+

@@ -47,3 +47,4 @@ Základ: `http://localhost:8788`
 - Rate limit/ban: `429` + `Retry-After` nebo structured `{ error: 'banned_until', until }`.
 
 
+

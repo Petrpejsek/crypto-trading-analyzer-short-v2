@@ -81,6 +81,7 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
             const createdMs = Number((o as any)?.time)
             const updatedMs = Number((o as any)?.updateTime)
             const qty = Number(o?.origQty ?? o?.quantity ?? o?.qty)
+            const clientOrderId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
             openOrdersById.set(id, {
               orderId: id,
               symbol: sym,
@@ -95,7 +96,8 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
               positionSide,
               createdAt: Number.isFinite(createdMs) && createdMs > 0 ? new Date(createdMs).toISOString() : null,
               updatedAt: Number.isFinite(updatedMs) && updatedMs > 0 ? new Date(updatedMs).toISOString() : null,
-              status: 'NEW'
+              status: 'NEW',
+              clientOrderId: clientOrderId || null
             })
           } catch {}
         }
@@ -120,13 +122,18 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
         const ep = Number(p?.ep)
         const psdRaw = String(p?.ps || '')
         const psd = psdRaw === 'LONG' ? 'LONG' : psdRaw === 'SHORT' ? 'SHORT' : null
-        const lev = Number(p?.l || p?.leverage)
+        // Preserve previous leverage if this event doesn't contain it
+        const prev = positions.get(sym)
+        const levRaw = Number(p?.l ?? p?.leverage)
+        const lev = (Number.isFinite(levRaw) && levRaw > 0)
+          ? levRaw
+          : (prev && Number.isFinite(prev.leverage as any) ? (prev.leverage as number) : null)
         positions.set(sym, {
           symbol: sym,
           positionAmt: Number.isFinite(pa) ? pa : 0,
           entryPrice: Number.isFinite(ep) ? ep : null,
           positionSide: psd,
-          leverage: Number.isFinite(lev) ? lev : null,
+          leverage: Number.isFinite(lev as any) ? (lev as number) : null,
           updatedAt: now
         })
       }
@@ -148,6 +155,7 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
       const closePosition = Boolean(o?.cp ?? o?.closePosition ?? false)
       const positionSideRaw = String(o?.ps || '')
       const positionSide = positionSideRaw === 'LONG' ? 'LONG' : positionSideRaw === 'SHORT' ? 'SHORT' : null
+      const clientOrderId = String((o as any)?.c || (o as any)?.C || (o as any)?.clientOrderId || '')
       const ts = Number(o?.T ?? o?.E ?? Date.now())
       const status = String(o?.X || '')
       const qty = Number(o?.q ?? o?.Q ?? o?.origQty)
@@ -174,7 +182,8 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
         positionSide,
         createdAt: createdAt as string | null,
         updatedAt: Number.isFinite(ts) ? new Date(ts).toISOString() : null,
-        status
+        status,
+        clientOrderId: clientOrderId || null
       }
       // Update or remove based on status
       if (status === 'NEW' || status === 'PARTIALLY_FILLED') {
@@ -189,6 +198,48 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
     } catch {}
   }
 
+  function isExitType(t: string | null | undefined): boolean {
+    try {
+      const T = String(t || '').toUpperCase()
+      return T === 'STOP' || T === 'STOP_MARKET' || T === 'TAKE_PROFIT' || T === 'TAKE_PROFIT_MARKET'
+    } catch { return false }
+  }
+
+  function isInternalClientId(id: string | null | undefined): boolean {
+    try { return /^(e_l_|x_sl_|x_tp_tm_|x_tp_l_)/.test(String(id || '')) } catch { return false }
+  }
+
+  async function cancelSiblingExits(symbol: string, filledOrderId: number, positionSide: 'LONG' | 'SHORT' | null, filledClientOrderId: string | null): Promise<void> {
+    try {
+      // Do nothing for external fills
+      if (!isInternalClientId(filledClientOrderId)) return
+      const api = getBinanceAPI() as any
+      const siblings = Array.from(openOrdersById.values()).filter((o: any) => {
+        try {
+          if (String(o?.symbol || '') !== symbol) return false
+          if (!isExitType(String(o?.type || ''))) return false
+          if (Number(o?.orderId) === Number(filledOrderId)) return false
+          if (!isInternalClientId(String(o?.clientOrderId || ''))) return false
+          const ps = (typeof o?.positionSide === 'string' && o.positionSide) ? String(o.positionSide) : null
+          if (positionSide && ps) return ps === positionSide
+          // If either side is unknown, allow cancel (one-way mode)
+          return true
+        } catch { return false }
+      })
+      if (siblings.length === 0) return
+      const tasks = siblings.map(async (s: any) => {
+        try {
+          await api.request('DELETE', '/fapi/v1/order', { symbol, orderId: Number(s.orderId) })
+          try { openOrdersById.delete(Number(s.orderId)) } catch {}
+          try { opts.audit({ type: 'cancel', symbol, orderId: Number(s.orderId), side: String(s.side || ''), otype: String(s.type || ''), source: 'binance_ws', reason: 'sibling_auto_cancel' }) } catch {}
+        } catch (e) {
+          try { console.error('[SIBLING_CANCEL_ERR]', { symbol, orderId: Number(s.orderId), error: (e as any)?.message || e }) } catch {}
+        }
+      })
+      await Promise.allSettled(tasks)
+    } catch {}
+  }
+
   function handleOrderTradeUpdate(msg: any) {
     const o = msg?.o
     if (!o) return
@@ -199,11 +250,18 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
       const orderId = Number(o?.i || 0)
       const side = String(o?.S || '')
       const otype = String(o?.o || '')
+      const positionSideRaw = String(o?.ps || '')
+      const positionSide: 'LONG' | 'SHORT' | null = positionSideRaw === 'LONG' ? 'LONG' : positionSideRaw === 'SHORT' ? 'SHORT' : null
+      const clientOrderId = String((o as any)?.c || (o as any)?.C || (o as any)?.clientOrderId || '') || null
       if (symbol) {
         if (status === 'CANCELED' || status === 'EXPIRED') {
           opts.audit({ type: 'cancel', symbol, orderId, side, otype, source: 'binance_ws', reason: status.toLowerCase(), payload: o })
         } else if (status === 'FILLED' || status === 'TRADE') {
           opts.audit({ type: 'filled', symbol, orderId, side, otype, source: 'binance_ws', reason: null, payload: o })
+          // On exit fill, cancel sibling exits (e.g., TP after SL fill, or SL after TP fill)
+          if (status === 'FILLED' && isExitType(otype)) {
+            cancelSiblingExits(symbol, orderId, positionSide, clientOrderId).catch(()=>{})
+          }
         }
       }
     } catch {}
@@ -231,7 +289,14 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
     const url = `wss://fstream.binance.com/ws/${listenKey}`
     try { console.info('[USERDATA_WS_CONNECT]', { url_end: url.slice(-8) }) } catch {}
     ws = new WebSocket(url)
-    ws.on('open', () => { try { console.info('[USERDATA_WS_OPEN]') } catch {}; rehydratePositionsOnce().catch(()=>{}); rehydrateOpenOrdersOnce().catch(()=>{}) })
+    ws.on('open', () => { 
+      try { console.info('[USERDATA_WS_OPEN]') } catch {}
+      // Force immediate position+order refresh on WS connect
+      setTimeout(() => {
+        rehydratePositionsOnce().catch(()=>{})
+        rehydrateOpenOrdersOnce().catch(()=>{})
+      }, 100)
+    })
     ws.on('close', (code) => { try { console.warn('[USERDATA_WS_CLOSE]', { code }) } catch {}; reconnect() })
     ws.on('error', (e) => { try { console.error('[USERDATA_WS_ERROR]', (e as any)?.message || e) } catch {}; reconnect() })
     ws.on('message', (data) => { handleMessage(String(data)) })
@@ -266,4 +331,32 @@ export function isUserDataReady(kind: 'positions' | 'orders' | 'any' = 'any'): b
   if (kind === 'positions') return hadAccountUpdate
   if (kind === 'orders') return hadOrderUpdate
   return hadAccountUpdate || hadOrderUpdate
+}
+
+// Explicit updater: refresh in-memory positions from a REST snapshot (used on FILLED events)
+export function upsertPositionsFromRest(list: any[]): void {
+  try {
+    const now = Date.now()
+    if (!Array.isArray(list)) return
+    for (const p of list) {
+      try {
+        const sym = String(p?.symbol || '')
+        if (!sym) continue
+        const pa = Number(p?.positionAmt)
+        const ep = Number(p?.entryPrice)
+        const psdRaw = String(p?.positionSide || '')
+        const psd = psdRaw === 'LONG' ? 'LONG' : psdRaw === 'SHORT' ? 'SHORT' : (Number.isFinite(pa) ? (pa < 0 ? 'SHORT' : 'LONG') : null)
+        const lev = Number(p?.leverage)
+        positions.set(sym, {
+          symbol: sym,
+          positionAmt: Number.isFinite(pa) ? pa : 0,
+          entryPrice: Number.isFinite(ep) ? ep : null,
+          positionSide: psd,
+          leverage: Number.isFinite(lev) ? lev : null,
+          updatedAt: now
+        })
+      } catch {}
+    }
+    hadAccountUpdate = true
+  } catch {}
 }

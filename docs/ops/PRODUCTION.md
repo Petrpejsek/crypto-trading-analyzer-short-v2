@@ -48,6 +48,26 @@
    - `pm2 start ...` (viz výše)
 3) Nginx conf: `/etc/nginx/sites-available/trader` (symlink do `sites-enabled`), certbot deploy
 
+### Běžné scénáře nasazení
+- Deploy posledního commitu na `main` (doporučeno):
+```bash
+ssh deploy@SERVER 'cd /srv/trader && git fetch origin && git checkout main && git reset --hard origin/main && npm ci && npm run -s build && pm2 reload trader-backend --update-env'
+```
+- Deploy konkrétního commitu (dočasně):
+```bash
+ssh deploy@SERVER 'cd /srv/trader && git fetch origin && git checkout <SHA> && npm ci && npm run -s build && pm2 restart trader-backend --update-env'
+# Pozn.: po ověření vrať zpět na main:
+ssh deploy@SERVER 'cd /srv/trader && git checkout main && git reset --hard origin/main && npm ci && npm run -s build && pm2 reload trader-backend'
+```
+- Čistý re‑clone (když repo nesedí / chybí skripty):
+```bash
+ssh deploy@SERVER 'sudo mv /srv/trader /srv/trader.bak-$(date +%Y%m%d%H%M%S) && sudo -u deploy git clone git@github.com:Petrpejsek/crypto-trading-analyzer.git /srv/trader && cd /srv/trader && npm ci && npm run -s build && pm2 start server/index.ts --interpreter /srv/trader/node_modules/.bin/tsx --name trader-backend --time'
+```
+
+### Když `/srv/trader` existuje, ale chybí `scripts/deploy.sh`
+- Je to v pořádku – skript není nutný pro runtime. Pro jednoduchost používej výše uvedené příkazy (git fetch/reset/build/reload).
+- Pokud je v `/srv/trader` jiné repo nebo zastaralá kopie, použij „Čistý re‑clone“ (záloha + fresh clone).
+
 ### Deploy skript (lokálně na serveru)
 - Skript: `scripts/deploy.sh`
 - Využití: idempotentní update v `/srv/trader`, build, PM2 reload, health-check.

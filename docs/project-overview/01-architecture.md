@@ -24,3 +24,4 @@
 - STRIKTNĚ 1:1 mezi UI hodnotami a trading enginem; sanitizace pouze pro validní tvary (žádné přepisování významu, kromě explicitních bezpečnostních pravidel).
 
 
+

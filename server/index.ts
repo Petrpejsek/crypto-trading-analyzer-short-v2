@@ -794,6 +794,18 @@ const server = http.createServer(async (req, res) => {
             } catch {}
           }
         } catch {}
+        // Build leverage map for ALL symbols (even zero-size) from raw positions (fallback for UI)
+        const levBySymbol: Record<string, number> = {}
+        try {
+          for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
+            try {
+              const sym = String((p as any)?.symbol || '')
+              const lev = Number((p as any)?.leverage)
+              if (sym && Number.isFinite(lev) && lev > 0) levBySymbol[sym] = Math.floor(lev)
+            } catch {}
+          }
+        } catch {}
+
         // Normalize open orders to UI shape (consistent with /api/open_orders)
         let openOrdersUi = (Array.isArray(ordersRaw) ? ordersRaw : []).map((o: any) => ({
           orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0,
@@ -808,6 +820,7 @@ const server = http.createServer(async (req, res) => {
           closePosition: Boolean(o?.closePosition ?? false),
           positionSide: (typeof o?.positionSide === 'string' && o.positionSide) ? String(o.positionSide) : null,
           clientOrderId: ((): string | null => { const id = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || ''); return id || null })(),
+          isExternal: ((): boolean => { const id = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || ''); return id ? !/^(e_l_|x_sl_|x_tp_tm_|x_tp_l_)/.test(id) : true })(),
           createdAt: (() => {
             if (typeof (o as any)?.createdAt === 'string') return String((o as any).createdAt)
             const t = Number((o as any)?.time)
@@ -851,17 +864,6 @@ const server = http.createServer(async (req, res) => {
             const isExternal = (() => { const id = String(o.clientOrderId || ''); return id ? !/^(e_l_|x_sl_|x_tp_tm_|x_tp_l_)/.test(id) : true })()
             return { ...o, leverage, investedUsd, isExternal }
           })
-        } catch {}
-        // Build leverage map for ALL symbols (even zero-size) from raw positions (fallback for UI)
-        const levBySymbol: Record<string, number> = {}
-        try {
-          for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
-            try {
-              const sym = String((p as any)?.symbol || '')
-              const lev = Number((p as any)?.leverage)
-              if (sym && Number.isFinite(lev) && lev > 0) levBySymbol[sym] = Math.floor(lev)
-            } catch {}
-          }
         } catch {}
         // Normalize positions and filter zero-size entries (match /api/positions)
         const positionsUi = (Array.isArray(positionsRaw) ? positionsRaw : [])

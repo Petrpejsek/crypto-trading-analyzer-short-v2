@@ -23,3 +23,4 @@
 - Slouží pro validace promptů a struktur – držte je konzistentní s implementacemi v `services/decider/*` a `server/index.ts`.
 
 
+
