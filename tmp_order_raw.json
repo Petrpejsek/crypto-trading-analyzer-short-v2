@@ -1,0 +1,1 @@
+{"orders": [{"symbol": "MUSDT", "side": "LONG", "strategy": "conservative", "tpLevel": "tp1", "orderType": "limit", "amount": 20, "leverage": 20, "entry": 1.441, "sl": 1.4169, "tp": 1.4956}]}

@@ -1,2 +1,0 @@
-[dotenv@17.2.1] injecting env (2) from .env.local -- tip: ⚙️  override existing env vars with { override: true }
-Server listening on http://localhost:8788

@@ -10,6 +10,33 @@ const barCache: Map<string, H1Bar> = new Map()
 let dropsNoH1: string[] = []
 let lastBackfillCount = 0
 
+// Reconnect control: exponential backoff with jitter and global budget (IP safety)
+let reconnectAttempts = 0
+const FIVE_MIN_MS = 5 * 60 * 1000
+;(globalThis as any).__ws_reconnect_times = Array.isArray((globalThis as any).__ws_reconnect_times) ? (globalThis as any).__ws_reconnect_times : []
+function recordReconnectAttempt() {
+  try {
+    const list: number[] = (globalThis as any).__ws_reconnect_times
+    const now = Date.now()
+    while (list.length && (now - list[0]) > FIVE_MIN_MS) list.shift()
+    list.push(now)
+  } catch {}
+}
+function recentReconnects(): number {
+  try { const list: number[] = (globalThis as any).__ws_reconnect_times; const now = Date.now(); while (list.length && (now - list[0]) > FIVE_MIN_MS) list.shift(); return list.length } catch { return 0 }
+}
+function scheduleReconnect(opts: { onBar?: (sym: string, bar: H1Bar) => void }) {
+  recordReconnectAttempt()
+  const budget = recentReconnects()
+  // Base exp backoff up to 10s
+  const exp = Math.min(10000, 500 * Math.pow(2, reconnectAttempts++))
+  // If budget is high (>220 in 5min), slow down aggressively to protect 300/5min IP limit
+  const slow = budget > 220 ? 60000 : 0
+  const jitter = 200 + Math.floor(Math.random() * 300)
+  const delay = slow || (exp + jitter)
+  setTimeout(() => { ws = null as any; startAltH1Collector({ symbols: subscribedSymbols, onBar: opts.onBar }) }, delay)
+}
+
 export function reportBackfillMetrics(drops: string[], count: number) {
   dropsNoH1 = drops.slice(0)
   lastBackfillCount = count
@@ -41,6 +68,7 @@ export function startAltH1Collector(opts: { symbols: string[]; onBar?: (sym: str
   ws = new WebSocket('wss://fstream.binance.com/ws')
   ws.on('open', () => {
     connected = true
+    reconnectAttempts = 0
     subscribeAll(subscribedSymbols)
   })
   ws.on('message', (data: WebSocket.RawData) => {
@@ -65,8 +93,8 @@ export function startAltH1Collector(opts: { symbols: string[]; onBar?: (sym: str
       }
     } catch {}
   })
-  ws.on('close', () => { connected = false; setTimeout(() => { ws = null as any; startAltH1Collector({ symbols: subscribedSymbols, onBar: opts.onBar }) }, 1000) })
-  ws.on('error', () => { try { ws?.close() } catch {} })
+  ws.on('close', () => { connected = false; scheduleReconnect({ onBar: opts.onBar }) })
+  ws.on('error', () => { try { ws?.close() } catch {}; scheduleReconnect({ onBar: opts.onBar }) })
 }
 
 export function getLastClosedH1(symbol: string): H1Bar | undefined {

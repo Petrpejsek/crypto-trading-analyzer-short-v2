@@ -1,2 +1,0 @@
-[dotenv@17.2.1] injecting env (2) from .env.local -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild
-Server listening on http://localhost:8788

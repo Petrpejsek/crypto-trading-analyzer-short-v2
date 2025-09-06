@@ -1,9 +1,0 @@
-
-  VITE v6.3.5  ready in 1205 ms
-
-  ➜  Local:   http://localhost:4300/
-3:00:03 PM [vite] .env.local changed, restarting server...
-3:00:03 PM [vite] .env.local changed, restarting server...
-3:00:04 PM [vite] server restarted.
-8:31:32 PM [vite] (client) hmr update /src/ui/App.tsx
-8:31:41 PM [vite] (client) hmr update /src/ui/App.tsx

@@ -2,11 +2,9 @@ import config from '../../config/fetcher.json'
 import deciderCfg from '../../config/decider.json'
 import signalsCfg from '../../config/signals.json'
 import type { MarketRawSnapshot, Kline, ExchangeFilters, UniverseItem } from '../../types/market_raw'
-import { getCollector } from '../ws/registry'
-import { WsCollector } from '../ws/wsCollector'
-import { calcSpreadBps, clampSnapshotSize, toNumber, toUtcIso, normalizeKlines } from '../../services/fetcher/normalize'
+import { calcSpreadBps, clampSnapshotSize, toNumber, toUtcIso } from '../../services/fetcher/normalize'
 import { request } from 'undici'
-import { ttlGet, ttlSet, makeKey } from '../lib/ttlCache'
+// TTL cache disabled by policy: no caching
 import { request as undiciRequest } from 'undici'
 
 const BASE_URL = 'https://fapi.binance.com'
@@ -43,17 +41,9 @@ async function httpGet(path: string, params?: Record<string, string | number>): 
   }
 }
 
-async function httpGetCached(path: string, params: Record<string, string | number> | undefined, ttlMs: number, fresh = false): Promise<any> {
-  if (fresh) {
-    // Skip cache entirely for fresh runs
-    return httpGet(path, params)
-  }
-  const key = makeKey(path, params)
-  const hit = ttlGet<any>(key)
-  if (hit) return hit
-  const data = await httpGet(path, params)
-  ttlSet(key, data, ttlMs)
-  return data
+async function httpGetCached(path: string, params: Record<string, string | number> | undefined, _ttlMs: number, _fresh = false): Promise<any> {
+  // Strict NO-CACHE: always hit origin
+  return httpGet(path, params)
 }
 
 async function getServerTime(): Promise<number> {
@@ -71,10 +61,9 @@ type ExchangeInfoSymbol = {
   quoteAsset?: string
 }
 
-let exchangeInfoCache: ExchangeFilters | null = null
 async function getExchangeInfo(): Promise<ExchangeFilters> {
-  if (exchangeInfoCache) return exchangeInfoCache
-  const data = await withRetry(() => httpGetCached('/fapi/v1/exchangeInfo', undefined, (config as any).cache?.exchangeInfoMs ?? 600000), config.retry)
+  // Always fetch fresh exchangeInfo to avoid any caching
+  const data = await withRetry(() => httpGet('/fapi/v1/exchangeInfo', undefined), config.retry)
   const symbols: ExchangeInfoSymbol[] = Array.isArray(data?.symbols) ? data.symbols : []
   const filters: ExchangeFilters = {}
   for (const s of symbols) {
@@ -91,7 +80,6 @@ async function getExchangeInfo(): Promise<ExchangeFilters> {
     if (!tickSize || !stepSize || !minQty || !minNot) continue
     filters[s.symbol] = { tickSize, stepSize, minQty, minNotional: minNot }
   }
-  exchangeInfoCache = filters
   return filters
 }
 
@@ -128,7 +116,7 @@ async function getTopGainersUsdtSymbols(n: number, fresh = false): Promise<strin
 }
 
 async function getKlines(symbol: string, interval: string, limit: number, fresh = false): Promise<Kline[]> {
-  const run = () => httpGetCached('/fapi/v1/klines', { symbol, interval, limit }, (config as any).cache?.klinesMs ?? 30000, fresh)
+  const run = () => httpGet('/fapi/v1/klines', { symbol, interval, limit })
   let raw: any
   try {
     raw = await withRetry(run, config.retry)
@@ -330,44 +318,22 @@ async function mapLimit<T, R>(arr: T[], limit: number, fn: (x: T) => Promise<R>)
   return results
 }
 
-// Access running collector via registry (set by server/index.ts)
+// REST-only builder – no WS cache access
 
-async function getBarsFromCache(symbol: string, interval: '4h'|'1h'|'15m'|'5m', need: number): Promise<Kline[]> {
-  try {
-    const coll = getCollector()
-    const bars = coll ? (coll as any).getBars(symbol, interval, need) : []
-    if (!Array.isArray(bars) || bars.length === 0) return []
-    return bars.map(b => ({
-      openTime: new Date(b.openTime).toISOString(),
-      open: b.open,
-      high: b.high,
-      low: b.low,
-      close: b.close,
-      volume: b.volume,
-      closeTime: new Date(b.openTime + 1).toISOString()
-    }))
-  } catch { return [] }
-}
-
-async function ensureAtLeastOneH1ForAlts(symbols: string[], signal?: AbortSignal) {
-  // No-op in REST-only mode; backfill happens in main loop
-  return
-}
-
-export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume'|'gainers'; desiredTopN?: number; includeSymbols?: string[]; fresh?: boolean }): Promise<MarketRawSnapshot> {
+export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume'|'gainers'; desiredTopN?: number; includeSymbols?: string[]; fresh?: boolean; allowPartial?: boolean }): Promise<MarketRawSnapshot> {
   const t0 = Date.now()
   const globalAc = new AbortController()
   const globalTimeout = setTimeout(() => globalAc.abort(), (config as any).globalDeadlineMs ?? 8000)
   const uniKlines: Record<string, { H1?: Kline[]; M15?: Kline[]; H4?: Kline[] }> = {}
   const exchangeFilters = await getExchangeInfo()
   const filteredSymbols = Object.keys(exchangeFilters)
-  // Fixed target: always BTC+ETH + exactly 28 alts (when possible). No posture-driven downsizing.
+  // Fixed target: always BTC+ETH + exactly N-2 alts (when possible)
   const desired = Number.isFinite(opts?.desiredTopN as any) && (opts!.desiredTopN as any) > 0 ? (opts!.desiredTopN as number) : config.universe.topN
   const altTarget = Math.max(0, desired - 2)
   // When includeSymbols provided, expand target to accommodate them
   const hasIncludeSymbols = Array.isArray(opts?.includeSymbols) && opts!.includeSymbols!.length > 0
   const effectiveAltTarget = hasIncludeSymbols ? Math.max(altTarget, altTarget + opts!.includeSymbols!.length) : altTarget
-  // Pull a large candidate list (the endpoint returns all anyway). We oversample to reliably fill 28 H1-ready alts.
+  // Pull a large candidate list (the endpoint returns all anyway)
   const strategy = (opts?.universeStrategy || (config as any)?.universe?.strategy || 'volume') as 'volume'|'gainers'
   const fresh = Boolean(opts?.fresh)
   const baseList = strategy === 'gainers' ? await getTopGainersUsdtSymbols(Math.max(200, desired * 10), fresh) : await getTopNUsdtSymbols(Math.max(200, desired * 10), fresh)
@@ -380,143 +346,36 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
     .filter(s => s !== 'BTCUSDT' && s !== 'ETHUSDT' && filteredSymbols.includes(s))))
   // Merge include first, then candidate list without duplicates
   const mergedPref = includeNorm.concat(allAltCandidates.filter(s => !includeNorm.includes(s)))
-  // Start with the first batch respecting effectiveAltTarget (expanded for includeSymbols)
-  let altSymbols: string[] = mergedPref.slice(0, effectiveAltTarget)
-  // update WS alt universe to track H1 for selected alts (will be refined after fill-in)
-  try { const c = getCollector() as unknown as WsCollector | null; c?.setAltUniverse(altSymbols) } catch {}
-  await ensureAtLeastOneH1ForAlts(altSymbols)
-  let universeSymbols = altSymbols.slice()
+  // Build universe symbol list
+  const altSymbols: string[] = mergedPref.slice(0, effectiveAltTarget)
+  const universeSymbols = altSymbols.slice()
 
-  // REST-only parallel backfill for alt H1 to populate uniKlines[sym].H1 (guaranteed)
+  // Fetch klines via REST for BTC/ETH and alts
   let backfillCount = 0
   let dropsAlts: string[] = []
-  async function fetchKlinesH1Direct(sym: string, limit: number, timeoutMs: number): Promise<any[]> {
-    const ac = new AbortController()
-    const to = setTimeout(() => ac.abort(), timeoutMs)
-    try {
-      const qs = new URLSearchParams({ symbol: sym, interval: '1h', limit: String(limit) }).toString()
-      const url = `${BASE_URL}/fapi/v1/klines?${qs}`
-      const { body, statusCode } = await undiciRequest(url, { method: 'GET', signal: ac.signal })
-      if (statusCode < 200 || statusCode >= 300) throw new Error(`HTTP ${statusCode}`)
-      const text = await body.text()
-      return JSON.parse(text)
-    } finally { clearTimeout(to) }
-  }
-  if ((config as any).preferWSAltH1 === false) {
-    const altSyms = universeSymbols.slice()
-    const backfillFactories = altSyms.map(sym => async () => {
-      try {
-        const raw = await fetchKlinesH1Direct(sym, ((config as any).backfillH1Limit ?? 12), ((config as any).altBackfillTimeoutMs ?? 4000))
-        const arr: Kline[] = Array.isArray(raw)
-          ? raw.map((k: any) => ({ openTime: toUtcIso(k[0])!, open: toNumber(k[1])!, high: toNumber(k[2])!, low: toNumber(k[3])!, close: toNumber(k[4])!, volume: toNumber(k[5])!, closeTime: toUtcIso(k[6])! }))
-          : []
-        uniKlines[sym] = uniKlines[sym] || {}
-        if (arr.length > 0) { (uniKlines[sym] as any).H1 = arr; backfillCount++ } else { dropsAlts.push(sym) }
-      } catch { dropsAlts.push(sym) }
-    })
-    await runWithConcurrency(backfillFactories, (config as any).altBackfillConcurrency ?? 12)
-    // TOP-UP (final): retry up to 12 missing alts with conservative concurrency and larger limit
-    function hasAltH1(s: string) {
-      return Array.isArray((uniKlines as any)[s]?.H1) && (uniKlines as any)[s]!.H1!.length > 0
-    }
-    const missingAlts = altSyms.filter(s => !hasAltH1(s))
-    if (missingAlts.length > 0) {
-      const retryList = missingAlts.slice(0, 14)
-      console.log('[ALT_TOPUP] missing=%d retrying=%s', missingAlts.length, retryList.join(','))
-      await mapLimit(retryList, 6, async (sym) => {
-        try {
-          const raw = await fetchKlinesH1Direct(sym, 32, 2500)
-          const arr = normalizeKlines(raw)
-          if (Array.isArray(arr) && arr.length > 0) {
-            ;(uniKlines as any)[sym] = (uniKlines as any)[sym] ?? {}
-            ;(uniKlines as any)[sym].H1 = arr
-            backfillCount++
-          } else {
-            dropsAlts.push(sym)
-          }
-        } catch {
-          dropsAlts.push(sym)
-        }
-      })
-    }
-    // Fill-in: if after backfill some initial alts still lack H1, pull additional candidates until we have 28 H1-ready
-    function hasAltH1Local(s: string) {
-      return Array.isArray((uniKlines as any)[s]?.H1) && (uniKlines as any)[s]!.H1!.length > 0
-    }
-    let readyAlts = altSymbols.filter(hasAltH1Local)
-    if (readyAlts.length < altTarget) {
-      const remainingQueue = allAltCandidates.filter(s => !altSymbols.includes(s))
-      let idx = 0
-      while (readyAlts.length < effectiveAltTarget && idx < remainingQueue.length) {
-        const batchSize = Math.min((config as any).altBackfillConcurrency ?? 6, effectiveAltTarget - readyAlts.length + 6)
-        const batch = remainingQueue.slice(idx, idx + batchSize)
-        if (batch.length === 0) break
-        // add to tracked alt list for WS/consistency
-        for (const b of batch) { if (!universeSymbols.includes(b)) universeSymbols.push(b) }
-        // backfill H1 for the batch
-        const factories = batch.map(sym => async () => {
-          try {
-            const raw = await fetchKlinesH1Direct(sym, ((config as any).backfillH1Limit ?? 12), ((config as any).altBackfillTimeoutMs ?? 4000))
-            const arr: Kline[] = Array.isArray(raw)
-              ? raw.map((k: any) => ({ openTime: toUtcIso(k[0])!, open: toNumber(k[1])!, high: toNumber(k[2])!, low: toNumber(k[3])!, close: toNumber(k[4])!, volume: toNumber(k[5])!, closeTime: toUtcIso(k[6])! }))
-              : []
-            uniKlines[sym] = uniKlines[sym] || {}
-            if (arr.length > 0) { (uniKlines[sym] as any).H1 = arr; backfillCount++ } else { dropsAlts.push(sym) }
-          } catch { dropsAlts.push(sym) }
-        })
-        await runWithConcurrency(factories, (config as any).altBackfillConcurrency ?? 6)
-        readyAlts = universeSymbols.filter(hasAltH1Local)
-        idx += batch.length
-      }
-      // After fill-in, restrict to exactly target alts (prioritize includeNorm, then candidates with H1)
-      const finalAlts: string[] = []
-      for (const s of includeNorm) {
-        if (hasAltH1Local(s) && !finalAlts.includes(s)) finalAlts.push(s)
-        if (finalAlts.length >= effectiveAltTarget) break
-      }
-      if (finalAlts.length < effectiveAltTarget) {
-        for (const s of allAltCandidates) {
-          if (hasAltH1Local(s) && !finalAlts.includes(s)) finalAlts.push(s)
-          if (finalAlts.length >= effectiveAltTarget) break
-        }
-      }
-      universeSymbols = finalAlts
-    }
-  }
 
   const klinesTasks: Array<() => Promise<any>> = []
-  const coreIntervals: string[] = (config as any).klinesCore ?? ['4h','1h','15m']
-  const altIntervals: string[] = (config as any).klinesAlt ?? ['1h']
-  const intervalKey = (itv: string) => (itv === '4h' ? 'H4' : itv === '1h' ? 'H1' : itv === '15m' ? 'M15' : itv === '5m' ? 'M5' : itv)
-  const addK = (sym: string, itv: string) => klinesTasks.push(async () => {
-    const cache = fresh ? [] : await getBarsFromCache(sym, itv as any, config.candles)
-    const k = cache.length >= config.candles ? cache : await getKlines(sym, itv, config.candles, fresh)
-    return { key: `${sym === 'BTCUSDT' ? 'btc' : sym === 'ETHUSDT' ? 'eth' : sym}.${intervalKey(itv)}`, k }
-  })
-  for (const itv of coreIntervals) addK('BTCUSDT', itv)
-  for (const itv of coreIntervals) addK('ETHUSDT', itv)
+  const coreIntervals: Array<{ key: 'H4'|'H1'|'M15'; interval: string; limit: number }> = [
+    { key: 'H4', interval: '4h', limit: (config as any).candles || 220 },
+    { key: 'H1', interval: '1h', limit: (config as any).candles || 220 },
+    { key: 'M15', interval: '15m', limit: (config as any).candles || 220 }
+  ]
+  for (const c of coreIntervals) klinesTasks.push(async () => ({ key: `btc.${c.key}`, k: await getKlines('BTCUSDT', c.interval, c.limit) }))
+  for (const c of coreIntervals) klinesTasks.push(async () => ({ key: `eth.${c.key}`, k: await getKlines('ETHUSDT', c.interval, c.limit) }))
+  // Lighter alt intervals to keep snapshot under maxSnapshotBytes
+  const altH1Limit = Number((config as any)?.altH1Limit ?? 80)
+  const altM15Limit = Number((config as any)?.altM15Limit ?? 96)
+  const altIntervals: Array<{ key: 'H1'|'M15'; interval: string; limit: number }> = [
+    { key: 'H1', interval: '1h', limit: altH1Limit },
+    { key: 'M15', interval: '15m', limit: altM15Limit }
+  ]
   for (const sym of universeSymbols) {
-    for (const itv of altIntervals) {
-      const key = intervalKey(itv)
+    for (const c of altIntervals) {
       klinesTasks.push(async () => {
-        if (key === 'H1' && (config as any).preferWSAltH1 === false) {
-          const limit = (config as any).backfillH1Limit ?? 7
-          const raw = await httpGetCached('/fapi/v1/klines', { symbol: sym, interval: '1h', limit }, (config as any).cache?.klinesMs ?? 30000, fresh)
-          const arr: Kline[] = Array.isArray(raw) ? raw.map((k: any) => ({ openTime: toUtcIso(k[0])!, open: toNumber(k[1])!, high: toNumber(k[2])!, low: toNumber(k[3])!, close: toNumber(k[4])!, volume: toNumber(k[5])!, closeTime: toUtcIso(k[6])! })) : []
-          // Preserve existing backfill/top-up data if REST cache returns empty
-          uniKlines[sym] = uniKlines[sym] || {}
-          const existing = (uniKlines[sym] as any).H1
-          if (arr.length > 0 || !Array.isArray(existing) || existing.length === 0) {
-            ;(uniKlines[sym] as any).H1 = arr
-          }
-          const base = (arr.length > 0) ? arr : ((uniKlines[sym] as any).H1 || [])
-          return { key: `${sym}.${key}`, k: base.slice(-config.candles) }
-        }
-        const cached = fresh ? [] : await getBarsFromCache(sym, itv as any, config.candles)
-        const k = cached.length >= config.candles ? cached : await getKlines(sym, itv, config.candles, fresh)
+        const k = await getKlines(sym, c.interval, c.limit)
         uniKlines[sym] = uniKlines[sym] || {}
-        ;(uniKlines[sym] as any)[key] = k
-        return { key: `${sym}.${key}`, k }
+        ;(uniKlines[sym] as any)[c.key] = k
+        return { key: `${sym}.${c.key}`, k }
       })
     }
   }
@@ -537,13 +396,28 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
   const oiNowMap: Record<string, number | undefined> = {}
   const oiChangeMap: Record<string, number | undefined> = {}
   const coreSymbols = ['BTCUSDT', 'ETHUSDT']
-  const fundingSymbols = (config as any).fundingMode === 'coreOnly' ? coreSymbols : universeSymbols.concat(coreSymbols)
-  const oiSymbols = (config as any).openInterestMode === 'coreOnly' ? coreSymbols : universeSymbols.concat(coreSymbols)
+
+  // Cold-start guard: pokud ještě nemáme H1 data pro významnou část altů,
+  // omezíme side-dotazy (funding/OI/oiChg) jen na BTC/ETH, aby první volání bylo rychlé a stabilní.
+  const altH1ReadyCount = universeSymbols.reduce((acc, s) => {
+    const h1 = (uniKlines[s]?.H1 || []) as Kline[]
+    return acc + (Array.isArray(h1) && h1.length > 0 ? 1 : 0)
+  }, 0)
+  const coldStart = altH1ReadyCount < Math.max(8, Math.floor(universeSymbols.length * 0.25))
+
+  const fundingSymbolsBase = (config as any).fundingMode === 'coreOnly' ? coreSymbols : universeSymbols.concat(coreSymbols)
+  const oiSymbolsBase = (config as any).openInterestMode === 'coreOnly' ? coreSymbols : universeSymbols.concat(coreSymbols)
+
+  const fundingSymbols = coldStart ? coreSymbols : fundingSymbolsBase
+  const oiSymbols = coldStart ? coreSymbols : oiSymbolsBase
+
   const sideTasks: Array<() => Promise<any>> = []
   for (const s of fundingSymbols) { sideTasks.push(() => getFundingRate(s).then(v => ({ type: 'fund', s, v }))) }
   for (const s of oiSymbols) { sideTasks.push(() => getOpenInterestNow(s).then(v => ({ type: 'oi', s, v }))) }
-  // OI hist change 1h
-  for (const s of oiSymbols) { sideTasks.push(() => getOpenInterestHistChange1h(s).then(v => ({ type: 'oiChg', s, v }))) }
+  // OI hist change 1h – na cold start pouze pro core, jinak pro celý výběr
+  const oiHistSymbols = coldStart ? coreSymbols : oiSymbols
+  for (const s of oiHistSymbols) { sideTasks.push(() => getOpenInterestHistChange1h(s).then(v => ({ type: 'oiChg', s, v }))) }
+
   const sideSettled = await runWithConcurrency(sideTasks, config.concurrency)
   for (const r of sideSettled) {
     if ((r as any).ok) {
@@ -557,7 +431,7 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
   const latencyMs = Date.now() - t0
 
   const tickerMap = await (async () => {
-    const raw = await withRetry(() => httpGetCached('/fapi/v1/ticker/24hr', undefined, (config as any).cache?.ticker24hMs ?? 30000, fresh), config.retry)
+    const raw = await withRetry(() => httpGet('/fapi/v1/ticker/24hr', undefined), config.retry)
     const out: Record<string, { volume24h_usd?: number; lastPrice?: number; closeTimeMs?: number; priceChange?: number; priceChangePercent?: number; volume?: number }> = {}
     for (const t of raw) {
       const sym = t?.symbol
@@ -657,8 +531,8 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
     coreTarget.resistance = item.resistance
   }
   for (const sym of universeSymbols) {
-    if (!hasAlt(sym)) { warnings.push(`drop:alt:noH1:${sym}`); continue }
-    const item: UniverseItem = { symbol: sym, klines: { H1: uniKlines[sym]?.H1, M15: uniKlines[sym]?.M15 }, funding: fundingMap[sym], oi_now: oiNowMap[sym], oi_hist: [], depth1pct_usd: undefined, spread_bps: undefined, volume24h_usd: tickerMap[sym]?.volume24h_usd, price: tickerMap[sym]?.lastPrice, exchange: 'Binance', market_type: 'perp', fees_bps: null, tick_size: (exchangeFilters as any)?.[sym]?.tickSize ?? null }
+    if (!hasAlt(sym) && !(opts as any)?.allowPartial) { warnings.push(`drop:alt:noH1:${sym}`); continue }
+    const item: UniverseItem = { symbol: sym, klines: { H1: (uniKlines[sym]?.H1 || []), M15: (uniKlines[sym]?.M15 || []) }, funding: fundingMap[sym], oi_now: oiNowMap[sym], oi_hist: [], depth1pct_usd: undefined, spread_bps: undefined, volume24h_usd: tickerMap[sym]?.volume24h_usd, price: tickerMap[sym]?.lastPrice, exchange: 'Binance', market_type: 'perp', fees_bps: null, tick_size: (exchangeFilters as any)?.[sym]?.tickSize ?? null }
     // Analytics for alts
     const h1 = item.klines.H1 || []
     const m15 = item.klines.M15 || []
@@ -705,11 +579,13 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
   }
   // Enforce fixed size: require exactly 28 alts in the universe (unless includeSymbols override)
   if (universe.length !== altTarget && !hasIncludeSymbols) {
-    const err: any = new Error('UNIVERSE_INCOMPLETE')
-    err.stage = 'universe_incomplete'
-    err.expected = altTarget
-    err.actual = universe.length
-    throw err
+    if (!(opts as any)?.allowPartial) {
+      const err: any = new Error('UNIVERSE_INCOMPLETE')
+      err.stage = 'universe_incomplete'
+      err.expected = altTarget
+      err.actual = universe.length
+      throw err
+    }
   }
 
   const latestTimes: number[] = []

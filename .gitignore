@@ -12,3 +12,13 @@ fixtures/**/*.json
 .env*
 logs/
 out/
+
+# Local runtime and logs
+*.out
+*.pid
+logs*/
+nohup.out
+runtime/
+tmp*/
+server.pid
+frontend.pid

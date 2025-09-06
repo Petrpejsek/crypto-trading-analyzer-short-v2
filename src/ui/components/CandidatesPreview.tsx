@@ -97,7 +97,7 @@ export default function CandidatesPreview({ list, finalPickerStatus, executionMo
         </tbody>
       </table>
       <div className="row gap-8 mt-8">
-        <button className="btn" onClick={() => navigator.clipboard.writeText(JSON.stringify(list, null, 2))}>Copy candidates JSON</button>
+        <button className="btn" onClick={() => { try { navigator.clipboard.writeText(JSON.stringify(list, null, 2)) } catch { console.info('Clipboard skipped: document not focused') } }}>Copy candidates JSON</button>
         {(!exec || finalPickerStatus !== 'success') && (
           <span style={{ fontSize:12, color:'#92400e' }}>Execution mode is OFF — preview only</span>
         )}

@@ -8,11 +8,11 @@ import crypto from 'node:crypto'
 import { cleanSchema } from './lib/clean_schema'
 
 export type StrategyPlan = {
-  entry: string
-  sl: string
-  tp1: string
-  tp2: string
-  tp3: string
+  entry: number
+  sl: number
+  tp1: number
+  tp2: number
+  tp3: number
   risk: string
   reasoning: string
 }
@@ -34,7 +34,7 @@ const validate = ajv.compile(entryStrategySchemaJson as any)
 
 const SYSTEM_PROMPT = fs.readFileSync(path.resolve('prompts/entry_strategy.md'), 'utf8')
 const PROMPT_HASH = crypto.createHash('sha256').update(SYSTEM_PROMPT).digest('hex')
-const SCHEMA_VERSION = String((entryStrategySchemaJson as any).version || '1.0.0')
+const SCHEMA_VERSION = String((entryStrategySchemaJson as any).version || '2.0.0')
 const schema = cleanSchema(entryStrategySchemaJson as any)
 
 function result(ok: boolean, code: string | undefined, latencyMs: number, data: EntryStrategyResponse | null, meta?: any) {
@@ -55,7 +55,7 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
       project: (process as any)?.env?.OPENAI_PROJECT
     } as any)
 
-    const instructions = 'Reply with JSON only. No prose. Follow the JSON schema exactly. All text fields MUST be in Czech language (cs-CZ).'
+    const instructions = fs.readFileSync(path.resolve('prompts/entry_strategy.md'), 'utf8')
     const model = 'gpt-4o'
     const timeoutMs = 15000 // 15 seconds timeout
 
@@ -75,6 +75,7 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
           strict: true
         }
       },
+      temperature: (()=>{ try { const t = Number(process.env.ENTRY_STRATEGY_TEMPERATURE); return Number.isFinite(t) ? t : 0.2 } catch { return 0.2 } })(),
       max_completion_tokens: 1024
     }
 
@@ -154,32 +155,4 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
   }
 }
 
-// Helper function to parse entry price from string
-export function parseEntryPrice(
-  entryString: string,
-  strategy: 'conservative' | 'aggressive',
-  customBuffer?: number,
-  globalBuffers: { conservative: number; aggressive: number } = { conservative: 0.1, aggressive: 0.3 }
-): number | null {
-  try {
-    // Extract minimum price from various formats:
-    // "27650–27700" → 27650
-    // "27650-27700" → 27650  
-    // "27850" → 27850
-    // "27650 (pullback support)" → 27650
-    
-    const priceMatch = entryString.match(/(\d+(?:\.\d+)?)/);
-    if (!priceMatch) return null;
-    
-    const minPrice = parseFloat(priceMatch[1]);
-    if (!Number.isFinite(minPrice) || minPrice <= 0) return null;
-    
-    // Apply buffer based on strategy
-    const buffer = customBuffer ?? globalBuffers[strategy];
-    const finalPrice = minPrice * (1 + buffer / 100);
-    
-    return finalPrice;
-  } catch {
-    return null;
-  }
-}
+// Už nepotřebujeme parsování – výstup je numerický.

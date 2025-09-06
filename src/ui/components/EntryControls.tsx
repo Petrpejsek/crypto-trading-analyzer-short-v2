@@ -1,11 +1,11 @@
 import React from 'react'
 
 export type StrategyPlan = {
-  entry: string
-  sl: string
-  tp1: string
-  tp2: string
-  tp3: string
+  entry: number
+  sl: number
+  tp1: number
+  tp2: number
+  tp3: number
   risk: string
   reasoning: string
 }
@@ -40,6 +40,7 @@ export type EntryControlsProps = {
   maxCoins: number
   onPrepareOrders: () => void
   placing?: boolean
+  failedSymbols?: string[]
 }
 
 export function EntryControls({ 
@@ -52,12 +53,17 @@ export function EntryControls({
   maxPerCoin,
   maxCoins,
   onPrepareOrders,
-  placing
+  placing,
+  failedSymbols
 }: EntryControlsProps) {
+  
+  // Persist Auto Prepare across rerenders and runs – no extra logic, only automates existing Prepare button
   const [autoPrepare, setAutoPrepare] = React.useState<boolean>(() => {
     try { return localStorage.getItem('auto_prepare') === '1' } catch { return false }
   })
-  React.useEffect(() => { try { localStorage.setItem('auto_prepare', autoPrepare ? '1' : '0') } catch {} }, [autoPrepare])
+  React.useEffect(() => {
+    try { localStorage.setItem('auto_prepare', autoPrepare ? '1' : '0') } catch {}
+  }, [autoPrepare])
   const selectionKey = React.useMemo(() => {
     try { return coinControls.filter(c=>c.include).map(c=>c.symbol).sort().join(',') } catch { return '' }
   }, [coinControls])
@@ -91,15 +97,16 @@ export function EntryControls({
     const label: React.CSSProperties = { fontSize: 11, opacity: 0.7 }
     const valueNum: React.CSSProperties = { fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums' as any }
     const valueText: React.CSSProperties = { fontSize: 14, fontWeight: 700, lineHeight: 1.2 as any, whiteSpace: 'pre-wrap' as any, display: '-webkit-box', WebkitLineClamp: 3 as any, WebkitBoxOrient: 'vertical' as any, overflow: 'hidden' }
-    const box = (lbl: string, val: string, color: string, bg: string, isText = false) => (
+    const fmt = (n: number | string) => typeof n === 'number' ? String(n) : n
+    const box = (lbl: string, val: number | string, color: string, bg: string, isText = false) => (
       <div style={{ ...boxBase, borderColor: color, background: bg }}>
         <span style={label}>{lbl}</span>
-        <span style={isText ? valueText : valueNum}>{val}</span>
+        <span style={isText ? valueText : valueNum}>{fmt(val)}</span>
       </div>
     )
     return (
       <div style={{ ...wrap, gridAutoRows: '1fr' }}>
-        {box('Entry', plan.entry, '#3b82f6', 'rgba(59,130,246,0.08)', true)}
+        {box('Entry', plan.entry, '#3b82f6', 'rgba(59,130,246,0.08)', false)}
         {box('SL', plan.sl, '#ef4444', 'rgba(239,68,68,0.08)')}
         {box('TP1', plan.tp1, '#22c55e', 'rgba(34,197,94,0.08)')}
         {box('TP2', plan.tp2, '#16a34a', 'rgba(22,163,74,0.08)')}
@@ -129,6 +136,13 @@ export function EntryControls({
           </div>
         )}
       </div>
+
+      {Array.isArray(failedSymbols) && failedSymbols.length > 0 && (
+        <div style={{ marginBottom: 12, padding: 8, border: '1px solid #664', borderRadius: 6, background: 'rgba(255,200,0,0.07)', fontSize: 12 }}>
+          Některé coiny nevrátily platný GPT plán a nejsou zahrnuté v Entry: <strong>{failedSymbols.join(', ')}</strong>.
+          <span style={{ marginLeft: 6, opacity: 0.8 }}>Klikni znovu na Analyze Selected pro opakování.</span>
+        </div>
+      )}
 
       {status === 'loading' && (
         <div style={{ padding: 20, textAlign: 'center', opacity: 0.7 }}>
@@ -236,7 +250,7 @@ export function EntryControls({
                       <select 
                         value={control.orderType || (control.strategy === 'conservative' ? 'limit' : 'stop_limit')}
                         onChange={(e) => handleControlUpdate(strategy.symbol, 'orderType', e.target.value as any)}
-                        disabled={!control.include}
+                        disabled
                       >
                         <option value="market">Market</option>
                         <option value="limit">Limit</option>
@@ -249,7 +263,7 @@ export function EntryControls({
                       <select 
                         value={control.side || 'LONG'} 
                         onChange={(e) => handleControlUpdate(strategy.symbol, 'side', e.target.value as any)}
-                        disabled={!control.include}
+                        disabled
                       >
                         <option value="LONG">LONG</option>
                         <option value="SHORT">SHORT</option>
@@ -260,7 +274,7 @@ export function EntryControls({
                       <select 
                         value={control.tpLevel} 
                         onChange={(e) => handleControlUpdate(strategy.symbol, 'tpLevel', e.target.value as any)}
-                        disabled={!control.include}
+                        disabled
                       >
                         <option value="tp1">TP1</option>
                         <option value="tp2">TP2</option>
@@ -277,7 +291,7 @@ export function EntryControls({
                         step={10}
                         value={control.amount} 
                         onChange={(e) => handleControlUpdate(strategy.symbol, 'amount', Number(e.target.value))}
-                        disabled={!control.include}
+                        disabled
                       />
                     </label>
 
@@ -286,7 +300,7 @@ export function EntryControls({
                       <select 
                         value={control.leverage} 
                         onChange={(e) => handleControlUpdate(strategy.symbol, 'leverage', Number(e.target.value))}
-                        disabled={!control.include}
+                        disabled
                       >
                         {[1,2,3,5,10,15,20].map(lev => (
                           <option key={lev} value={lev}>{lev}x</option>
@@ -299,7 +313,7 @@ export function EntryControls({
                       <select 
                         value={control.strategy}
                         onChange={(e) => handleControlUpdate(strategy.symbol, 'strategy', e.target.value as any)}
-                        disabled={!control.include}
+                        disabled
                       >
                         <option value="conservative">Conservative</option>
                         <option value="aggressive">Aggressive</option>
@@ -315,8 +329,8 @@ export function EntryControls({
                           max={5} 
                           step={0.1}
                           value={control.customBuffer || 0} 
-                          onChange={(e) => handleControlUpdate(strategy.symbol, 'customBuffer', Number(e.target.value))}
-                          disabled={!control.include}
+                          onChange={() => {}}
+                          disabled
                         />
                       </label>
                     )}
@@ -336,7 +350,7 @@ export function EntryControls({
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                <input type="checkbox" checked={autoPrepare} onChange={e=>setAutoPrepare(e.target.checked)} />
+                <input type="checkbox" checked={autoPrepare} onChange={(e) => setAutoPrepare(e.target.checked)} />
                 Auto Prepare
               </label>
               <PrepareButton count={includedCount} placing={placing} onClick={onPrepareOrders} auto={autoPrepare} selectionKey={selectionKey} />

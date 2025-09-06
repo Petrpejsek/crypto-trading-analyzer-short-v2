@@ -1,2 +1,0 @@
-[dotenv@17.2.1] injecting env (2) from .env.local -- tip: 🔐 prevent committing .env to code: https://dotenvx.com/precommit
-Server listening on http://localhost:8788

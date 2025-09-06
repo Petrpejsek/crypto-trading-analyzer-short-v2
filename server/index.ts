@@ -3,20 +3,20 @@ import fs from 'node:fs'
 import path from 'node:path'
 import dotenv from 'dotenv'
 import { buildMarketRawSnapshot } from './fetcher/binance'
-import { WsCollector } from './ws/wsCollector'
-import { setCollector } from './ws/registry'
 import { performance } from 'node:perf_hooks'
 import http from 'node:http'
 import { decideMarketStrict } from '../services/decider/market_decider_gpt'
 import { runFinalPicker as runFinalPickerServer } from '../services/decider/final_picker_gpt'
 import { runHotScreener } from '../services/decider/hot_screener_gpt'
 import { runEntryStrategy } from '../services/decider/entry_strategy_gpt'
-import { executeHotTradingOrders, type PlaceOrdersRequest, fetchMarkPrice, fetchLastTradePrice, fetchAllOpenOrders, fetchPositions, cancelOrder } from '../services/trading/binance_futures'
+import { executeHotTradingOrders, type PlaceOrdersRequest, fetchMarkPrice, fetchLastTradePrice, fetchAllOpenOrders, fetchPositions, cancelOrder, getBinanceAPI, getWaitingTpList, cleanupWaitingTpForSymbol, waitingTpProcessPassFromPositions } from '../services/trading/binance_futures'
 import { ttlGet, ttlSet, makeKey } from './lib/ttlCache'
 import { preflightCompact } from '../services/decider/market_compact'
 import deciderCfg from '../config/decider.json'
-import { startAltH1Collector } from './ws/collector_alt_h1'
+import tradingCfg from '../config/trading.json'
 import { calculateKlineChangePercent, calculateRegime } from './lib/calculations'
+import { startBinanceUserDataWs, getPositionsInMemory, getOpenOrdersInMemory, isUserDataReady } from '../services/exchange/binance/userDataWs'
+ 
 
 // Load env from .env.local and .env even in production
 try {
@@ -36,19 +36,39 @@ try {
 } catch {}
 
 const PORT = 8788
-const wsCollector = new WsCollector({ coreSymbols: ['BTCUSDT','ETHUSDT'], altSymbols: [] })
-wsCollector.start()
-setCollector(wsCollector)
-// Start Alt H1 collector prewarm
-startAltH1Collector({ symbols: [], onBar: () => {} })
+// WS market collector disabled – REST-only mode for klines
 
 // Ephemeral in-memory store of last place_orders request/response for diagnostics
 let __lastPlaceOrders: { request: any; result: any } | null = null
 const __lastEntryBySymbol: Record<string, { input: any; output: any }> = {}
+// Simple batch mutex to ensure /api/place_orders do not overlap
+let __batchBusy: boolean = false
+const acquireBatch = async (): Promise<void> => {
+  const start = Date.now()
+  while (__batchBusy) {
+    await new Promise(r => setTimeout(r, 25))
+    if (Date.now() - start > 10000) break
+  }
+  __batchBusy = true
+  try { console.error('[BATCH_MUTEX_ACQUIRE]', { ts: new Date().toISOString(), pid: process.pid }) } catch {}
+}
+const releaseBatch = (): void => {
+  __batchBusy = false
+  try { console.error('[BATCH_MUTEX_RELEASE]', { ts: new Date().toISOString(), pid: process.pid }) } catch {}
+}
 
 // Trading settings (in-memory)
 let __pendingCancelAgeMin: number = 0 // minutes; 0 = Off
 let __sweeperDidAutoCancel: boolean = false // one-shot client handshake flag
+// In-memory cancel/filled audit log for UI footer
+type AuditEvent = { ts: string; type: 'cancel' | 'filled'; source: 'server' | 'sweeper' | 'binance_ws'; symbol: string; orderId?: number; reason?: string | null }
+const __auditEvents: AuditEvent[] = []
+function pushAudit(evt: AuditEvent): void {
+  try {
+    __auditEvents.push(evt)
+    if (__auditEvents.length > 1000) __auditEvents.splice(0, __auditEvents.length - 1000)
+  } catch {}
+}
 let __sweeperRunning = false
 let __sweeperTimer: NodeJS.Timeout | null = null
 
@@ -85,7 +105,11 @@ async function sweepStaleOrdersOnce(): Promise<void> {
     const maxParallel = 4
     for (let i = 0; i < candidates.length; i += maxParallel) {
       const batch = candidates.slice(i, i + maxParallel)
-      const res = await Promise.allSettled(batch.map(c => cancelOrder(c.symbol, c.orderId)))
+      const res = await Promise.allSettled(batch.map(async (c) => {
+        const r = await cancelOrder(c.symbol, c.orderId)
+        pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'sweeper', symbol: c.symbol, orderId: c.orderId, reason: 'stale_auto_cancel' })
+        return r
+      }))
       for (const r of res) {
         if (r.status === 'fulfilled') anyCancelled = true
       }
@@ -103,7 +127,36 @@ async function sweepStaleOrdersOnce(): Promise<void> {
 
 function startOrderSweeper(): void {
   if (__sweeperTimer) return
-  __sweeperTimer = setInterval(() => { sweepStaleOrdersOnce().catch(()=>{}) }, 5000)
+  const ms = Number((tradingCfg as any)?.OPEN_ORDERS_SWEEP_MS ?? 10000)
+  __sweeperTimer = setInterval(() => { sweepStaleOrdersOnce().catch(()=>{}) }, ms)
+}
+
+// Start Binance user-data WS to capture cancel/filled events into audit log
+try {
+  startBinanceUserDataWs({
+    audit: async (evt) => {
+      try {
+        pushAudit({
+          ts: new Date().toISOString(),
+          type: evt.type === 'filled' ? 'filled' : 'cancel',
+          source: 'binance_ws',
+          symbol: String(evt.symbol || ''),
+          orderId: (Number(evt.orderId) || undefined) as any,
+          reason: (evt as any)?.reason || null
+        })
+      } catch {}
+      // Trigger immediate waiting TP processing on fill without waiting for HTTP poll
+      try {
+        if (evt.type === 'filled' && evt.symbol) {
+          const api = getBinanceAPI() as any
+          const positions = await api.getPositions()
+          waitingTpProcessPassFromPositions(positions).catch(()=>{})
+        }
+      } catch {}
+    }
+  })
+} catch (e) {
+  try { console.error('[USERDATA_WS_ERROR]', (e as any)?.message || e) } catch {}
 }
 
 function isDebugApi(): boolean {
@@ -112,8 +165,49 @@ function isDebugApi(): boolean {
 
 const server = http.createServer(async (req, res) => {
   try {
+    // Basic CORS for dev/prod – no caching
+    try {
+      res.setHeader('Access-Control-Allow-Origin', '*')
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Requested-With')
+    } catch {}
+    if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return }
     const url = new URL(req.url || '/', 'http://localhost')
     const hasRealBinanceKeys = (): boolean => {
+    // Static UI (serve built frontend from dist/)
+    try {
+      const distDir = path.resolve(process.cwd(), 'dist')
+      const serveFile = (p: string, type: string) => {
+        try {
+          const buf = fs.readFileSync(p)
+          res.statusCode = 200
+          res.setHeader('content-type', type)
+          res.setHeader('Cache-Control', 'no-cache')
+          res.end(buf)
+          return true
+        } catch { return false }
+      }
+      if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+        const idx = path.join(distDir, 'index.html')
+        if (fs.existsSync(idx)) { if (serveFile(idx, 'text/html; charset=utf-8')) return }
+      }
+      if (req.method === 'GET' && url.pathname.startsWith('/assets/')) {
+        const rel = url.pathname.replace(/^\/+/, '') // strip leading slashes
+        const filePath = path.join(distDir, rel)
+        if (fs.existsSync(filePath)) {
+          const ext = path.extname(filePath).toLowerCase()
+          const type = ext === '.js' ? 'text/javascript; charset=utf-8'
+            : ext === '.css' ? 'text/css; charset=utf-8'
+            : ext === '.map' ? 'application/json; charset=utf-8'
+            : ext === '.svg' ? 'image/svg+xml'
+            : ext === '.png' ? 'image/png'
+            : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+            : 'application/octet-stream'
+          if (serveFile(filePath, type)) return
+        }
+      }
+    } catch {}
+
       try {
         const k = String(process.env.BINANCE_API_KEY || '')
         const s = String(process.env.BINANCE_SECRET_KEY || '')
@@ -145,6 +239,7 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+    
     if (url.pathname === '/api/trading/settings' && req.method === 'PUT') {
       res.setHeader('Cache-Control', 'no-store')
       try {
@@ -199,9 +294,41 @@ const server = http.createServer(async (req, res) => {
           return
         }
         const r = await cancelOrder(symbol, orderId)
+        try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'server', symbol, orderId, reason: 'manual_delete' }) } catch {}
+        
+        // Auto-cleanup waiting TP if this was an ENTRY order
+        try {
+          const orderInfo = r || {}
+          const wasEntryOrder = (
+            String(orderInfo?.side) === 'BUY' && 
+            String(orderInfo?.type) === 'LIMIT' && 
+            !(orderInfo?.reduceOnly || orderInfo?.closePosition)
+          )
+          if (wasEntryOrder) {
+            cleanupWaitingTpForSymbol(symbol)
+          }
+        } catch {}
+        
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: true, result: r }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    if (url.pathname === '/api/debug/cancel_audit' && req.method === 'GET') {
+      try {
+        const last = Number(url.searchParams.get('last') || '0')
+        const list = Array.isArray(__auditEvents) ? __auditEvents : []
+        const events = last > 0 ? list.slice(Math.max(0, list.length - last)) : list
+        // eslint-disable-next-line no-console
+        try { console.info('[AUDIT_API]', { path: '/api/debug/cancel_audit', q: req.url?.includes('?') ? req.url?.split('?')[1] : '' }) } catch {}
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, events }))
       } catch (e: any) {
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')
@@ -218,11 +345,17 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: 'missing_binance_keys' }))
           return
         }
-        const key = makeKey('/api/open_orders')
-        let base: any = ttlGet<any>(key)
-        if (!base) {
-          const raw = await fetchAllOpenOrders()
-          const orders = Array.isArray(raw) ? raw.map((o: any) => ({
+        // If WS user-data not ready, return 200 with empty list (no REST fallback, but no hard error)
+        if (!isUserDataReady('orders')) {
+          const waiting = getWaitingTpList()
+          const response = { ok: true, count: 0, orders: [], waiting: Array.isArray(waiting) ? waiting : [] }
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify(response))
+          return
+        }
+        const raw = getOpenOrdersInMemory()
+        const orders = Array.isArray(raw) ? raw.map((o: any) => ({
           orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0,
           symbol: String(o?.symbol || ''),
           side: String(o?.side || ''),
@@ -237,18 +370,26 @@ const server = http.createServer(async (req, res) => {
           createdAt: (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })(),
           updatedAt: (() => { const t = Number(o?.updateTime); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })()
         })) : []
-          const body = { ok: true, count: orders.length, orders }
-          ttlSet(key, body, 1500)
-          base = body
-        }
-        const response = { ...base, auto_cancelled_due_to_age: __sweeperDidAutoCancel }
+        const response = { ok: true, count: orders.length, orders, auto_cancelled_due_to_age: __sweeperDidAutoCancel }
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
+        try {
+          // Attach waiting TP list to response for UI "Waiting orders"
+          const waiting = getWaitingTpList()
+          ;(response as any).waiting = Array.isArray(waiting) ? waiting : []
+        } catch {}
         res.end(JSON.stringify(response))
       } catch (e: any) {
-        res.statusCode = 500
+        const msg = String(e?.message || 'binance_error')
+        const isRateLimit = /code\":-?1003|too\s+many\s+requests|status:\s*418|banned\s+until/i.test(msg)
+        if (isRateLimit) {
+          res.statusCode = 429
+          res.setHeader('Retry-After', '60')
+        } else {
+          res.statusCode = 500
+        }
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: e?.message || 'binance_error' }))
+        res.end(JSON.stringify({ ok: false, error: msg }))
       }
       return
     }
@@ -273,22 +414,22 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: 'missing_binance_keys' }))
           return
         }
-        const key = makeKey('/api/positions')
-        const cached = ttlGet<any>(key)
-        if (cached) {
+        // If WS user-data not ready, return 200 with empty positions
+        if (!isUserDataReady('positions')) {
+          const response = { ok: true, positions: [] }
           res.statusCode = 200
           res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify(cached))
+          res.end(JSON.stringify(response))
           return
         }
-        const raw = await fetchPositions()
+        const raw = getPositionsInMemory()
         const positionsRaw = Array.isArray(raw) ? raw : []
         const positions = positionsRaw
           .map((p: any) => {
             const amt = Number(p?.positionAmt)
             const size = Number.isFinite(amt) ? Math.abs(amt) : 0
             const entry = Number(p?.entryPrice)
-            const mark = Number(p?.markPrice)
+            const mark = Number((p as any)?.markPrice)
             const pnl = Number(p?.unRealizedProfit ?? p?.unrealizedPnl)
             const lev = Number(p?.leverage)
             const side = (typeof p?.positionSide === 'string' && p.positionSide) ? String(p.positionSide) : (Number.isFinite(amt) ? (amt >= 0 ? 'LONG' : 'SHORT') : '')
@@ -301,19 +442,27 @@ const server = http.createServer(async (req, res) => {
               markPrice: Number.isFinite(mark) ? mark : null,
               unrealizedPnl: Number.isFinite(pnl) ? pnl : null,
               leverage: Number.isFinite(lev) ? lev : null,
-              updatedAt: Number.isFinite(upd) && upd > 0 ? new Date(upd).toISOString() : null
+              updatedAt: Number.isFinite(upd) && upd > 0 ? new Date(upd).toISOString() : (Number.isFinite((p as any)?.updatedAt) ? new Date((p as any).updatedAt).toISOString() : null)
             }
           })
           .filter((p: any) => Number.isFinite(p.size) && p.size > 0)
+        // Spustit waiting TP processing pass s již získanými pozicemi (sníží duplicitní poll na Binance)
+        try { waitingTpProcessPassFromPositions(raw).catch(()=>{}) } catch {}
         const body = { ok: true, count: positions.length, positions }
-        ttlSet(key, body, 1500)
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify(body))
       } catch (e: any) {
-        res.statusCode = 500
+        const msg = String(e?.message || 'binance_error')
+        const isRateLimit = /code\":-?1003|too\s+many\s+requests|status:\s*418|banned\s+until/i.test(msg)
+        if (isRateLimit) {
+          res.statusCode = 429
+          res.setHeader('Retry-After', '60')
+        } else {
+          res.statusCode = 500
+        }
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: e?.message || 'binance_error' }))
+        res.end(JSON.stringify({ ok: false, error: msg }))
       }
       return
     }
@@ -326,17 +475,93 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/ws/health') {
       res.statusCode = 200
       res.setHeader('content-type', 'application/json')
-      const perf = (globalThis as any).__perf_last_snapshot || {}
-      res.end(JSON.stringify({
-        ok: true,
-        connected: false,
-        streams: 0,
-        altH1Subscribed: 0,
-        altH1Ready: 0,
-        includedSymbols: perf.includedSymbolsCount ?? 0,
-        lastBackfillCount: perf.lastBackfillCount ?? 0,
-        drops_noH1: Array.isArray(perf.drops_noH1) ? perf.drops_noH1 : []
-      }))
+      res.end(JSON.stringify({ ok: true, connected: false, streams: 0, lastClosedAgeMsByKey: {}, altH1Subscribed: 0, altH1Ready: 0, includedSymbols: 0, lastBackfillCount: 0, drops_noH1: [] }))
+      return
+    }
+
+    if (url.pathname === '/api/orders_console' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        if (!hasRealBinanceKeys()) { res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_binance_keys' })); return }
+        // WS user-data: pokud ještě nepřišla událost, vrátíme prázdná pole (NO REST fallback pro user-data)
+        const positionsRaw = isUserDataReady('positions') ? getPositionsInMemory() : []
+        const ordersRaw = isUserDataReady('orders') ? getOpenOrdersInMemory() : []
+        // Fast-path: průběžně uklízej waiting TP, pokud už není ENTRY a ani pozice
+        try {
+          const hasEntry = (o: any): boolean => String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT' && !(o?.reduceOnly || o?.closePosition)
+          const entrySymbols = new Set<string>()
+          for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
+            try { if (hasEntry(o)) entrySymbols.add(String(o?.symbol || '')) } catch {}
+          }
+          const posSizeBySym = new Map<string, number>()
+          for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
+            try {
+              const sym = String(p?.symbol || '')
+              const amt = Number(p?.positionAmt)
+              const size = Number.isFinite(amt) ? Math.abs(amt) : 0
+              if (sym) posSizeBySym.set(sym, size)
+            } catch {}
+          }
+          const pending = getWaitingTpList()
+          for (const w of (Array.isArray(pending) ? pending : [])) {
+            try {
+              const sym = String(w?.symbol || '')
+              if (!sym) continue
+              const size = Number(posSizeBySym.get(sym) || 0)
+              if (!entrySymbols.has(sym) && size === 0) {
+                cleanupWaitingTpForSymbol(sym)
+              }
+            } catch {}
+          }
+        } catch {}
+        // Spusť waiting TP processing pass na základě pozic (bez dalšího REST čtení)
+        try { waitingTpProcessPassFromPositions(positionsRaw).catch(()=>{}) } catch {}
+        // Build marks map via REST for symbols present in orders/positions (keeps one client call)
+        const marks: Record<string, number> = {}
+        try {
+          const symSet = new Set<string>()
+          const push = (s: any) => { const v = String(s||''); if (v) symSet.add(v) }
+          for (const o of (Array.isArray(ordersRaw)?ordersRaw:[])) push(o?.symbol)
+          for (const p of (Array.isArray(positionsRaw)?positionsRaw:[])) push(p?.symbol)
+          const arr = Array.from(symSet)
+          const limit = 4
+          for (let i=0;i<arr.length;i+=limit) {
+            const batch = arr.slice(i, i+limit)
+            const settled = await Promise.allSettled(batch.map(async (s)=>({ s, m: await fetchMarkPrice(String(s)) })))
+            for (const r of settled) {
+              if (r.status === 'fulfilled') {
+                const { s, m } = r.value as any
+                if (Number.isFinite(m)) marks[s] = Number(m)
+              }
+            }
+          }
+        } catch {}
+        const waiting = getWaitingTpList()
+        const last = __lastPlaceOrders ? { request: __lastPlaceOrders.request, result: __lastPlaceOrders.result } : null
+        // Normalize open orders to UI shape (consistent with /api/open_orders)
+        const openOrdersUi = (Array.isArray(ordersRaw) ? ordersRaw : []).map((o: any) => ({
+          orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0,
+          symbol: String(o?.symbol || ''),
+          side: String(o?.side || ''),
+          type: String(o?.type || ''),
+          qty: (() => { const n = Number(o?.origQty ?? o?.quantity ?? o?.qty); return Number.isFinite(n) ? n : null })(),
+          price: (() => { const n = Number(o?.price); return Number.isFinite(n) && n > 0 ? n : null })(),
+          stopPrice: (() => { const n = Number(o?.stopPrice); return Number.isFinite(n) && n > 0 ? n : null })(),
+          timeInForce: o?.timeInForce ? String(o.timeInForce) : null,
+          reduceOnly: Boolean(o?.reduceOnly ?? false),
+          closePosition: Boolean(o?.closePosition ?? false),
+          positionSide: (typeof o?.positionSide === 'string' && o.positionSide) ? String(o.positionSide) : null,
+          createdAt: (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })(),
+          updatedAt: (() => { const t = Number(o?.updateTime); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })()
+        }))
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, positions: positionsRaw, open_orders: openOrdersUi, marks, waiting, last_place: last }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
       return
     }
     if (url.pathname === '/api/snapshot') {
@@ -348,7 +573,7 @@ const server = http.createServer(async (req, res) => {
         const universeStrategy = uniParam === 'gainers' ? 'gainers' : 'volume'
         const fresh = String(url.searchParams.get('fresh') || '1') === '1'
         const topN = Number(url.searchParams.get('topN') || '')
-        const snapshot = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh })
+        const snapshot = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh, allowPartial: true })
         ;(snapshot as any).duration_ms = Math.round(performance.now() - t0)
         delete (snapshot as any).latency_ms
         const body = JSON.stringify(snapshot)
@@ -356,19 +581,28 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('content-type', 'application/json')
         res.end(body)
       } catch (err: any) {
-        // Distinguish universe incomplete (fixed 28 alts rule) from generic errors
-        const stage = err?.stage || 'unknown'
-        res.statusCode = stage === 'universe_incomplete' ? 503 : 500
+        const stage = String(err?.stage || '').toLowerCase()
+        const isUniverseIncomplete = stage === 'universe_incomplete' || /universe\s*incomplete/i.test(String(err?.message||''))
+        if (isUniverseIncomplete) {
+          const out = {
+            timestamp: new Date().toISOString(),
+            exchange: 'Binance',
+            market_type: 'perp',
+            feeds_ok: false,
+            data_warnings: ['universe_incomplete'],
+            btc: { klines: {} },
+            eth: { klines: {} },
+            universe: [],
+            policy: { max_hold_minutes: null, risk_per_trade_pct: null, risk_per_trade_pct_flat: null, max_leverage: null }
+          }
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json; charset=utf-8')
+          res.end(JSON.stringify(out))
+          return
+        }
+        res.statusCode = 500
         res.setHeader('content-type', 'application/json; charset=utf-8')
-        const stack = typeof err?.stack === 'string' ? String(err.stack).split('\n').slice(0, 3) : []
-        res.end(JSON.stringify({
-          error: err?.message || 'INTERNAL_ERROR',
-          stage,
-          symbol: err?.symbol || null,
-          expected: err?.expected ?? null,
-          actual: err?.actual ?? null,
-          stack
-        }))
+        res.end(JSON.stringify({ error: err?.message || 'INTERNAL_ERROR' }))
       }
       return
     }
@@ -388,7 +622,7 @@ const server = http.createServer(async (req, res) => {
           const v = String(s).toUpperCase()
           return [v]
         })()
-        const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, includeSymbols, fresh })
+        const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, includeSymbols, fresh, allowPartial: true })
         type K = { time: string; open: number; high: number; low: number; close: number; volume: number }
         const toBars = (arr: any[], keep: number): K[] => {
           if (!Array.isArray(arr)) return []
@@ -745,7 +979,7 @@ const server = http.createServer(async (req, res) => {
           }
           throw lastErr
         }
-        const snap = await retry(() => buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh: true }))
+        const snap = await retry(() => buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh: true, allowPartial: true }))
         type Bar = { time: string; open: number; high: number; low: number; close: number; volume: number }
         const toIsoNoMs = (isoLike: string): string => {
           const s = String(isoLike || '')
@@ -834,21 +1068,24 @@ const server = http.createServer(async (req, res) => {
         const name = String(e?.name||'').toLowerCase()
         const msg = String(e?.message||'').toLowerCase()
         const abortLike = name.includes('abort') || msg.includes('abort') || msg.includes('timeout')
-        res.statusCode = abortLike ? 503 : 500
+        // For universe incomplete we return 200 with partial: true
+        const isUniverseIncomplete = /universe_incomplete|universe\s*incomplete/i.test(String(e?.message||'')) || String((e as any)?.stage||'') === 'universe_incomplete'
+        res.statusCode = isUniverseIncomplete ? 200 : (abortLike ? 503 : 500)
         if (abortLike) res.setHeader('Retry-After', '1')
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ error: abortLike ? 'UNAVAILABLE_TEMPORARILY' : (e?.message || 'unknown') }))
+        res.end(JSON.stringify(isUniverseIncomplete ? { ok: true, partial: true, coins: [], policy: { max_hold_minutes: null, risk_per_trade_pct: null, max_leverage: null }, exchange: 'Binance', market_type: 'perp', regime: {}, timestamp: new Date().toISOString() } : { error: abortLike ? 'UNAVAILABLE_TEMPORARILY' : (e?.message || 'unknown') }))
       }
       return
     }
 
     if (url.pathname === '/api/place_orders' && req.method === 'POST') {
       res.setHeader('Cache-Control', 'no-store')
+      await acquireBatch()
       try {
         const chunks: Buffer[] = []
         for await (const ch of req) chunks.push(ch as Buffer)
         const bodyStr = Buffer.concat(chunks).toString('utf8')
-        const parsed = bodyStr ? JSON.parse(bodyStr) : null as PlaceOrdersRequest
+        const parsed = (bodyStr ? JSON.parse(bodyStr) : null) as PlaceOrdersRequest
         
         // Validate input
         if (!parsed.orders || !Array.isArray(parsed.orders) || parsed.orders.length === 0) {
@@ -892,8 +1129,27 @@ const server = http.createServer(async (req, res) => {
           return true
         })
         console.log(`[PLACE_ORDERS] Processing ${parsed.orders.length} orders`)
-        try { console.info('[PLACE_ORDERS_REQ]', { sample: parsed.orders.slice(0,3) }) } catch {}
+        try {
+          console.info('[PLACE_ORDERS_REQ]', { sample: parsed.orders.slice(0,3) })
+          // Explicit trace: UI -> server mapping for each order (STRICT 1:1)
+          for (const o of parsed.orders) {
+            try {
+              console.info('[PLACE_ORDERS_MAP]', {
+                symbol: String((o as any)?.symbol || ''),
+                side: String((o as any)?.side || ''),
+                strategy: String((o as any)?.strategy || ''),
+                tpLevel: String((o as any)?.tpLevel || ''),
+                entry: Number((o as any)?.entry ?? 0),
+                sl: Number((o as any)?.sl ?? 0),
+                tp: Number((o as any)?.tp ?? 0)
+              })
+            } catch {}
+          }
+        } catch {}
+        const tStart = Date.now()
+        try { console.error('[BATCH_START]', { ts: new Date().toISOString(), count: parsed.orders.length }) } catch {}
         const result = await executeHotTradingOrders(parsed)
+        try { console.error('[BATCH_DONE]', { ts: new Date().toISOString(), dur_ms: Date.now() - tStart, success: !!(result as any)?.success }) } catch {}
         try { __lastPlaceOrders = { request: parsed, result } } catch {}
         if (!result?.success) {
           try {
@@ -912,6 +1168,200 @@ const server = http.createServer(async (req, res) => {
         console.error('[PLACE_ORDERS_ERROR]', e.message)
         try { __lastPlaceOrders = { request: null, result: { success: false, error: e?.message || 'unknown' } } } catch {}
         res.statusCode = 400
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      } finally { releaseBatch() }
+      return
+    }
+
+    // Test-only: place a small MARKET order to force a position (dev utility)
+    if (url.pathname === '/api/test/market_fill' && req.method === 'POST') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        if (!hasRealBinanceKeysGlobal()) { res.statusCode = 401; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ ok:false, error:'missing_binance_keys' })); return }
+        const chunks: Buffer[] = []
+        for await (const ch of req) chunks.push(ch as Buffer)
+        const bodyStr = Buffer.concat(chunks).toString('utf8')
+        const input = bodyStr ? JSON.parse(bodyStr) : null
+        const symbolRaw = String(input?.symbol || '')
+        const sideRaw = String(input?.side || 'BUY').toUpperCase()
+        const qtyRaw = input?.quantity
+        if (!symbolRaw || !qtyRaw) { res.statusCode = 400; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ ok:false, error:'missing_symbol_or_quantity' })); return }
+        const symbol = symbolRaw.toUpperCase().endsWith('USDT') ? symbolRaw.toUpperCase() : `${symbolRaw.toUpperCase()}USDT`
+        const side = sideRaw === 'SELL' ? 'SELL' : 'BUY'
+        const api = getBinanceAPI() as any
+        // Detect hedge mode and fetch stepSize for qty quantization
+        let isHedgeMode = false
+        try { isHedgeMode = Boolean(await (api as any).getHedgeMode()) } catch {}
+        let stepSize: number | null = null
+        try {
+          const info = await api.getSymbolInfo(symbol)
+          const lf = (info?.filters || []).find((f: any) => f?.filterType === 'LOT_SIZE')
+          stepSize = lf ? Number(lf.stepSize) : null
+        } catch {}
+        const quantizeFloor = (value: number, step: number): number => {
+          const s = String(step)
+          const idx = s.indexOf('.')
+          const decimals = idx >= 0 ? (s.length - idx - 1) : 0
+          const factor = Math.pow(10, decimals)
+          const v = Math.round(value * factor)
+          const st = Math.round(step * factor)
+          return Math.floor(v / st) * st / factor
+        }
+        const qtyNumIn = Number(qtyRaw)
+        if (!Number.isFinite(qtyNumIn) || qtyNumIn <= 0) { res.statusCode = 400; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ ok:false, error:'bad_quantity' })); return }
+        const qtyNum = (Number.isFinite(stepSize as any) && (stepSize as number) > 0) ? quantizeFloor(qtyNumIn, stepSize as number) : qtyNumIn
+        const quantity = String(qtyNum)
+        const baseParams: any = { symbol, side, type: 'MARKET', quantity, newOrderRespType: 'RESULT' }
+        if (isHedgeMode) baseParams.positionSide = side === 'BUY' ? 'LONG' : 'SHORT'
+        try { console.info('[TEST_MARKET_FILL_REQ]', params) } catch {}
+        const r = await api.placeOrder(baseParams)
+        try { console.info('[TEST_MARKET_FILL_RES]', { symbol, orderId: (r as any)?.orderId ?? null }) } catch {}
+        res.statusCode = 200
+        res.setHeader('content-type','application/json')
+        res.end(JSON.stringify({ ok: true, result: r }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type','application/json')
+        res.end(JSON.stringify({ ok:false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+
+    // New: Place only exits (SL/TP) for an existing or soon-to-exist position
+    if (url.pathname === '/api/place_exits' && req.method === 'POST') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        const chunks: Buffer[] = []
+        for await (const ch of req) chunks.push(ch as Buffer)
+        const bodyStr = Buffer.concat(chunks).toString('utf8')
+        const input = bodyStr ? JSON.parse(bodyStr) : null
+        if (!input || typeof input !== 'object') {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'bad_request' }))
+          return
+        }
+        const symbolRaw = String(input.symbol || '')
+        if (!symbolRaw) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'missing_symbol' }))
+          return
+        }
+        const normalizeSymbol = (s: string): string => {
+          let v = String(s || '').trim().toUpperCase()
+          if (!v) return ''
+          if (v.includes('/')) v = v.replace('/', '')
+          if (!v.endsWith('USDT')) v = `${v}USDT`
+          return v
+        }
+        const symbol = normalizeSymbol(symbolRaw)
+        const sl = Number(input.sl)
+        const tp = Number(input.tp)
+        const forceTpLimitRO = Boolean(input.limit_reduce_only === true)
+        if (!Number.isFinite(sl) && !Number.isFinite(tp)) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'missing_sl_or_tp' }))
+          return
+        }
+
+        const api = getBinanceAPI() as any
+        // Hedge mode detection
+        // Detect account mode: one-way vs hedge
+        let isHedgeMode = false
+        try { isHedgeMode = Boolean(await (getBinanceAPI() as any).getHedgeMode()) } catch {}
+
+        // RAW passthrough: pokud je zapnuto, neposouvej ceny na tick – použij přesně vstup
+        const rawMode = ((tradingCfg as any)?.RAW_PASSTHROUGH === true)
+        // Obtain filters for rounding and step for qty
+        let tickSize: number | null = null
+        let stepSize: number | null = null
+        try {
+          const info = await api.getSymbolInfo(symbol)
+          const pf = (info?.filters || []).find((f: any) => f?.filterType === 'PRICE_FILTER')
+          const lf = (info?.filters || []).find((f: any) => f?.filterType === 'LOT_SIZE')
+          tickSize = pf ? Number(pf.tickSize) : null
+          stepSize = lf ? Number(lf.stepSize) : null
+        } catch {}
+        if (!rawMode) {
+          if (!Number.isFinite(tickSize) || (tickSize as number) <= 0) {
+            res.statusCode = 422
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify({ ok: false, error: 'missing_price_filter' }))
+            return
+          }
+        }
+        const quantize = (value: number, step: number): number => {
+          const s = String(step)
+          const idx = s.indexOf('.')
+          const decimals = idx >= 0 ? (s.length - idx - 1) : 0
+          const factor = Math.pow(10, decimals)
+          return Math.round(value * factor) / factor
+        }
+        const quantizeFloor = (value: number, step: number): number => {
+          const s = String(step)
+          const idx = s.indexOf('.')
+          const decimals = idx >= 0 ? (s.length - idx - 1) : 0
+          const factor = Math.pow(10, decimals)
+          const v = Math.round(value * factor)
+          const st = Math.round(step * factor)
+          return Math.floor(v / st) * st / factor
+        }
+        const slRounded = Number.isFinite(sl) ? (rawMode ? sl : quantize(sl, tickSize as number)) : null
+        const tpRounded = Number.isFinite(tp) ? (rawMode ? tp : quantize(tp, (tickSize as number))) : null
+
+        // Determine current position size
+        let positionQty: string | null = null
+        try {
+          const pos = await api.getPositions()
+          const p = (Array.isArray(pos) ? pos : []).find((x: any) => String(x?.symbol) === symbol)
+          const amt = Number(p?.positionAmt)
+          if (Number.isFinite(amt) && Math.abs(amt) > 0) positionQty = String(Math.abs(amt))
+        } catch {}
+
+        const workingType = String((tradingCfg as any)?.EXIT_WORKING_TYPE || 'MARK_PRICE') as 'MARK_PRICE' | 'CONTRACT_PRICE'
+
+        const out: any = { ok: true, symbol, sl: null as any, tp: null as any }
+
+        if (Number.isFinite(slRounded as any)) {
+          const slParams: any = isHedgeMode
+            ? { symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(slRounded), closePosition: true, workingType, positionSide: 'LONG', newOrderRespType: 'RESULT' }
+            : { symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(slRounded), closePosition: true, workingType, newOrderRespType: 'RESULT' }
+          out.sl = await api.placeOrder(slParams)
+        }
+        if (Number.isFinite(tpRounded as any)) {
+          if (forceTpLimitRO) {
+            if (!Number.isFinite(stepSize as any) || (stepSize as number) <= 0) {
+              res.statusCode = 422
+              res.setHeader('content-type', 'application/json')
+              res.end(JSON.stringify({ ok: false, error: 'missing_step_size' }))
+              return
+            }
+            if (!positionQty) {
+              res.statusCode = 422
+              res.setHeader('content-type', 'application/json')
+              res.end(JSON.stringify({ ok: false, error: 'no_position_for_limit_tp' }))
+              return
+            }
+            const qtyNum = quantizeFloor(Number(positionQty), stepSize as number)
+            const qtyStr = String(qtyNum)
+            const tpParams: any = isHedgeMode
+              ? { symbol, side: 'SELL', type: 'TAKE_PROFIT', price: String(tpRounded), stopPrice: String(tpRounded), timeInForce: 'GTC', quantity: qtyStr, reduceOnly: true, workingType, positionSide: 'LONG', newOrderRespType: 'RESULT' }
+              : { symbol, side: 'SELL', type: 'TAKE_PROFIT', price: String(tpRounded), stopPrice: String(tpRounded), timeInForce: 'GTC', quantity: qtyStr, reduceOnly: true, workingType, newOrderRespType: 'RESULT' }
+            out.tp = await api.placeOrder(tpParams)
+          } else {
+            const tpParams: any = { symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: String(tpRounded), closePosition: true, workingType, newOrderRespType: 'RESULT' }
+            out.tp = await api.placeOrder(tpParams)
+          }
+        }
+
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(out))
+      } catch (e: any) {
+        res.statusCode = 500
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
       }

@@ -54,8 +54,7 @@ function useNowTick(): number {
 
 function roundToTick(value: number, tickSize: number): number {
   if (!Number.isFinite(value) || !Number.isFinite(tickSize) || tickSize <= 0) return value
-  const factor = Math.round(1 / tickSize)
-  return Math.round(value * factor) / factor
+  return Math.round(value / tickSize) * tickSize
 }
 
 function roundDown(value: number, step: number): number {
@@ -155,18 +154,16 @@ export const SetupsTable: React.FC<Props> = ({ finalPicks, finalPickerStatus, fi
 
   const copyToast = () => { setCopied(true); window.setTimeout(()=>setCopied(false), 1200) }
 
-  const copyPicks = () => { try { navigator.clipboard.writeText(JSON.stringify(finalPicks ?? [], null, 2)) } catch {} }
+  const copyPicks = () => { try { navigator.clipboard.writeText(JSON.stringify(finalPicks ?? [], null, 2)) } catch { console.info('Clipboard skipped: document not focused') } }
 
   
 
   function serializePick(p: FinalPick) {
     const plan = computeOrderPlan(p)
-    const f = plan.filters
-    const tick = f.tickSize
-    const entryR = roundToTick(p.entry, tick)
-    const slR = roundToTick(p.sl, tick)
-    const tp1R = roundToTick(p.tp1, tick)
-    const tp2R = roundToTick(p.tp2, tick)
+    const entryR = p.entry
+    const slR = p.sl
+    const tp1R = p.tp1
+    const tp2R = p.tp2
     const rrr1 = Math.abs((tp1R - entryR) / Math.max(1e-12, Math.abs(entryR - slR)))
     const rrr2 = Math.abs((tp2R - entryR) / Math.max(1e-12, Math.abs(entryR - slR)))
     const expiryAt = new Date(runStartedAt + (p.expiry_minutes * 60_000)).toISOString()
@@ -192,7 +189,7 @@ export const SetupsTable: React.FC<Props> = ({ finalPicks, finalPickerStatus, fi
       notional: Number.isFinite(plan.notional) ? Number(plan.notional.toFixed(2)) : 0,
       expiry_minutes: p.expiry_minutes,
       expiry_at: expiryAt,
-      exchange_filters: f,
+      exchange_filters: plan.filters,
     }
   }
 
@@ -201,7 +198,7 @@ export const SetupsTable: React.FC<Props> = ({ finalPicks, finalPickerStatus, fi
       const obj = serializePick(p)
       await navigator.clipboard.writeText(JSON.stringify(obj, null, 2))
       copyToast()
-    } catch {}
+    } catch { console.info('Clipboard skipped: document not focused') }
   }
 
   async function copyAll() {
@@ -209,7 +206,7 @@ export const SetupsTable: React.FC<Props> = ({ finalPicks, finalPickerStatus, fi
       const arr = limited.map(serializePick)
       await navigator.clipboard.writeText(JSON.stringify(arr, null, 2))
       copyToast()
-    } catch {}
+    } catch { console.info('Clipboard skipped: document not focused') }
   }
 
   // Expose global trigger for ReportView without prop drilling
@@ -249,7 +246,7 @@ export const SetupsTable: React.FC<Props> = ({ finalPicks, finalPickerStatus, fi
         <div className="error" style={{ margin: '8px 0' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
             <strong>Final Picker selhal (STRICT NO-FALLBACK)</strong>
-            <button className="btn" onClick={()=>{ try { navigator.clipboard.writeText(JSON.stringify(finalPickerMeta ?? {}, null, 2)) } catch {} }}>Copy details</button>
+            <button className="btn" onClick={()=>{ try { navigator.clipboard.writeText(JSON.stringify(finalPickerMeta ?? {}, null, 2)) } catch { console.info('Clipboard skipped: document not focused') } }}>Copy details</button>
           </div>
           <div style={{ fontSize: 12, opacity: .9, marginTop: 4 }}>Code: {finalPickerMeta?.error_code ?? 'unknown'}</div>
         </div>
@@ -298,12 +295,10 @@ export const SetupsTable: React.FC<Props> = ({ finalPicks, finalPickerStatus, fi
               const { text, expired } = fmtExpiryCountdown(now, runStartedAt, p.expiry_minutes)
               const isAdvisory = posture === 'NO-TRADE'
               const canOverride = settings.override_no_trade_execution && (p.confidence ?? 0) >= (settings.no_trade_confidence_floor ?? 0.65)
-              const f0 = (exchangeFilters as any)?.[p.symbol] || { tickSize: 1e-6, stepSize: 1e-6 }
-              const tick = Number.isFinite(f0.tickSize) ? f0.tickSize : 1e-6
-              const entryR = roundToTick(p.entry, tick)
-              const slR = roundToTick(p.sl, tick)
-              const tp1R = roundToTick(p.tp1, tick)
-              const tp2R = roundToTick(p.tp2, tick)
+              const entryR = p.entry
+              const slR = p.sl
+              const tp1R = p.tp1
+              const tp2R = p.tp2
               const snapTs = (()=>{ try { const raw = localStorage.getItem('lastRunAtMs'); return raw ? Number(raw) : runStartedAt } catch { return runStartedAt } })()
               const staleMs = Date.now() - snapTs
               const isStale5 = Number.isFinite(staleMs as any) && staleMs >= 5*60_000
@@ -378,7 +373,7 @@ export const SetupsTable: React.FC<Props> = ({ finalPicks, finalPickerStatus, fi
               </div>
               <div className="row gap-8" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
                 <button className="btn" onClick={() => setConfirming(null)}>Cancel</button>
-                <button className="btn" disabled={disabled || (needsAccept && !accept) || executing} title={disabled ? reason : (needsAccept && !accept ? 'Please accept NO-TRADE risk' : '')} onClick={() => { if (executing) return; setExecuting(true); try { navigator.clipboard.writeText(JSON.stringify({ pick: confirming, plan }, null, 2)) } catch {}; setTimeout(()=>setExecuting(false), 2000); setConfirming(null) }}>
+                <button className="btn" disabled={disabled || (needsAccept && !accept) || executing} title={disabled ? reason : (needsAccept && !accept ? 'Please accept NO-TRADE risk' : '')} onClick={() => { if (executing) return; setExecuting(true); try { navigator.clipboard.writeText(JSON.stringify({ pick: confirming, plan }, null, 2)) } catch { console.info('Clipboard skipped: document not focused') }; setTimeout(()=>setExecuting(false), 2000); setConfirming(null) }}>
                   {executing ? 'Executing…' : 'Execute'}{showSoftWarn ? <span className="pill" style={{ marginLeft: 6, background:'#fff3cd', color:'#92400e' }}>warn</span> : null}
                 </button>
               </div>

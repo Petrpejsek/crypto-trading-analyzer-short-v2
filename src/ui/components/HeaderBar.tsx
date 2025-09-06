@@ -42,6 +42,13 @@ export const HeaderBar: React.FC<Props> = ({ running, onRun, onExportSnapshot, o
   useEffect(() => { try { localStorage.setItem('auto_copy_enabled', autoCopyEnabled ? '1' : '0') } catch {} }, [autoCopyEnabled])
   useEffect(() => { try { localStorage.setItem('auto_copy_minutes', String(Math.max(0, Math.floor(autoCopyMinutes || 0)))) } catch {} }, [autoCopyMinutes])
 
+  // Persist user header preferences (strictly UI prefs only)
+  useEffect(() => { try { localStorage.setItem('ui_preset', String(defaultPreset)) } catch {} }, [defaultPreset])
+  useEffect(() => { try { localStorage.setItem('ui_side', String(defaultSide)) } catch {} }, [defaultSide])
+  useEffect(() => { try { localStorage.setItem('ui_tp_level', String(defaultTPLevel)) } catch {} }, [defaultTPLevel])
+  useEffect(() => { try { localStorage.setItem('ui_amount', String(defaultAmount)) } catch {} }, [defaultAmount])
+  useEffect(() => { try { localStorage.setItem('ui_leverage', String(defaultLeverage)) } catch {} }, [defaultLeverage])
+
   const totalSeconds = useMemo(() => Math.max(0, Math.floor((autoCopyMinutes || 0) * 60)), [autoCopyMinutes])
 
   // Reset odpočtu při změně minut
@@ -142,10 +149,10 @@ export const HeaderBar: React.FC<Props> = ({ running, onRun, onExportSnapshot, o
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
               <input
                 type="checkbox"
-                checked={autoCopyEnabled && totalSeconds > 0}
+                checked={autoCopyEnabled}
                 onChange={(e)=>setAutoCopyEnabled(e.target.checked)}
-                disabled={totalSeconds === 0}
-                title={totalSeconds === 0 ? 'Nastavte minuty > 0' : 'Zapnout/vypnout auto Copy RAW'}
+                // Povolit přepínání vždy; odpočet běží jen když minuty > 0
+                title={'Zapnout/vypnout auto Copy RAW'}
               />
               <span style={{ opacity: .9 }}>On</span>
             </label>

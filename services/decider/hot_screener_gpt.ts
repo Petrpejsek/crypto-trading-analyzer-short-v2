@@ -50,29 +50,7 @@ export async function runHotScreener(input: HotScreenerInput): Promise<{ ok: boo
       project: (process as any)?.env?.OPENAI_PROJECT
     } as any)
 
-    const instructions = `Reply with JSON only. No prose. Follow the JSON schema exactly.
-
-CRITICAL RULES:
-1. NEVER repeat the same symbol twice - each symbol can appear only ONCE in your response
-2. Return exactly 3-5 DIFFERENT coins maximum
-3. Analyze SPECIFIC numerical data for each UNIQUE coin
-
-DATA ANALYSIS REQUIREMENTS:
-- RSI values (oversold <30, overbought >70)
-- Price vs EMA levels (bullish if price > EMA20)  
-- Volume 24h (higher = better liquidity)
-- ATR values (volatility indicator)
-- Support/resistance levels
-- Funding rates and OI changes
-
-Base your confidence and reasoning on ACTUAL numbers from the data, not generic market knowledge.
-
-Example reasoning: "RSI 29.17 indicates oversold conditions, price 4387 vs EMA20 4433 shows bearish momentum, but high volume 41.36B suggests potential reversal."
-
-FORBIDDEN: 
-- Do NOT repeat any symbol
-- Do NOT use generic phrases like "market dominance"
-- Do NOT analyze the same coin multiple times`
+    const instructions = fs.readFileSync(path.resolve('prompts/hot_screener.md'), 'utf8')
     const model = 'gpt-4o'
     const timeoutMs = 15000 // 15 seconds timeout
 
@@ -94,6 +72,7 @@ FORBIDDEN:
           strict: true
         }
       },
+      temperature: (()=>{ try { const t = Number(process.env.HOT_SCREENER_TEMPERATURE); return Number.isFinite(t) ? t : 0.2 } catch { return 0.2 } })(),
       max_completion_tokens: 4096
     }
 

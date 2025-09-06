@@ -1,0 +1,1 @@
+{"orders": [{"symbol": "ALPINEUSDT", "side": "LONG", "strategy": "conservative", "tpLevel": "tp1", "orderType": "limit", "amount": 7, "leverage": 1, "entry": 1.9029, "sl": 1.8548, "tp": 1.9509}]}

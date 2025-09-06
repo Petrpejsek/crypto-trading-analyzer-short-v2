@@ -1,6 +1,6 @@
 {
-  "requestTimeoutMs": 6000,
-  "timeoutMs": 6000,
+  "requestTimeoutMs": 30000,
+  "timeoutMs": 30000,
   "retry": {
     "maxAttempts": 2,
     "baseDelayMs": 400,
@@ -9,7 +9,7 @@
   "concurrency": 16,
   "candles": 220,
   "depthMode": "bookTicker+depth",
-  "globalDeadlineMs": 8000,
+  "globalDeadlineMs": 20000,
   "klines": {
     "btceth": {
       "H4": { "interval": "4h", "limit": 120 },
@@ -28,7 +28,7 @@
     "topN": 50,
     "strategy": "gainers" 
   },
-  "preferWSAltH1": false,
+  "preferWSAltH1": true,
   "backfillH1Limit": 48,
   "altBackfillTimeoutMs": 5000,
   "altBackfillConcurrency": 6,

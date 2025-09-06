@@ -40,6 +40,7 @@ import CandidatesPreview from './components/CandidatesPreview';
 import { HotScreener, type HotPick } from './components/HotScreener';
 import { EntryControls, type EntryStrategyData, type CoinControl } from './components/EntryControls';
 import OrdersPanel from './components/OrdersPanel';
+// import OrderDebugFooter from './components/OrderDebugFooter';
 
 export const App: React.FC = () => {
   // TTL for locally cached raw coin list (avoid stale list on ~5m pipeline)
@@ -105,8 +106,8 @@ export const App: React.FC = () => {
 
   // Load hot trading settings from localStorage
   const hotTradingSettings = useMemo(() => ({
-    conservativeBuffer: 0.1,
-    aggressiveBuffer: 0.3,
+    conservativeBuffer: 0,
+    aggressiveBuffer: 0,
     maxPerCoin: 500,
     maxCoins: 5,
     defaultStrategy: 'conservative',
@@ -160,15 +161,12 @@ export const App: React.FC = () => {
   }
 
   const coinsSource = useMemo(() => {
-    // Prefer rawCoins (50) only if they are fresh; otherwise fallback to current snapshot.universe (48)
-    const freshRaw = (() => {
-      if (!rawCoins || !Array.isArray(rawCoins) || rawCoins.length === 0) return null
-      const ts = rawCoinsTs ?? null
-      if (!Number.isFinite(ts as any)) return null
-      return (Date.now() - (ts as number)) <= RAW_COINS_TTL_MS ? rawCoins : null
-    })()
-    return freshRaw || snapshot?.universe || []
-  }, [rawCoins, rawCoinsTs, snapshot])
+    // STRICT: použij pouze fresh rawCoins, jinak prázdný seznam
+    if (!rawCoins || !Array.isArray(rawCoins) || rawCoins.length === 0) return []
+    const ts = rawCoinsTs ?? null
+    if (!Number.isFinite(ts as any)) return []
+    return (Date.now() - (ts as number)) <= RAW_COINS_TTL_MS ? rawCoins : []
+  }, [rawCoins, rawCoinsTs])
   
   const columns = 3
   const displayCoins = useMemo(() => {
@@ -205,7 +203,7 @@ export const App: React.FC = () => {
       try { localStorage.setItem('lastRunAtMs', String(nowMs)) } catch {}
       async function fetchJsonWithTimeout<T=any>(input: RequestInfo | URL, init: RequestInit & { timeoutMs?: number } = {}): Promise<{ ok: boolean; status: number; json: T | null }> {
         const ac = new AbortController()
-        const timeoutMs = init.timeoutMs ?? 12000
+        const timeoutMs = init.timeoutMs ?? 30000
         const to = window.setTimeout(() => {
           try {
             // Provide an explicit reason so the browser error is meaningful
@@ -231,7 +229,7 @@ export const App: React.FC = () => {
       // removed: local fetchWithRetry (using module-level helper)
 
       const snapUrl = `/api/snapshot${universeStrategy === 'gainers' ? '?universe=gainers&topN=50' : '?topN=50'}`
-      const snap = await fetchJsonWithTimeout<MarketRawSnapshot>(snapUrl, { timeoutMs: 25000 })
+      const snap = await fetchJsonWithTimeout<MarketRawSnapshot>(snapUrl, { timeoutMs: 30000 })
       if (!snap.ok) {
         if (snap.json) { setErrorPayload(snap.json); throw new Error((snap.json as any)?.error || `HTTP ${snap.status}`) }
         throw new Error(`HTTP ${snap.status}`);
@@ -346,7 +344,7 @@ export const App: React.FC = () => {
             }))
           }
           // Call backend Final Picker (node-side runs GPT + validation)
-          const fpResp = await fetchJsonWithTimeout('/api/final_picker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), timeoutMs: 15000 })
+          const fpResp = await fetchJsonWithTimeout('/api/final_picker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), timeoutMs: 30000 })
           const res = fpResp.ok ? (fpResp.json || { ok: false, code: 'unknown', latencyMs: 0, data: { picks: [] } }) : { ok: false, code: (fpResp.status === 0 ? 'timeout' : 'http'), latencyMs: 0, data: { picks: [] }, meta: { http_status: fpResp.status } }
           const saveTelem = (status: string, code?: string, latency?: number, picksCount?: number) => {
             const telem = {
@@ -442,14 +440,16 @@ export const App: React.FC = () => {
   const onExportFeatures = () => { if (features) downloadJson(features, 'features') };
 
   // Safe clipboard write: requires focused document in modern browsers
-  const writeClipboardSafely = async (text: string) => {
+  const writeClipboardSafely = async (text: string, { requireFocusForAuto = true }: { requireFocusForAuto?: boolean } = {}) => {
     try {
       const hasFocus = (() => { try { return typeof document !== 'undefined' && typeof document.hasFocus === 'function' ? document.hasFocus() : true } catch { return true } })()
-      if (!hasFocus) {
+      const isVisible = (() => { try { return typeof document !== 'undefined' ? (document.visibilityState === 'visible') : true } catch { return true } })()
+      if ((!hasFocus || !isVisible) && requireFocusForAuto) {
         try { window.focus() } catch {}
         await new Promise(res => setTimeout(res, 120))
         const focusedNow = (() => { try { return typeof document !== 'undefined' && typeof document.hasFocus === 'function' ? document.hasFocus() : true } catch { return true } })()
-        if (!focusedNow) {
+        const visibleNow = (() => { try { return typeof document !== 'undefined' ? (document.visibilityState === 'visible') : true } catch { return true } })()
+        if (!(focusedNow && visibleNow)) {
           const err = new Error('document_not_focused') as any
           err.code = 'document_not_focused'
           throw err
@@ -483,8 +483,11 @@ export const App: React.FC = () => {
           try {
             await writeClipboardSafely(JSON.stringify(asset, null, 2))
           } catch (e: any) {
-            const msg = String(e?.code || e?.message || '') === 'document_not_focused' ? 'Please focus this tab and click again.' : (e?.message || 'write failed')
-            setError(`Clipboard error: ${msg}`)
+            if (String(e?.code || e?.message || '') === 'document_not_focused') {
+              console.info('Clipboard skipped: document not focused')
+            } else {
+              setError(`Clipboard error: ${e?.message || 'write failed'}`)
+            }
             return
           }
           setCopiedSymbol(sym)
@@ -503,6 +506,8 @@ export const App: React.FC = () => {
 
   const copyRawAll = async () => {
     setRawLoading(true)
+    // Clear previous UI error state before fresh fetch
+    setError(null)
     try {
       const q = `${universeStrategy === 'gainers' ? 'universe=gainers&' : ''}topN=50`
       const res = await fetchWithRetry(`/api/metrics?${q}`)
@@ -538,6 +543,8 @@ export const App: React.FC = () => {
       // Update UI state (no localStorage persistence of rawCoins)
       setRawCoins(coins)
       setRawCoinsTs(Date.now())
+      // Success: ensure any stale error banner is cleared
+      setError(null)
       
       // OPRAVA: Validované BTC/ETH regime calculations
       try {
@@ -572,8 +579,11 @@ export const App: React.FC = () => {
             copiedOk = true
           }
         } catch (e: any) {
-          const msg = String(e?.code || e?.message || '') === 'document_not_focused' ? 'Please focus this tab and click again.' : (e?.message || 'write failed')
-          setError(`Clipboard error: ${msg}`)
+          if (String(e?.code || e?.message || '') === 'document_not_focused') {
+            console.info('Clipboard skipped: document not focused')
+          } else {
+            setError(`Clipboard error: ${e?.message || 'write failed'}`)
+          }
         }
         if (copiedOk) {
           setRawCopied(true)
@@ -610,7 +620,11 @@ export const App: React.FC = () => {
       setSelectedCopied(true)
       window.setTimeout(()=>setSelectedCopied(false), 1200)
     } catch (e: any) {
-      setError(`Clipboard error: ${e?.message || 'write failed'}`)
+      if (String(e?.code || e?.message || '') === 'document_not_focused') {
+        console.info('Clipboard skipped: document not focused')
+      } else {
+        setError(`Clipboard error: ${e?.message || 'write failed'}`)
+      }
     }
   }
 
@@ -649,8 +663,14 @@ export const App: React.FC = () => {
       
       // Auto-select pouze "🟢 Super Hot" picks, ale vynecháme symboly,
       // které mají otevřené pozice nebo čekající objednávky (duplicitní analýza nechceme)
+      const isSuperHotRating = (rating: string): boolean => {
+        const raw = String(rating || '')
+        const lower = raw.toLowerCase()
+        // Tolerantní detekce: emoji i čistý text, různé mezery/příp. lokalizace
+        return raw.includes('🟢') || lower.includes('super hot') || lower.includes('super A0hot') || lower.replace(/\s+/g, ' ').includes('super hot')
+      }
       const superHotSymbols: string[] = hotPicks
-        .filter((pick: any) => pick.rating === '🟢 Super Hot')
+        .filter((pick: any) => isSuperHotRating(pick.rating))
         .map((pick: any) => String(pick.symbol || ''))
         .filter(Boolean)
 
@@ -659,27 +679,21 @@ export const App: React.FC = () => {
       }
       const getBlockedSymbols = async (): Promise<Set<string>> => {
         const blocked = new Set<string>()
-        const [oRes, pRes] = await Promise.all([
-          fetchWithRetry('/api/open_orders'),
-          fetchWithRetry('/api/positions')
-        ])
-        if (!oRes.ok) {
-          throw new Error(`open_orders_block_check:${oRes.status}`)
+        // Consolidated endpoint returns 200 and empty arrays when WS user-data is not ready
+        const res = await fetchWithRetry('/api/orders_console')
+        if (!res.ok) {
+          // Do not fail the whole flow – just treat as empty
+          return blocked
         }
-        if (!pRes.ok) {
-          throw new Error(`positions_block_check:${pRes.status}`)
-        }
-        const oJson: any = await oRes.json()
-        const pJson: any = await pRes.json()
-        const oList = Array.isArray(oJson?.orders) ? oJson.orders : []
+        const j: any = await res.json()
+        const oList = Array.isArray(j?.open_orders) ? j.open_orders : []
         for (const o of oList) {
           const sym = normalize(String(o?.symbol || ''))
           const reduceOnly = Boolean(o?.reduceOnly)
           const closePosition = Boolean(o?.closePosition)
-          // Block only entry-like orders (not pure exit orders)
           if (sym && !(reduceOnly || closePosition)) blocked.add(sym)
         }
-        const pList = Array.isArray(pJson?.positions) ? pJson.positions : []
+        const pList = Array.isArray(j?.positions) ? j.positions : []
         for (const p of pList) {
           const size = Number(p?.size)
           const sym = normalize(String(p?.symbol || ''))
@@ -716,17 +730,18 @@ export const App: React.FC = () => {
       const strategies: EntryStrategyData[] = []
       const payloadsToCopy: Array<{ symbol: string; asset_data: any }> = []
       const priceMap: Record<string, number> = {}
+      const failed: string[] = []
       
       for (const symbol of selectedHotSymbols) {
         // Get detailed asset data
         const assetRes = await fetchWithRetry(`/api/intraday_any?symbol=${encodeURIComponent(symbol)}`)
-        if (!assetRes.ok) continue
+        if (!assetRes.ok) { failed.push(symbol); continue }
 
         const assetData = await assetRes.json()
         const assets = Array.isArray(assetData?.assets) ? assetData.assets : []
         const asset = assets.find((a: any) => a?.symbol === symbol)
         
-        if (!asset) continue
+        if (!asset) { failed.push(symbol); continue }
         // Collect exact GPT payload per symbol for auto-copy
         payloadsToCopy.push({ symbol, asset_data: asset })
         try { const p = Number(asset?.price); if (Number.isFinite(p) && p > 0) priceMap[symbol] = p } catch {}
@@ -744,68 +759,70 @@ export const App: React.FC = () => {
           })
         })
 
-        if (!strategyRes.ok) continue
+        if (!strategyRes.ok) { failed.push(symbol); continue }
 
         const strategyResult = await strategyRes.json()
         
         if (strategyResult.ok && strategyResult.data) {
           strategies.push(strategyResult.data)
-        }
+        } else { failed.push(symbol) }
       }
 
       // Auto-copy exact payloads that are sent to /api/entry_strategy
-      try {
-        if (payloadsToCopy.length === 0) {
-          setError('Analyze Selected: no asset_data to copy for selected symbols.')
-        } else {
-          const text = JSON.stringify(payloadsToCopy, null, 2)
-          await writeClipboardSafely(text)
-          setSelectedCopied(true)
-          window.setTimeout(()=>setSelectedCopied(false), 1200)
+      {
+        const text = payloadsToCopy.length ? JSON.stringify(payloadsToCopy, null, 2) : ''
+        if (text) {
+          try {
+            await writeClipboardSafely(text, { requireFocusForAuto: true })
+            setSelectedCopied(true)
+            window.setTimeout(()=>setSelectedCopied(false), 1200)
+          } catch (e: any) {
+            // Auto-flow: když není focus/visible, nevyhazuj chybu – zobraz jen nenarušující info
+            if (String(e?.code||e?.message||'').includes('document_not_focused')) {
+              console.info('Clipboard skipped: document not focused')
+            } else {
+              setError(`Clipboard error: ${e?.message || 'write failed'}`)
+            }
+          }
         }
-      } catch (e: any) {
-        setError(`Clipboard error: ${e?.message || 'write failed'}`)
       }
 
       setEntryStrategies(strategies)
       setCurrentPrices(priceMap)
 
-      // Initialize coin controls
-      const controls: CoinControl[] = strategies.map(strategy => ({
-        symbol: strategy.symbol,
-        include: true,
-        side: defaultSide,
-        strategy: defaultPreset,
-        tpLevel: defaultTPLevel,
-        orderType: defaultPreset === 'conservative' ? 'limit' : 'stop_limit',
-        amount: defaultAmount,
-        leverage: defaultLeverage,
-        useCustomBuffer: false
-      }))
+      // Initialize coin controls without any locked values – purely display and switches
+      const controls: CoinControl[] = strategies.map(strategy => {
+        const plan = defaultPreset === 'conservative' ? strategy.conservative : strategy.aggressive
+        
+        return {
+          symbol: strategy.symbol,
+          include: true,
+          side: defaultSide,
+          strategy: defaultPreset,
+          tpLevel: defaultTPLevel,
+          orderType: defaultPreset === 'conservative' ? 'limit' : 'stop_limit',
+          amount: defaultAmount,
+          leverage: defaultLeverage,
+          useCustomBuffer: false,
+        }
+      })
 
       setCoinControls(controls)
       setEntryControlsStatus('success')
+      // Ulož seznam failnutých pro zobrazení v EntryControls
+      ;(window as any).__entry_failed_symbols = failed
     } catch (e: any) {
       setError(`Entry analysis error: ${e?.message || 'unknown'}`)
       setEntryControlsStatus('error')
     }
   }
 
-  // Auto-spuštění Entry Analysis po úspěšném Hot Screeneru, pokud je zapnuté Auto Prepare
+  // Disable auto re-lock: once locked, keep values until user explicitly changes strategy or relocks
+  // (No useEffect that overwrites lockedValues on entryStrategies update)
+
+  // Auto-spuštění Entry Analysis: DISABLED – pouze checkbox Auto Prepare v EntryControls může spouštět automaticky přípravu objednávek
   const lastAutoAnalyzeKeyRef = useRef<string>('')
-  useEffect(() => {
-    try {
-      const auto = localStorage.getItem('auto_prepare') === '1'
-      if (!auto) return
-      if (hotScreenerStatus !== 'success') return
-      if (!Array.isArray(selectedHotSymbols) || selectedHotSymbols.length === 0) return
-      const key = [...selectedHotSymbols].sort().join(',')
-      if (!key || key === lastAutoAnalyzeKeyRef.current) return
-      lastAutoAnalyzeKeyRef.current = key
-      // Spustit synchronizačně, ale bez čekání na UI thread
-      void runEntryAnalysis()
-    } catch {}
-  }, [hotScreenerStatus, selectedHotSymbols])
+  useEffect(() => { /* disabled per request */ }, [hotScreenerStatus, selectedHotSymbols])
 
   const handleCoinControlChange = (symbol: string, updates: Partial<CoinControl>) => {
     setCoinControls(prev => prev.map(control => 
@@ -831,55 +848,36 @@ export const App: React.FC = () => {
         if (!s) return null
         return strategy === 'conservative' ? s.conservative : s.aggressive
       }
-      const parsePriceLike = (v: string | number | null | undefined): number | null => {
-        if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? v : null
-        if (typeof v !== 'string') return null
-        try {
-          let s = v
-          // Remove parentheses content and percents
-          s = s.replace(/\((.*?)\)/g, ' ')
-          s = s.replace(/-?\d+(?:[\.,]\d+)?\s*%/g, ' ')
-          // Normalize en dash and remove obvious labels/ratios that inject small integers
-          s = s.replace(/–/g, '-')
-          s = s.replace(/\bTP\s*\d+\b/gi, 'TP')
-          s = s.replace(/\b\d+\s*[:xX]\s*\d+\b/g, ' ') // ratios like 2:1 or 1x3
-          s = s.replace(/\b\d+(?:[\.,]\d+)?\s*[rR]\b/g, ' ') // 2R, 1.5R
-          // Remove digits glued to letters (e.g., TP2, V2) to avoid picking those integers
-          s = s.replace(/[A-Za-z]+\d+(?=\b)/g, (m) => m.replace(/\d+/g, ''))
-          // Find numeric tokens (supports thousand separators and comma/dot decimals)
-          const re = /\d{1,3}(?:[\s,]\d{3})*(?:[\.,]\d+)?|\d+(?:[\.,]\d+)?/g
-          const matches = s.match(re)
-          if (!matches || matches.length === 0) return null
-          const normalizeNumber = (str: string): number | null => {
-            let t = str.trim()
-            const lastComma = t.lastIndexOf(',')
-            const lastDot = t.lastIndexOf('.')
-            const decIsComma = lastComma > lastDot
-            if (decIsComma) {
-              t = t.replace(/[\s\.]/g, '').replace(',', '.')
-            } else {
-              t = t.replace(/[\s,]/g, '')
-            }
-            const n = Number(t)
-            return Number.isFinite(n) && n > 0 ? n : null
-          }
-          // FIRST numeric token (left edge)
-          for (const m of matches) {
-            const n = normalizeNumber(m)
-            if (n !== null) return n
-          }
-          return null
-        } catch { return null }
+      // DEBUG: MEGA AUDIT všech dat před odesláním
+      console.log('[MEGA_DEBUG_START] ===== AUDIT PŘED ODESLÁNÍM =====')
+      console.log('[ENTRY_STRATEGIES_FULL]', entryStrategies)
+      console.log('[COIN_CONTROLS_FULL]', coinControls)
+      console.log('[INCLUDED_CONTROLS]', includedControls)
+      for (const c of includedControls) {
+        const strategy = entryStrategies.find(es => es.symbol === c.symbol)
+        console.log('[CONTROL_VS_STRATEGY]', { 
+          symbol: c.symbol, 
+          strategy: c.strategy, 
+          tpLevel: c.tpLevel,
+          control_data: c,
+          found_strategy: strategy || null,
+          conservative_plan: strategy?.conservative || null,
+          aggressive_plan: strategy?.aggressive || null
+        })
       }
-      // Only include symbols explicitly checked (include===true). This avoids stray orders
-      // Deduplicate by symbol – poslední nastavení vítězí
-      // Parse numeric ENTRY/SL/TP strictly – if any missing, stop and show error
+      
+      // ŽÁDNÉ LOCKED VALUES – použij přesně numbers z entryStrategies (strategie/plan)
+      // Vyloučit symboly, které nejsou zaškrtnuté. Dedup by symbol.
       const mapped = includedControls.map(c => {
         const plan = findPlan(c.symbol, c.strategy)
-        const entry = parsePriceLike(plan?.entry ?? null)
-        const sl = parsePriceLike(plan?.sl ?? null)
-        const tpVal = parsePriceLike(plan ? (plan as any)[c.tpLevel] : null)
-        try { console.info('[ORDER_PARSE]', { symbol: c.symbol, strategy: c.strategy, tpLevel: c.tpLevel, raw: { entry: plan?.entry, sl: plan?.sl, tp: plan ? (plan as any)[c.tpLevel] : null }, parsed: { entry, sl, tp: tpVal } }) } catch {}
+        if (!plan) throw new Error(`Missing strategy plan for ${c.symbol}`)
+        const entry = Number((plan as any)?.entry)
+        const sl = Number((plan as any)?.sl)
+        const tpKey = c.tpLevel as 'tp1' | 'tp2' | 'tp3'
+        const tpVal = Number((plan as any)?.[tpKey])
+        console.log('[UI_ORDER_MAP]', { symbol: c.symbol, strategy: c.strategy, tpLevel: c.tpLevel, plan: { entry, sl, tp: tpVal } })
+        console.log('[UI_PAYLOAD_VS_DISPLAY]', JSON.stringify({ symbol: c.symbol, payload: { entry, sl, tp: tpVal }, note: 'Check if this matches UI display' }, null, 2))
+
         return {
           symbol: c.symbol,
           side: (c.side || 'LONG') as any,
@@ -888,8 +886,6 @@ export const App: React.FC = () => {
           orderType: c.orderType || (c.strategy === 'conservative' ? 'limit' : 'stop_limit'),
           amount: c.amount,
           leverage: c.leverage,
-          useBuffer: c.useCustomBuffer === true,
-          bufferPercent: c.useCustomBuffer ? (c.customBuffer ?? 0) : undefined,
           entry,
           sl,
           tp: tpVal
@@ -912,15 +908,15 @@ export const App: React.FC = () => {
           return
         }
       }
-      // STRICT 1:1 preflight – ověř, že parsed hodnoty přesně odpovídají 1. číslu z GPT stringů
+      // STRICT 1:1 preflight – ověř, že klient posílá přesně čísla z aktuálního plánu (zobrazeného v UI)
       {
         const diffs: string[] = []
         for (const c of includedControls) {
           const plan = findPlan(c.symbol, c.strategy)
           if (!plan) continue
-          const expEntry = parsePriceLike(plan.entry)
-          const expSL = parsePriceLike(plan.sl)
-          const expTP = parsePriceLike((plan as any)[c.tpLevel])
+          const expEntry = Number((plan as any).entry) || 0
+          const expSL = Number((plan as any).sl) || 0
+          const expTP = Number((plan as any)[c.tpLevel]) || 0
           const got = mapped.find(m => m.symbol === c.symbol)
           if (!got) continue
           const add = (label: string, exp: any, val: any) => {
@@ -961,6 +957,7 @@ export const App: React.FC = () => {
       }
       if (orders.length === 0) return
       const payload = { orders }
+      console.log('[PLACE_ORDERS_PAYLOAD]', payload)
 
       const res = await fetch('/api/place_orders', {
         method: 'POST',
@@ -976,6 +973,35 @@ export const App: React.FC = () => {
         return
       }
       console.log('[PLACE_ORDERS_OK]', json)
+
+      // Post-verify 1:1 echo: compare payload vs server-accepted prices
+      try {
+        const toNum = (v:any)=>{ const n = Number(v); return Number.isFinite(n) ? n : 0 }
+        const toNumOrNaN = (v:any)=>{ const n = Number(v); return Number.isFinite(n) ? n : NaN }
+        const serverMap: Record<string, { entry: number; sl: number; tp: number }> = {}
+        for (const r of (json.orders||[])) {
+          const sym = String(r?.symbol||'')
+          const entry = toNum(r?.entry_order?.price)
+          const sl = toNum((r?.sl_order?.stopPrice ?? r?.sl_order?.price))
+          // TP může být záměrně odložen (MARK gating) => pokud server TP neposlal, neporovnávejme s nulou
+          const tpRaw = (r?.tp_order?.stopPrice ?? r?.tp_order?.price)
+          const tp = toNumOrNaN(tpRaw)
+          if (sym) serverMap[sym] = { entry, sl, tp }
+        }
+        const diffs: string[] = []
+        for (const o of orders) {
+          const s = serverMap[o.symbol]
+          if (!s) continue
+          const neq = (a:number,b:number)=> Math.abs(a-b) > 1e-9
+          if (neq(toNum(o.entry), s.entry)) diffs.push(`${o.symbol} ENTRY: ${o.entry} vs ${s.entry}`)
+          if (neq(toNum(o.sl), s.sl)) diffs.push(`${o.symbol} SL: ${o.sl} vs ${s.sl}`)
+          // TP porovnej jen pokud server skutečně TP echo vrátil jako číslo (není NaN)
+          if (Number.isFinite(s.tp) && neq(toNum(o.tp), s.tp)) diffs.push(`${o.symbol} TP: ${o.tp} vs ${s.tp}`)
+        }
+        if (diffs.length) {
+          setError(`STRICT 1:1 echo mismatch (server):\n${diffs.join('\n')}`)
+        }
+      } catch {}
       // success notice: non-blocking (console only)
     } catch (e: any) {
       setError(`Order submit error: ${e?.message || 'unknown'}`)
@@ -985,24 +1011,8 @@ export const App: React.FC = () => {
   }
 
   // WS health poll (best-effort)
-  useEffect(() => {
-    let mounted = true
-    let timer: number | undefined
-    const poll = async () => {
-      try {
-        const res = await fetch('/api/ws/health')
-        if (res.ok) {
-          const h = await res.json()
-          if (mounted) setWsHealth(h)
-        } else {
-          if (mounted) setWsHealth(null)
-        }
-      } catch { if (mounted) setWsHealth(null) }
-      timer = window.setTimeout(poll, 4000)
-    }
-    poll()
-    return () => { mounted = false; if (timer) clearTimeout(timer) }
-  }, [])
+  // WS health poll disabled in production to minimize requests
+  useEffect(() => { /* disabled */ }, [])
 
   // No auto-run on load; wait for explicit user click
 
@@ -1095,7 +1105,7 @@ export const App: React.FC = () => {
           </pre>
         </details>
       )}
-      {snapshot && Array.isArray(snapshot.universe) && (
+      {Array.isArray(displayCoins) && (displayCoins as any[]).length > 0 && (
         <div className="card" style={{ marginTop: 12, padding: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <strong>Alt universe</strong>
@@ -1139,7 +1149,7 @@ export const App: React.FC = () => {
             <textarea
               readOnly
               style={{ width: '100%', height: 100, fontFamily: 'monospace', fontSize: 12 }}
-              value={snapshot.universe.map(u => u.symbol).join(', ')}
+              value={(displayCoins as any[]).map((u: any) => u.symbol).join(', ')}
             />
           </div>
         </div>
@@ -1190,7 +1200,15 @@ export const App: React.FC = () => {
           maxCoins={hotTradingSettings.maxCoins}
           onPrepareOrders={prepareOrders}
           placing={placingOrders}
+          failedSymbols={(window as any).__entry_failed_symbols || []}
         />
+      )}
+      {entryStrategies.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <button className="btn" onClick={() => { try { console.log('[ENTRY_STRATEGIES_SHOW]', JSON.stringify(entryStrategies, null, 2)) } catch {} }}>
+            Show entryStrategies
+          </button>
+        </div>
       )}
 
       {/* Preview only table when picks are not ready or execution mode is off */}
@@ -1226,6 +1244,7 @@ export const App: React.FC = () => {
       ) : null}
       {/* Orders & Positions overview at the very bottom */}
       <OrdersPanel />
+      {/* OrderDebugFooter disabled temporarily */}
         </>
       )}
       <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} lastSnapshot={snapshot} lastRunAt={lastRunAt} finalPickerStatus={finalPickerStatus} finalPicksCount={finalPicks.length} posture={(decision?.flag as any) ?? 'NO-TRADE'} />
