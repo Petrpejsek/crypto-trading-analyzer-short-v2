@@ -98,8 +98,20 @@ async function sweepStaleOrdersOnce(): Promise<number> {
     const now = Date.now()
     const ageMs = __pendingCancelAgeMin * 60 * 1000
     const raw = await fetchAllOpenOrders()
+    // Positions snapshot pro bezpečnou detekci osiřelých exitů
+    let positionsForSweep: any[] = []
+    try { positionsForSweep = await fetchPositions() } catch {}
+    const posSizeBySym = new Map<string, number>()
+    try {
+      for (const p of (Array.isArray(positionsForSweep) ? positionsForSweep : [])) {
+        const sym = String((p as any)?.symbol || '')
+        const amt = Number((p as any)?.positionAmt)
+        const size = Number.isFinite(amt) ? Math.abs(amt) : 0
+        if (sym) posSizeBySym.set(sym, size)
+      }
+    } catch {}
     // Strict: mazat pouze ENTRY BUY LIMIT bez reduceOnly/closePosition; nikdy ne EXITy (STOP/TP)
-    const candidates = (Array.isArray(raw) ? raw : [])
+    const entryCandidates = (Array.isArray(raw) ? raw : [])
       .filter((o: any) => {
         try {
           const side = String(o?.side || '').toUpperCase()
@@ -117,12 +129,44 @@ async function sweepStaleOrdersOnce(): Promise<number> {
       .filter(o => o.symbol && o.orderId && Number.isFinite(o.createdAtMs as any))
       .filter(o => (now - (o.createdAtMs as number)) > ageMs)
 
-    if (candidates.length === 0) return 0
+    // Bezpečné čištění osiřelých exitů (SELL STOP/TAKE_PROFIT (+MARKET)) – pouze pokud není pozice a není otevřený ENTRY
+    const entrySymbols = new Set<string>((Array.isArray(raw) ? raw : [])
+      .filter((o: any) => {
+        try {
+          return String(o?.side||'').toUpperCase()==='BUY' && String(o?.type||'').toUpperCase()==='LIMIT' && !(o?.reduceOnly||o?.closePosition)
+        } catch { return false }
+      })
+      .map((o: any) => String(o?.symbol || '')).filter(Boolean))
+
+    const orphanExitCandidates = (Array.isArray(raw) ? raw : [])
+      .filter((o: any) => {
+        try {
+          const side = String(o?.side||'').toUpperCase()
+          const type = String(o?.type||'').toUpperCase()
+          const reduceOnly = Boolean(o?.reduceOnly)
+          const closePosition = Boolean(o?.closePosition)
+          const sym = String(o?.symbol||'')
+          const isExitType = type.includes('STOP') || type.includes('TAKE_PROFIT')
+          const noPos = (Number(posSizeBySym.get(sym)||0)===0)
+          const noEntryOpen = !entrySymbols.has(sym)
+          return side==='SELL' && isExitType && (reduceOnly || closePosition) && noPos && noEntryOpen
+        } catch { return false }
+      })
+      .map((o: any) => ({
+        symbol: String(o?.symbol || ''),
+        orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0,
+        createdAtMs: (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? t : null })()
+      }))
+      .filter(o => o.symbol && o.orderId && Number.isFinite(o.createdAtMs as any))
+      .filter(o => (now - (o.createdAtMs as number)) > ageMs)
+
+    if (entryCandidates.length === 0 && orphanExitCandidates.length === 0) return 0
 
     let cancelled = 0
     const maxParallel = 4
-    for (let i = 0; i < candidates.length; i += maxParallel) {
-      const batch = candidates.slice(i, i + maxParallel)
+    const all = entryCandidates.concat(orphanExitCandidates)
+    for (let i = 0; i < all.length; i += maxParallel) {
+      const batch = all.slice(i, i + maxParallel)
       const res = await Promise.allSettled(batch.map(async (c) => {
         const r = await cancelOrder(c.symbol, c.orderId)
         pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'sweeper', symbol: c.symbol, orderId: c.orderId, reason: 'stale_auto_cancel' })
@@ -136,7 +180,7 @@ async function sweepStaleOrdersOnce(): Promise<number> {
       __sweeperDidAutoCancel = true
       try { ttlSet(makeKey('/api/open_orders'), null as any, 1) } catch {}
     }
-    try { console.error('[SWEEPER_PASS]', { age_min: __pendingCancelAgeMin, cancelled, candidates: candidates.length }) } catch {}
+    try { console.error('[SWEEPER_PASS]', { age_min: __pendingCancelAgeMin, cancelled, entries: entryCandidates.length, orphan_exits: orphanExitCandidates.length }) } catch {}
     return cancelled
   } catch (e) {
     try { console.error('[SWEEPER_ERROR]', (e as any)?.message || e) } catch {}
