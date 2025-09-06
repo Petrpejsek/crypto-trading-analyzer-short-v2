@@ -60,8 +60,30 @@ const releaseBatch = (): void => {
   try { console.error('[BATCH_MUTEX_RELEASE]', { ts: new Date().toISOString(), pid: process.pid }) } catch {}
 }
 
-// Trading settings (in-memory)
+// Trading settings (in-memory) with simple file persist
 let __pendingCancelAgeMin: number = 0 // minutes; 0 = Off
+const SETTINGS_FILE = path.resolve(process.cwd(), 'runtime', 'settings.json')
+function loadSettings(): void {
+  try {
+    const dir = path.dirname(SETTINGS_FILE)
+    try { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }) } catch {}
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const raw = fs.readFileSync(SETTINGS_FILE, 'utf8')
+      const j = JSON.parse(raw)
+      const v = Number(j?.pending_cancel_age_min)
+      if (Number.isFinite(v) && v >= 0) __pendingCancelAgeMin = Math.floor(v)
+    }
+    // eslint-disable-next-line no-console
+    console.error('[SETTINGS_LOADED]', { pending_cancel_age_min: __pendingCancelAgeMin })
+  } catch {}
+}
+function saveSettings(): void {
+  try {
+    const dir = path.dirname(SETTINGS_FILE)
+    try { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }) } catch {}
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ pending_cancel_age_min: __pendingCancelAgeMin }), 'utf8')
+  } catch {}
+}
 let __sweeperDidAutoCancel: boolean = false // one-shot client handshake flag
 // In-memory cancel/filled audit log for UI footer
 type AuditEvent = { ts: string; type: 'cancel' | 'filled'; source: 'server' | 'sweeper' | 'binance_ws'; symbol: string; orderId?: number; reason?: string | null }
@@ -198,6 +220,8 @@ function startOrderSweeper(): void {
 
 // Rehydrate waiting TP list from disk (if any) early during startup
 try { rehydrateWaitingFromDiskOnce().catch(()=>{}) } catch {}
+// Load persisted settings on startup
+try { loadSettings() } catch {}
 
 // Start Binance user-data WS to capture cancel/filled events into audit log
 try {
@@ -375,7 +399,8 @@ const server = http.createServer(async (req, res) => {
         const chunks: Buffer[] = []
         for await (const ch of req) chunks.push(ch as Buffer)
         const bodyStr = Buffer.concat(chunks).toString('utf8')
-        const parsed = bodyStr ? JSON.parse(bodyStr) : null
+        let parsed: any = null
+        try { parsed = bodyStr ? JSON.parse(bodyStr) : null } catch { parsed = null }
         const vRaw = parsed?.pending_cancel_age_min
         const vNum = Number(vRaw)
         if (!Number.isFinite(vNum) || vNum < 0) {
@@ -385,6 +410,7 @@ const server = http.createServer(async (req, res) => {
           return
         }
         __pendingCancelAgeMin = Math.floor(vNum)
+        try { saveSettings() } catch {}
         // If client acknowledged and disabled, clear handshake flag
         if (__pendingCancelAgeMin === 0) __sweeperDidAutoCancel = false
         res.statusCode = 200
@@ -505,6 +531,7 @@ const server = http.createServer(async (req, res) => {
           reduceOnly: Boolean(o?.reduceOnly ?? false),
           closePosition: Boolean(o?.closePosition ?? false),
           positionSide: (typeof o?.positionSide === 'string' && o.positionSide) ? String(o.positionSide) : null,
+          clientOrderId: ((): string | null => { const id = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || ''); return id || null })(),
           createdAt: (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })(),
           updatedAt: (() => { const t = Number(o?.updateTime); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })()
         })) : []
@@ -650,7 +677,11 @@ const server = http.createServer(async (req, res) => {
         // Fast-path auto-clean čekajících TP jen pokud jsou WS data READY (jinak hrozí falešné mazání)
         try {
           if (ordersReady && positionsReady) {
-            const hasEntry = (o: any): boolean => String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT' && !(o?.reduceOnly || o?.closePosition)
+            const hasEntry = (o: any): boolean => {
+              const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+              const internal = /^(e_l_|x_sl_|x_tp_tm_|x_tp_l_)/.test(clientId)
+              return internal && String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT' && !(o?.reduceOnly || o?.closePosition)
+            }
             const entrySymbols = new Set<string>()
             for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
               try { if (hasEntry(o)) entrySymbols.add(String(o?.symbol || '')) } catch {}
@@ -670,6 +701,7 @@ const server = http.createServer(async (req, res) => {
                 const sym = String(w?.symbol || '')
                 if (!sym) continue
                 const size = Number(posSizeBySym.get(sym) || 0)
+                // Cleanup only if there is no internal ENTRY for the symbol
                 if (!entrySymbols.has(sym) && size === 0) {
                   cleanupWaitingTpForSymbol(sym)
                 }
@@ -690,7 +722,9 @@ const server = http.createServer(async (req, res) => {
           try {
             for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
               try {
-                const isEntry = String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT' && !(o?.reduceOnly || o?.closePosition)
+                const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+                const internal = /^(e_l_|x_sl_|x_tp_tm_|x_tp_l_)/.test(clientId)
+                const isEntry = internal && String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT' && !(o?.reduceOnly || o?.closePosition)
                 if (isEntry) entrySymbols.push(String(o?.symbol || ''))
               } catch {}
             }
@@ -773,6 +807,7 @@ const server = http.createServer(async (req, res) => {
           reduceOnly: Boolean(o?.reduceOnly ?? false),
           closePosition: Boolean(o?.closePosition ?? false),
           positionSide: (typeof o?.positionSide === 'string' && o.positionSide) ? String(o.positionSide) : null,
+          clientOrderId: ((): string | null => { const id = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || ''); return id || null })(),
           createdAt: (() => {
             if (typeof (o as any)?.createdAt === 'string') return String((o as any).createdAt)
             const t = Number((o as any)?.time)
@@ -798,7 +833,9 @@ const server = http.createServer(async (req, res) => {
             let investedUsd: number | null = null
             try {
               const isEntry = String(o.side || '').toUpperCase() === 'BUY' && !(o.reduceOnly || o.closePosition)
-              if (isEntry) {
+              // Compute investedUsd only for internal entries
+              const internal = /^(e_l_|x_sl_|x_tp_tm_|x_tp_l_)/.test(String(o.clientOrderId || ''))
+              if (isEntry && internal) {
                 // Prefer planned amount if available (exact UI input)
                 const amt = Number(planned?.amount)
                 if (Number.isFinite(amt) && amt > 0) investedUsd = amt
@@ -811,7 +848,8 @@ const server = http.createServer(async (req, res) => {
                 }
               }
             } catch {}
-            return { ...o, leverage, investedUsd }
+            const isExternal = (() => { const id = String(o.clientOrderId || ''); return id ? !/^(e_l_|x_sl_|x_tp_tm_|x_tp_l_)/.test(id) : true })()
+            return { ...o, leverage, investedUsd, isExternal }
           })
         } catch {}
         // Build leverage map for ALL symbols (even zero-size) from raw positions (fallback for UI)
