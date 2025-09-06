@@ -767,6 +767,17 @@ const server = http.createServer(async (req, res) => {
             return { ...o, leverage, investedUsd }
           })
         } catch {}
+        // Build leverage map for ALL symbols (even zero-size) from raw positions (fallback for UI)
+        const levBySymbol: Record<string, number> = {}
+        try {
+          for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
+            try {
+              const sym = String((p as any)?.symbol || '')
+              const lev = Number((p as any)?.leverage)
+              if (sym && Number.isFinite(lev) && lev > 0) levBySymbol[sym] = Math.floor(lev)
+            } catch {}
+          }
+        } catch {}
         // Normalize positions and filter zero-size entries (match /api/positions)
         const positionsUi = (Array.isArray(positionsRaw) ? positionsRaw : [])
           .map((p: any) => {
@@ -777,9 +788,16 @@ const server = http.createServer(async (req, res) => {
             const markFromMem = Number.isFinite(markMem) && markMem > 0 ? markMem : Number((marks as any)?.[String(p?.symbol||'')])
             const mark = Number.isFinite(markFromMem) && markFromMem > 0 ? markFromMem : null
             const pnl = Number(p?.unRealizedProfit ?? p?.unrealizedPnl)
-            const levRaw = (p as any)?.leverage
-            const levNum = Number(levRaw)
-            const lev = (levRaw == null || !Number.isFinite(levNum)) ? null : levNum
+            // Leverage: prefer direct value; fallback to map from raw positions snapshot
+            let lev: number | null = null
+            try {
+              const lv = Number((p as any)?.leverage)
+              if (Number.isFinite(lv) && lv > 0) lev = lv
+              else {
+                const fm = Number(levBySymbol[String(p?.symbol || '')])
+                if (Number.isFinite(fm) && fm > 0) lev = fm
+              }
+            } catch {}
             const side = (typeof p?.positionSide === 'string' && p.positionSide) ? String(p.positionSide) : (Number.isFinite(amt) ? (amt >= 0 ? 'LONG' : 'SHORT') : '')
             const upd = Number(p?.updateTime)
             return {
@@ -794,17 +812,6 @@ const server = http.createServer(async (req, res) => {
             }
           })
           .filter((p: any) => Number.isFinite(p.size) && p.size > 0)
-        // Build leverage map for ALL symbols (even zero-size) from raw positions
-        const levBySymbol: Record<string, number> = {}
-        try {
-          for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
-            try {
-              const sym = String((p as any)?.symbol || '')
-              const lev = Number((p as any)?.leverage)
-              if (sym && Number.isFinite(lev) && lev > 0) levBySymbol[sym] = Math.floor(lev)
-            } catch {}
-          }
-        } catch {}
         // Timestamps overview for UI (diagnostic and clarity)
         const nowIso = new Date().toISOString()
         const maxIso = (arr: any[], key: string): string | null => {
