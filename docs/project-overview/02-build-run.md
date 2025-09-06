@@ -53,7 +53,19 @@ curl http://localhost:8788/api/health
 ### Smoke test
 1) Ověř snapshot: `GET /api/snapshot?universe=gainers&topN=50`
 2) Ověř metrics: `GET /api/metrics?universe=gainers&topN=50`
-3) UI „Run now“ → „Copy RAW“ → Hot Screener → Entry → Prepare Orders → Place
+3) UI „Run now" → „Copy RAW" → Hot Screener → Entry → Prepare Orders → Place
+
+### Produkční build a deploy
+Pro nasazení na externí server:
+```bash
+# Build pro produkci
+npm run build
+
+# Deploy pomocí automatizovaného scriptu
+./scripts/deploy.sh
+```
+
+Kompletní návod produkčního nasazení viz **[docs/ops/PRODUCTION.md](../ops/PRODUCTION.md)**.
 
 
 

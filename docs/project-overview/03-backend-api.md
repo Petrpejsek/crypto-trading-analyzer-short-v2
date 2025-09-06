@@ -29,7 +29,8 @@ Základ: `http://localhost:8788`
 - `GET /api/positions` – čisté pozice (WS snapshot)
 - `GET /api/open_orders` – čisté otevřené objednávky (WS snapshot)
 - `DELETE /api/order?symbol=...&orderId=...` – zrušení jedné objednávky
-- `PUT /api/trading/settings` – nastavení `pending_cancel_age_min` (sweeper)
+- `GET /api/trading/settings` – aktuální nastavení sweepu
+- `PUT /api/trading/settings` – nastavení `pending_cancel_age_min` (sweeper, perzistentní)
 
 ### Test/Debug
 - `POST /api/test/market_fill` – dev util pro rychlé vytvoření pozice (market)
@@ -45,6 +46,12 @@ Základ: `http://localhost:8788`
 ### Sémantika odpovědí
 - WS not ready: server vrací 200 s prázdnými listy. Žádné REST seedování uvnitř těchto endpointů.
 - Rate limit/ban: `429` + `Retry-After` nebo structured `{ error: 'banned_until', until }`.
+- Missing Binance keys: `403` (místo `401`) pro API endpoints, aby se zabránilo opakovaným Basic Auth promptům.
+
+### Perzistentní nastavení
+- `pending_cancel_age_min` se ukládá do `runtime/settings.json` a přežije restarty serveru.
+- Při startu serveru se načte z disku, pokud soubor existuje.
+- Změny přes `PUT /api/trading/settings` se okamžitě zapíší na disk.
 
 
 

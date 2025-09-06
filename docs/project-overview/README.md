@@ -28,6 +28,13 @@ npm run dev:server   # backend na http://localhost:8788
 npm run dev          # frontend (Vite) na http://localhost:4000
 ```
 
+### Produkční nasazení
+Pro kompletní návod nasazení na externí server viz **[docs/ops/PRODUCTION.md](../ops/PRODUCTION.md)** - obsahuje:
+- Setup DigitalOcean droplet + SSH + Nginx + HTTPS + Basic Auth
+- Automatizovaný deploy script `scripts/deploy.sh`
+- Zdravotní kontroly, rollback postupy, incident checklist
+- Perzistentní nastavení (sweeper settings přežívají restarty)
+
 ### Obsah
 - 01-architecture.md
 - 02-build-run.md
@@ -37,6 +44,7 @@ npm run dev          # frontend (Vite) na http://localhost:4000
 - 06-rate-limits-logging.md
 - 07-frontend.md
 - 08-ops-cheatsheet.md
+- **[ops/PRODUCTION.md](../ops/PRODUCTION.md)** - Produkční nasazení
 
 
 
