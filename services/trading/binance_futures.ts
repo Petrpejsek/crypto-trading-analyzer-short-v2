@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import tradingCfg from '../../config/trading.json'
 import { wrapBinanceFuturesApi } from '../exchange/binance/safeSender'
+import { noteApiCall, setBanUntilMs } from '../../server/lib/rateLimits'
 
 // SAFE_BOOT log pro identifikaci procesu
 console.log('[SAFE_BOOT]', { pid: process.pid, file: __filename })
@@ -269,6 +270,23 @@ class BinanceFuturesAPI {
     })
 
     const text = await response.text()
+    try {
+      const headersLike: Record<string, string> = {}
+      try { (response.headers as any).forEach((v: string, k: string) => { headersLike[String(k)] = String(v) }) } catch {}
+      const statusNum = Number(response.status)
+      let errCode: number | null = null
+      let errMsg: string | null = null
+      if (!response.ok) {
+        try { const j = JSON.parse(text); if (typeof j?.code !== 'undefined') errCode = Number(j.code); if (typeof j?.msg !== 'undefined') errMsg = String(j.msg) } catch {}
+      }
+      try { noteApiCall({ method, path: endpoint, status: statusNum, headers: headersLike, errorCode: errCode, errorMsg: errMsg }) } catch {}
+      if (errCode === -1003) {
+        try {
+          const m = String(errMsg || '').match(/banned\s+until\s+(\d{10,})/i)
+          if (m && m[1]) setBanUntilMs(Number(m[1]))
+        } catch {}
+      }
+    } catch {}
     if (DEBUG) {
       // eslint-disable-next-line no-console
       console.info('[BINANCE_RES]', { status: response.status, ok: response.ok, body_start: text.slice(0, 200) })
@@ -644,9 +662,9 @@ export async function waitingTpProcessPassFromPositions(positionsRaw: any[]): Pr
       const rec = sizeBySymbol[symbol] || { size: 0, side: null }
       const size = rec.size
       waitingTpOnCheck(symbol, size)
-      // Auto-cleanup pokud už není ENTRY a velikost je 0
-      if (size === 0) waitingTpCleanupIfNoEntry(symbol)
-      if (size > 0 && w.checks >= 2) {
+      // Žádné REST dotazy na openOrders – cleanup řeší server na základě WS snapshotu
+      // Place TP LIMIT as soon as pozice existuje (bez čekání na druhý průchod)
+      if (size > 0 && w.checks >= 1) {
         const qtyStr = String(size)
         const workingType = (w.workingType === 'CONTRACT_PRICE') ? 'CONTRACT_PRICE' : 'MARK_PRICE'
         const positionSide = (w.positionSide === 'SHORT' || rec.side === 'SHORT') ? 'SHORT' : 'LONG'
@@ -654,7 +672,7 @@ export async function waitingTpProcessPassFromPositions(positionsRaw: any[]): Pr
           symbol,
           side: positionSide === 'SHORT' ? 'BUY' : 'SELL',
           type: 'TAKE_PROFIT',
-          price: String(w.tp),
+          price: String(w.tp * 1.03), // Price o 3% vyšší pro lepší "chycení"
           stopPrice: String(w.tp),
           timeInForce: 'GTC',
           quantity: qtyStr,
@@ -692,6 +710,7 @@ async function spawnDeferredTpPoller(symbol: string, tpStr: string, qtyHint: str
     console.error('[TP_DELAY_SCHEDULED]', { symbol, tp: tpStr, qty_planned: qtyHint, interval_ms: waitingCheckMs })
     // Pouze zaregistruj waiting – žádná vlastní smyčka. Zpracování probíhá při /api/positions passu.
     waitingTpSchedule(symbol, Number(tpStr), qtyHint, positionSide, workingType)
+    // Bez extra REST dotazu; spolehni se na pravidelný pass z /api/orders_console
   } catch {}
 }
 
@@ -741,6 +760,11 @@ async function rehydrateWaitingFromDisk(): Promise<void> {
   } catch (e) {
     try { console.error('[WAITING_REHYDRATE_ERR]', (e as any)?.message || e) } catch {}
   }
+}
+
+// Public one-shot rehydrate for server startup
+export async function rehydrateWaitingFromDiskOnce(): Promise<void> {
+  return rehydrateWaitingFromDisk()
 }
 
 async function sleep(ms: number): Promise<void> { return new Promise(res => setTimeout(res, ms)) }
@@ -923,6 +947,16 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
       const notionalUsd = order.amount * order.leverage
       const qty = await api.calculateQuantity(order.symbol, notionalUsd, entryPx)
       const workingType: 'MARK_PRICE' = 'MARK_PRICE'
+      // Align Binance leverage to UI value before placing orders so margin/equity math matches UI intent
+      try {
+        const levDesired = Math.max(1, Math.min(125, Math.floor(Number(order.leverage))))
+        if (levDesired > 0) {
+          await api.setLeverage(order.symbol, levDesired)
+          try { console.info('[SET_LEVERAGE]', { symbol: order.symbol, leverage: levDesired }) } catch {}
+        }
+      } catch (e:any) {
+        try { console.error('[SET_LEVERAGE_ERR]', { symbol: order.symbol, error: (e as any)?.message || e }) } catch {}
+      }
       
       // RAW passthrough mode: nepoužívej interní zaokrouhlování, pošli čísla z UI
       let symbolFilters = { tickSize: null as number | null, stepSize: null as number | null, pricePrecision: null as number | null }
@@ -1099,15 +1133,14 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
         }
 
         try {
-          const reqs: Array<Promise<any>> = []
           if (hasPosition) {
-            reqs.push(api.placeOrder(slParamsHasPos))
-            reqs.push(api.placeOrder(tpParamsHasPos))
+            // S pozicí: SL + TP LIMIT současně
+            ;[slRes, tpRes] = await Promise.all([api.placeOrder(slParamsHasPos), api.placeOrder(tpParamsHasPos)])
           } else {
-            if (slOk) reqs.push(api.placeOrder(slParamsPre))
-            if (tpOk) reqs.push(api.placeOrder(tpParamsPre))
+            // Bez pozice: nejprve SL (pokud OK), pak TP MARKET zvlášť, aby se TP nevynechal při částečném failu
+            slRes = slOk ? await api.placeOrder(slParamsPre) : null
+            tpRes = tpOk ? await api.placeOrder(tpParamsPre) : null
           }
-          ;[slRes, tpRes] = await Promise.all(reqs)
         } catch (exitError: any) {
           console.error('[SL_TP_ERROR]', { symbol: order.symbol, error: exitError?.message })
           // Pokračuj i když SL/TP selže
@@ -1342,6 +1375,18 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
   const entrySettled: Array<any> = []
   await Promise.all(prepared.map(async (p) => {
     try {
+      // Ensure Binance symbol leverage matches UI-requested leverage before placing entry
+      try {
+        const levDesiredRaw = Number((p as any)?.order?.leverage)
+        const levDesired = Math.max(1, Math.min(125, Math.floor(Number.isFinite(levDesiredRaw) ? levDesiredRaw : 0)))
+        if (levDesired > 0) {
+          await api.setLeverage(p.symbol, levDesired)
+          try { console.info('[SET_LEVERAGE]', { symbol: p.symbol, leverage: levDesired }) } catch {}
+        }
+      } catch (e:any) {
+        try { console.error('[SET_LEVERAGE_ERR]', { symbol: p.symbol, error: (e as any)?.message || e }) } catch {}
+        // Continue even if leverage set fails – quantity already reflects requested leverage in notional
+      }
       const entryResult = await api.placeOrder(p.entryParams)
       console.error('[ENTRY_SUCCESS]', { symbol: p.symbol, orderId: entryResult?.orderId })
       entrySettled.push({ status: 'fulfilled', value: { symbol: p.symbol, ok: true, res: entryResult } })

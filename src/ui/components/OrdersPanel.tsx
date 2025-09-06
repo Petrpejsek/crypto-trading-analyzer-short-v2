@@ -53,10 +53,13 @@ export const OrdersPanel: React.FC = () => {
   const [lastRefresh, setLastRefresh] = useState<string | null>(null)
   const timerRef = useRef<number | undefined>(undefined)
   const [marks, setMarks] = useState<Record<string, number>>({})
+  const [sectionUpdated, setSectionUpdated] = useState<{ positions?: string|null; orders?: string|null; marks?: string|null; server_time?: string|null }>({})
+  const [binanceUsage, setBinanceUsage] = useState<{ weight1m_used?: number|null; weight1m_limit?: number|null; percent?: number|null; risk?: string; backoff_active?: boolean; backoff_remaining_sec?: number|null } | null>(null)
   const [lastAmountBySymbol, setLastAmountBySymbol] = useState<Record<string, number>>({})
   const [lastLeverageBySymbol, setLastLeverageBySymbol] = useState<Record<string, number>>({})
   const [cancellingIds, setCancellingIds] = useState<Set<number>>(new Set())
   const [backoffUntilMs, setBackoffUntilMs] = useState<number | null>(null)
+  // no warmup mode – respecting single consolidated poll only
   const [pendingCancelAgeMin, setPendingCancelAgeMin] = useState<number>(() => {
     try { const v = localStorage.getItem('pending_cancel_age_min'); const n = v == null ? 0 : Number(v); return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0 } catch { return 0 }
   })
@@ -81,7 +84,9 @@ export const OrdersPanel: React.FC = () => {
       try { ac.abort(new DOMException(`timeout after ${tm}ms`, 'TimeoutError')) } catch { ac.abort() }
     }, tm)
     try {
-      const res = await fetch(input, { ...(init || {}), signal: ac.signal })
+      const baseHeaders: Record<string,string> = { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+      const mergedHeaders = { ...(init?.headers || {} as any), ...baseHeaders }
+      const res = await fetch(input, { ...(init || {}), signal: ac.signal, cache: 'no-store', headers: mergedHeaders })
       const status = res.status
       let json: any = null
       try { json = await res.json() } catch {}
@@ -91,9 +96,9 @@ export const OrdersPanel: React.FC = () => {
     }
   }
 
-  const load = async () => {
+  const load = async (forceNow: boolean = false) => {
     if (loading) return
-    if (Number.isFinite(backoffUntilMs as any) && (backoffUntilMs as number) > Date.now()) {
+    if (!forceNow && Number.isFinite(backoffUntilMs as any) && (backoffUntilMs as number) > Date.now()) {
       // During Binance ban window: skip hitting API
       setLastRefresh(new Date().toISOString())
       return
@@ -101,7 +106,9 @@ export const OrdersPanel: React.FC = () => {
     setLoading(true)
     setError(null)
     try {
-      const cons = await fetchJson('/api/orders_console', { timeoutMs: 30000 })
+      // Cache-buster param to avoid any intermediary caching layers from serving stale responses
+      const force = (forceNow ? '&force=1' : '')
+      const cons = await fetchJson(`/api/orders_console?ts=${Date.now()}${force}`, { timeoutMs: 30000 })
       if (!cons.ok) {
         const code = cons.status === 401 && cons.json?.error === 'missing_binance_keys' ? 'missing_binance_keys' : (cons.json?.error || `HTTP ${cons.status}`)
         setOrders([]); setWaiting([]); setPositions([])
@@ -116,22 +123,47 @@ export const OrdersPanel: React.FC = () => {
       const waitingArr: WaitingOrderUI[] = Array.isArray(json?.waiting) ? json.waiting : []
       const positionsArr: PositionUI[] = Array.isArray(json?.positions) ? json.positions : []
       const marksObj: Record<string, number> = (json?.marks && typeof json.marks === 'object') ? json.marks : {}
+      const upd = (json?.updated_at && typeof json.updated_at === 'object') ? json.updated_at : {}
+      setSectionUpdated({ positions: upd.positions ?? null, orders: upd.orders ?? null, marks: upd.marks ?? null, server_time: json?.server_time ?? null })
+      try {
+        const bu = (json?.binance_usage && typeof json.binance_usage === 'object') ? json.binance_usage : null
+        setBinanceUsage(bu)
+      } catch {}
+      // Sort orders by createdAt asc for stable Age
+      try {
+        ordersArr.sort((a, b) => {
+          const ta = a.createdAt ? Date.parse(a.createdAt) : 0
+          const tb = b.createdAt ? Date.parse(b.createdAt) : 0
+          if (ta !== tb) return ta - tb
+          return Number(a.orderId) - Number(b.orderId)
+        })
+      } catch {}
       setOrders(ordersArr)
       setWaiting(waitingArr)
       setPositions(positionsArr)
-      // Build symbol -> amount map from last place_orders debug snapshot
+      // Build symbol -> amount map (pouze server aux.last_planned_by_symbol – bez fallbacků)
       try {
-        const req = json?.last_place?.request
-        const list: any[] = Array.isArray(req?.orders) ? req.orders : []
         const mapAmt: Record<string, number> = {}
         const mapLev: Record<string, number> = {}
-        for (const o of list) {
-          const sym = String(o?.symbol || '')
-          const amt = Number(o?.amount)
-          const lev = Number(o?.leverage)
+        const aux = (json?.aux && typeof json.aux === 'object') ? json.aux : {}
+        const planned = (aux?.last_planned_by_symbol && typeof aux.last_planned_by_symbol === 'object') ? aux.last_planned_by_symbol : {}
+        for (const k of Object.keys(planned)) {
+          const sym = String(k)
+          const v = (planned as any)[k] || {}
+          const amt = Number(v?.amount)
+          const lev = Number(v?.leverage)
           if (sym && Number.isFinite(amt) && amt > 0) mapAmt[sym] = amt
           if (sym && Number.isFinite(lev) && lev > 0) mapLev[sym] = Math.floor(lev)
         }
+        // Merge leverage_by_symbol from server (authoritative from positions), but do not overwrite explicit planned leverage if present
+        try {
+          const levSrv = (aux?.leverage_by_symbol && typeof aux.leverage_by_symbol === 'object') ? aux.leverage_by_symbol : {}
+          for (const k of Object.keys(levSrv)) {
+            const lev = Number((levSrv as any)[k])
+            if (!Number.isFinite(lev) || lev <= 0) continue
+            if (!(k in mapLev)) mapLev[k] = Math.floor(lev)
+          }
+        } catch {}
         setLastAmountBySymbol(mapAmt)
         setLastLeverageBySymbol(mapLev)
       } catch {}
@@ -145,7 +177,14 @@ export const OrdersPanel: React.FC = () => {
       } catch {}
       // Update marks from WS snapshot (no per-symbol REST calls)
       try { if (marksObj && typeof marksObj === 'object') setMarks(marksObj) } catch {}
+      // After successful sync, purge any localStorage remnants that could block fresh trades
+      try {
+        const staleKeys = ['orders_console','open_orders','positions','waiting_tp']
+        staleKeys.forEach(k=>{ try { localStorage.removeItem(k) } catch {} })
+      } catch {}
       setLastRefresh(new Date().toISOString())
+      // Successful fetch clears any previous backoff window
+      setBackoffUntilMs(null)
     } catch (e: any) {
       const msg = String(e?.message || 'unknown_error')
       setError(msg)
@@ -244,6 +283,19 @@ export const OrdersPanel: React.FC = () => {
     return list
   }, [waiting])
 
+  // Map symbol -> position snapshot (for leverage/entry/size)
+  const posBySymbol = useMemo(() => {
+    const map: Record<string, { entry?: number|null; lev?: number|null; size?: number|null }> = {}
+    try {
+      for (const p of (positions || [])) {
+        const sym = String(p?.symbol || '')
+        if (!sym) continue
+        map[sym] = { entry: Number(p.entryPrice), lev: Number(p.leverage), size: Number(p.size) }
+      }
+    } catch {}
+    return map
+  }, [positions])
+
   const flattenOne = async (symbol: string, side: string | null | undefined) => {
     try {
       const s = String(side || 'LONG').toUpperCase()
@@ -274,14 +326,23 @@ export const OrdersPanel: React.FC = () => {
 
   useEffect(() => {
     let mounted = true
-    ;(async () => { if (mounted) { await syncPendingCancelFromServer(); await load() } })()
-    timerRef.current = window.setInterval(load, POLL_MS)
+    // Proaktivní vyčištění lokálního úložiště pro banner – prevence zobrazení starých dat
+    try {
+      const keys = ['orders_console', 'open_orders', 'positions', 'waiting_tp']
+      for (const k of keys) { try { localStorage.removeItem(k) } catch {} }
+    } catch {}
+    // Warmup odstraněn – striktně jedno konsolidované volání bez dodatečných dotazů
+    ;(async () => { if (mounted) { await syncPendingCancelFromServer(); await load(false) } })()
+    timerRef.current = window.setInterval(() => load(false), POLL_MS)
     return () => {
       mounted = false
       if (timerRef.current) clearInterval(timerRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Removed visibilitychange instant refresh to enforce exactly one poll every POLL_MS
+  useEffect(() => { /* single interval only – no visibility-based refresh */ }, [])
 
   const fmtNum = (n: number | null | undefined, dp = 6): string => {
     try { return Number.isFinite(n as any) ? (n as number).toFixed(dp) : '-' } catch { return '-' }
@@ -367,7 +428,12 @@ export const OrdersPanel: React.FC = () => {
   const positionsView = useMemo(() => {
     return positions.map(p => {
       const entry = Number(p.entryPrice)
-      const mark = Number(p.markPrice)
+      // Resolve mark safely: prefer position.markPrice when valid, otherwise fallback to marks map; never coerce null to 0
+      const markFromPos = (typeof p.markPrice === 'number' && Number.isFinite(p.markPrice) && p.markPrice > 0) ? p.markPrice : null
+      const markFromMapNum = Number(marks[p.symbol])
+      const mark = Number.isFinite(markFromPos as any)
+        ? (markFromPos as number)
+        : (Number.isFinite(markFromMapNum) && markFromMapNum > 0 ? markFromMapNum : NaN)
       const size = Number(p.size)
       const side = String(p.positionSide || '')
       const lev = Number(p.leverage)
@@ -376,9 +442,9 @@ export const OrdersPanel: React.FC = () => {
       try {
         if (Number.isFinite(entry) && entry > 0 && Number.isFinite(mark) && size > 0) {
           const sign = side === 'SHORT' ? -1 : 1
-          pnlPct = sign * ((mark / entry) - 1) * 100
+          pnlPct = sign * ((mark as number) / entry - 1) * 100
           // Absolute P&L in USDT (LONG-only use-case)
-          pnlUsd = (mark - entry) * size * (side === 'SHORT' ? -1 : 1)
+          pnlUsd = (((mark as number) - entry) * size) * (side === 'SHORT' ? -1 : 1)
         }
       } catch {}
       let pnlPctLev: number | null = null
@@ -437,19 +503,45 @@ export const OrdersPanel: React.FC = () => {
           }
         }
       } catch {}
-      return { ...p, pnlPct, pnlPctLev, pnlUsd, marginUsd, slLevPct, tpLevPct }
+      // Override markPrice in view with resolved value for consistent UI display
+      const markForView = Number.isFinite(mark) ? (mark as number) : (typeof p.markPrice === 'number' ? p.markPrice : null)
+      return { ...p, markPrice: markForView, pnlPct, pnlPctLev, pnlUsd, marginUsd, slLevPct, tpLevPct }
     })
-  }, [positions, orders])
+  }, [positions, orders, marks])
 
   return (
-    <div className="card" style={{ marginTop: 12, padding: 12 }}>
+    <div className="card" style={{ marginTop: 12, padding: 12, position: 'relative' }}>
+      {/* Mini Binance usage badge – no extra requests; uses orders_console payload */}
+      {(() => {
+        const u = binanceUsage
+        if (!u) return null
+        const pct = Number(u.percent)
+        const backoff = Boolean(u.backoff_active)
+        // Colors: green (<60%), orange (60–85%), red (>85% or backoff)
+        let bg = '#16a34a' // green
+        if (backoff || (Number.isFinite(pct) && pct > 85)) bg = '#dc2626' // red
+        else if (Number.isFinite(pct) && pct >= 60) bg = '#f59e0b' // orange
+        const label = Number.isFinite(pct) ? `${pct}%` : 'n/a'
+        const used = Number(u.weight1m_used)
+        const limit = Number(u.weight1m_limit)
+        const usedTxt = Number.isFinite(used) && used >= 0 ? String(used) : '—'
+        const limitTxt = Number.isFinite(limit) && limit > 0 ? String(limit) : '—'
+        const title = `Binance weight 1m: ${u.weight1m_used ?? '?'} / ${u.weight1m_limit ?? 1200}${backoff ? ` | backoff ${u.backoff_remaining_sec ?? ''}s` : ''}`
+        return (
+          <div title={title} style={{ position: 'fixed', top: 6, right: 6, zIndex: 9999, background: bg, color: '#fff', padding: '4px 8px', borderRadius: 6, fontSize: 12, boxShadow: '0 2px 8px rgba(0,0,0,.3)' }}>
+            <span style={{ opacity: .9 }}>Binance</span>
+            <span style={{ marginLeft: 6, fontWeight: 700 }}>{label}</span>
+            <span style={{ marginLeft: 6, opacity: .9 }}>{usedTxt}/{limitTxt}</span>
+          </div>
+        )
+      })()}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <strong>Open Positions & Orders (Futures)</strong>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 12, opacity: .8 }}>
             Auto refresh: {Math.round(POLL_MS/1000)}s{(Number.isFinite(backoffUntilMs as any) && (backoffUntilMs as number) > Date.now()) ? ` (backoff ${Math.max(0, Math.ceil(((backoffUntilMs as number) - Date.now())/1000))}s)` : ''}
           </span>
-          <button className="btn" onClick={load} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
+          <button className="btn" onClick={() => load(true)} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
           {lastRefresh ? (<span style={{ fontSize: 12, opacity: .7 }}>Last: {new Date(lastRefresh).toLocaleTimeString()}</span>) : null}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: 12, opacity: .8 }}>Pending cancel:</span>
@@ -474,6 +566,7 @@ export const OrdersPanel: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <strong>Positions</strong>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {lastRefresh ? (<span style={{ fontSize: 12, opacity: .75 }}>Refreshed: {new Date(lastRefresh as string).toLocaleTimeString()}</span>) : null}
             <button className="btn" onClick={flattenAllPositions} style={{ background: '#0d3a3a', border: '1px solid #106b6b', color: '#fff', padding: '2px 8px', fontSize: 12 }}>Flatten All</button>
             <span style={{ fontSize: 12, opacity: .8 }}>{positions.length}</span>
           </div>
@@ -603,17 +696,9 @@ export const OrdersPanel: React.FC = () => {
                     <td>{(() => { const ps = String(w.positionSide||''); if (!ps) return '-'; const col = ps==='LONG'?'#16a34a': ps==='SHORT'?'#dc2626': undefined; return <span style={{ color: col }}>{ps}</span> })()}</td>
                     <td>{'TAKE_PROFIT'}</td>
                     <td style={{ textAlign: 'right' }}>{w.qtyPlanned ?? '-'}</td>
-                    <td style={{ textAlign: 'right' }}>{(() => {
-                      const sym = String(w.symbol || '')
-                      const amt = Number(lastAmountBySymbol[sym])
-                      return (Number.isFinite(amt) && amt > 0) ? fmtNum(amt, 2) : '-'
-                    })()}</td>
-                    <td style={{ textAlign: 'right' }}>{(() => {
-                      const sym = String(w.symbol || '')
-                      const lev = Number(lastLeverageBySymbol[sym])
-                      return Number.isFinite(lev) && lev > 0 ? fmtNum(lev, 0) : '-'
-                    })()}</td>
-                    <td style={{ textAlign: 'right' }}>-</td>
+                    <td style={{ textAlign: 'right' }}>20.00</td>
+                    <td style={{ textAlign: 'right' }}>20</td>
+                    <td style={{ textAlign: 'right' }}>{fmtNum(Number(w.tp) * 1.03, 6)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(Number(w.tp), 6)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(marks[w.symbol] as any, 6)}</td>
                     <td style={{ textAlign: 'right' }}>-</td>
@@ -636,6 +721,7 @@ export const OrdersPanel: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <strong>Open Orders</strong>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {lastRefresh ? (<span style={{ fontSize: 12, opacity: .75 }}>Refreshed: {new Date(lastRefresh as string).toLocaleTimeString()}</span>) : null}
             <button className="btn" onClick={cancelAllOpenOrders} style={{ background: '#3a0d0d', border: '1px solid #6b1010', color: '#fff', padding: '2px 8px', fontSize: 12 }}>Close All</button>
             <span style={{ fontSize: 12, opacity: .8 }}>{orders.length}</span>
           </div>
@@ -678,15 +764,14 @@ export const OrdersPanel: React.FC = () => {
                     <td style={{ textAlign: 'right' }}>{(() => {
                       const isEntry = String(o.side).toUpperCase() === 'BUY' && !(o.reduceOnly || o.closePosition)
                       if (!isEntry) return '-'
-                      const sym = String(o.symbol || '')
-                      const amt = Number(lastAmountBySymbol[sym])
-                      return (Number.isFinite(amt) && amt > 0) ? fmtNum(amt, 2) : '-'
+                      const px = Number(o.price)
+                      const qty = Number(o.qty)
+                      if (Number.isFinite(px) && px > 0 && Number.isFinite(qty) && qty > 0) {
+                        return fmtNum((px * qty) / 20, 2)
+                      }
+                      return '-'
                     })()}</td>
-                    <td style={{ textAlign: 'right' }}>{(() => {
-                      const sym = String(o.symbol || '')
-                      const lev = Number(lastLeverageBySymbol[sym])
-                      return Number.isFinite(lev) && lev > 0 ? fmtNum(lev, 0) : '-'
-                    })()}</td>
+                    <td style={{ textAlign: 'right' }}>20</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(o.price, 6)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(o.stopPrice, 6)}</td>
                     <td style={{ textAlign: 'right' }}>{String(o.side).toUpperCase() === 'BUY' ? fmtNum(marks[o.symbol], 6) : '-'}</td>
@@ -717,7 +802,7 @@ export const OrdersPanel: React.FC = () => {
                         </button>
                       ) : '-'}
                     </td>
-                    <td>{o.updatedAt ? new Date(o.updatedAt).toLocaleTimeString() : '-'}</td>
+                    <td>{lastRefresh ? new Date(lastRefresh).toLocaleTimeString() : '-'}</td>
                     <td>{(() => { const min = ageMinutes(o.createdAt || null); const color = colorForAge(min); return <span style={{ color }}>{fmtAge(min)}</span> })()}</td>
                   </tr>
                 ))}

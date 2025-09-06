@@ -68,3 +68,12 @@ Log lines (one-liners per decision):
 
 Examples of reasons: "preentry_guard_failed", "preentry_disabled", "post_fill_default".
 
+### Production overview
+See docs/ops/PRODUCTION.md for production setup, deploy and ops.
+
+## Production overview
+
+See detailed operations and deployment guide at:
+
+- docs/ops/PRODUCTION.md
+

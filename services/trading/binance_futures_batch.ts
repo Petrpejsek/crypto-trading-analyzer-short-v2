@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 import tradingCfg from '../../config/trading.json'
 import { wrapBinanceFuturesApi } from '../exchange/binance/safeSender'
+import { noteApiCall, setBanUntilMs } from '../../server/lib/rateLimits'
 
 // SAFE_BOOT log pro identifikaci procesu
 console.log('[SAFE_BOOT]', { pid: process.pid, file: __filename })
@@ -178,6 +179,20 @@ class BinanceFuturesAPI {
     try {
       const response = await fetch(url, { method, headers })
       const responseText = await response.text()
+      try {
+        const headersLike: Record<string, string> = {}
+        try { (response.headers as any).forEach((v: string, k: string) => { headersLike[String(k)] = String(v) }) } catch {}
+        const statusNum = Number(response.status)
+        let errCode: number | null = null
+        let errMsg: string | null = null
+        if (!response.ok) {
+          try { const j = JSON.parse(responseText); if (typeof j?.code !== 'undefined') errCode = Number(j.code); if (typeof j?.msg !== 'undefined') errMsg = String(j.msg) } catch {}
+        }
+        try { noteApiCall({ method, path: endpoint, status: statusNum, headers: headersLike, errorCode: errCode, errorMsg: errMsg }) } catch {}
+        if (errCode === -1003) {
+          try { const m = String(errMsg || '').match(/banned\s+until\s+(\d{10,})/i); if (m && m[1]) setBanUntilMs(Number(m[1])) } catch {}
+        }
+      } catch {}
       
       if (!response.ok) {
         // Enhanced error parsing for Binance API

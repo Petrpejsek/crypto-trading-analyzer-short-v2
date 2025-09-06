@@ -1076,7 +1076,11 @@ export const App: React.FC = () => {
       {/* BTC/ETH data integrated into DecisionBanner */}
       
       {showReport ? (
-        <ReportView snapshot={snapshot} features={features} decision={decision} signals={signalSet} featuresMs={featuresMs ?? null} />
+        <>
+          <ReportView snapshot={snapshot} features={features} decision={decision} signals={signalSet} featuresMs={featuresMs ?? null} />
+          <div style={{ height: 8 }} />
+          {/* OrdersPanel intentionally rendered only once globally to avoid duplicate polling */}
+        </>
       ) : (
         <>
       {decision && (
@@ -1242,7 +1246,7 @@ export const App: React.FC = () => {
           />
         </>
       ) : null}
-      {/* Orders & Positions overview at the very bottom */}
+      {/* Orders & Positions overview – single instance */}
       <OrdersPanel />
       {/* OrderDebugFooter disabled temporarily */}
         </>

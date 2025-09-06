@@ -51,21 +51,24 @@ export const OrderDebugFooter: React.FC = () => {
 	})
 	useEffect(() => { try { localStorage.setItem('order_debug_open', open ? '1' : '0') } catch {} }, [open])
 
-	const [tab, setTab] = useState<'audit'|'last'>('audit')
+	const [tab, setTab] = useState<'audit'|'last'|'limits'>('audit')
 	const [audit, setAudit] = useState<any[]>([])
 	const [lastPlace, setLastPlace] = useState<any | null>(null)
+	const [limits, setLimits] = useState<any | null>(null)
 	const [err, setErr] = useState<string | null>(null)
 	const timerRef = useRef<number | null>(null)
 
 	const load = async () => {
 		try {
 			setErr(null)
-			const [a, l] = await Promise.all([
+			const [a, l, lim] = await Promise.all([
 				fetchJson('/api/debug/cancel_audit?last=300', { timeoutMs: 7000 }),
-				fetchJson('/api/debug/last_place_orders', { timeoutMs: 7000 })
+				fetchJson('/api/debug/last_place_orders', { timeoutMs: 7000 }),
+				fetchJson('/api/limits', { timeoutMs: 5000 })
 			])
 			if (a.ok) setAudit(Array.isArray(a.json?.events) ? a.json.events : [])
 			if (l.ok) setLastPlace(l.json || null)
+			if (lim.ok) setLimits(lim.json?.limits || null)
 		} catch (e:any) {
 			setErr(String(e?.message || 'debug_fetch_failed'))
 		}
@@ -115,6 +118,7 @@ export const OrderDebugFooter: React.FC = () => {
 						<div style={{ display: open ? 'flex' : 'none', alignItems: 'center', gap: 8 }}>
 							<button className={tab==='audit'?'btn':'btn ghost'} onClick={()=>setTab('audit')} style={{ fontSize: 12, padding: '2px 8px' }}>Audit</button>
 							<button className={tab==='last'?'btn':'btn ghost'} onClick={()=>setTab('last')} style={{ fontSize: 12, padding: '2px 8px' }}>Last place</button>
+							<button className={tab==='limits'?'btn':'btn ghost'} onClick={()=>setTab('limits')} style={{ fontSize: 12, padding: '2px 8px' }}>Limits</button>
 						</div>
 					</div>
 					<div style={{ opacity: .8 }}>{err ? <span style={{ color: 'crimson' }}>Error: {err}</span> : <span>Auto-refresh 5s</span>}</div>
@@ -148,11 +152,18 @@ export const OrderDebugFooter: React.FC = () => {
 									))}
 								</tbody>
 							</table>
-						) : (
+						) : tab === 'last' ? (
 							<div>
 								<div style={{ marginBottom: 6, opacity: .85 }}>Last place_orders snapshot</div>
 								<pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 11, lineHeight: 1.25, background: 'transparent', color: '#ccc' }}>
 									{lastPlaceText}
+								</pre>
+							</div>
+						) : (
+							<div>
+								<div style={{ marginBottom: 6, opacity: .85 }}>Binance API Limits snapshot</div>
+								<pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 11, lineHeight: 1.25, background: 'transparent', color: '#ccc' }}>
+									{(() => { try { return JSON.stringify(limits || {}, null, 2) } catch { return 'n/a' } })()}
 								</pre>
 							</div>
 						)}

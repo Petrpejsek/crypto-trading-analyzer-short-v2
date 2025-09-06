@@ -4,6 +4,7 @@ import signalsCfg from '../../config/signals.json'
 import type { MarketRawSnapshot, Kline, ExchangeFilters, UniverseItem } from '../../types/market_raw'
 import { calcSpreadBps, clampSnapshotSize, toNumber, toUtcIso } from '../../services/fetcher/normalize'
 import { request } from 'undici'
+import { noteApiCall } from '../lib/rateLimits'
 // TTL cache disabled by policy: no caching
 import { request as undiciRequest } from 'undici'
 
@@ -32,8 +33,12 @@ async function httpGet(path: string, params?: Record<string, string | number>): 
   const ac = new AbortController()
   const to = setTimeout(() => ac.abort(), config.timeoutMs ?? 6000)
   try {
-    const { body, statusCode } = await request(url, { method: 'GET', signal: ac.signal })
-    if (statusCode < 200 || statusCode >= 300) throw new Error(`HTTP ${statusCode} ${path}`)
+    const { body, statusCode, headers } = await request(url, { method: 'GET', signal: ac.signal })
+    try { noteApiCall({ method: 'GET', path, status: Number(statusCode), headers }) } catch {}
+    if (statusCode < 200 || statusCode >= 300) {
+      try { noteApiCall({ method: 'GET', path, status: Number(statusCode), headers }) } catch {}
+      throw new Error(`HTTP ${statusCode} ${path}`)
+    }
     const text = await body.text()
     return JSON.parse(text)
   } finally {

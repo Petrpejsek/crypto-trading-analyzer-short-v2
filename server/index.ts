@@ -9,13 +9,14 @@ import { decideMarketStrict } from '../services/decider/market_decider_gpt'
 import { runFinalPicker as runFinalPickerServer } from '../services/decider/final_picker_gpt'
 import { runHotScreener } from '../services/decider/hot_screener_gpt'
 import { runEntryStrategy } from '../services/decider/entry_strategy_gpt'
-import { executeHotTradingOrders, type PlaceOrdersRequest, fetchMarkPrice, fetchLastTradePrice, fetchAllOpenOrders, fetchPositions, cancelOrder, getBinanceAPI, getWaitingTpList, cleanupWaitingTpForSymbol, waitingTpProcessPassFromPositions } from '../services/trading/binance_futures'
+import { executeHotTradingOrders, type PlaceOrdersRequest, fetchMarkPrice, fetchLastTradePrice, fetchAllOpenOrders, fetchPositions, cancelOrder, getBinanceAPI, getWaitingTpList, cleanupWaitingTpForSymbol, waitingTpProcessPassFromPositions, rehydrateWaitingFromDiskOnce } from '../services/trading/binance_futures'
 import { ttlGet, ttlSet, makeKey } from './lib/ttlCache'
 import { preflightCompact } from '../services/decider/market_compact'
 import deciderCfg from '../config/decider.json'
 import tradingCfg from '../config/trading.json'
 import { calculateKlineChangePercent, calculateRegime } from './lib/calculations'
 import { startBinanceUserDataWs, getPositionsInMemory, getOpenOrdersInMemory, isUserDataReady } from '../services/exchange/binance/userDataWs'
+import { getLimitsSnapshot, setBanUntilMs } from './lib/rateLimits'
  
 
 // Load env from .env.local and .env even in production
@@ -40,6 +41,8 @@ const PORT = 8788
 
 // Ephemeral in-memory store of last place_orders request/response for diagnostics
 let __lastPlaceOrders: { request: any; result: any } | null = null
+// In-memory hints per symbol: last requested amount/leverage (survives across UI polls)
+const __lastPlannedBySymbol: Record<string, { amount?: number | null; leverage?: number | null; ts: string }> = {}
 const __lastEntryBySymbol: Record<string, { input: any; output: any }> = {}
 // Simple batch mutex to ensure /api/place_orders do not overlap
 let __batchBusy: boolean = false
@@ -135,6 +138,9 @@ function startOrderSweeper(): void {
   __sweeperTimer = setInterval(() => { sweepStaleOrdersOnce().catch(()=>{}) }, ms)
 }
 
+// Rehydrate waiting TP list from disk (if any) early during startup
+try { rehydrateWaitingFromDiskOnce().catch(()=>{}) } catch {}
+
 // Start Binance user-data WS to capture cancel/filled events into audit log
 try {
   startBinanceUserDataWs({
@@ -177,6 +183,48 @@ const server = http.createServer(async (req, res) => {
     } catch {}
     if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return }
     const url = new URL(req.url || '/', 'http://localhost')
+    // Long-lived auth endpoint for proxy integration. Allows setting 30-day cookie after Basic login.
+    if (url.pathname === '/__auth') {
+      try {
+        const parseCookies = (h: any): Record<string, string> => {
+          try {
+            const raw = String(h?.cookie || '')
+            const out: Record<string, string> = {}
+            if (!raw) return out
+            for (const p of raw.split(';')) {
+              const [k, ...rest] = p.split('=')
+              if (!k) continue
+              const key = decodeURIComponent(k.trim())
+              const val = decodeURIComponent(rest.join('=')?.trim() || '')
+              out[key] = val
+            }
+            return out
+          } catch { return {} }
+        }
+        const cookies = parseCookies(req.headers)
+        // Accept existing cookie as already authenticated
+        if (cookies['trader_auth'] === '1') { res.statusCode = 204; res.end(); return }
+        // Validate Basic header against expected credentials
+        const user = String(process.env.BASIC_USER || 'trader')
+        const pass = String(process.env.BASIC_PASS || 'Orchid-Falcon-Quasar-73!X')
+        const expected = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64')
+        const got = String(req.headers['authorization'] || '')
+        if (got === expected) {
+          res.statusCode = 204
+          // 30 days cookie, secure/lax
+          res.setHeader('Set-Cookie', 'trader_auth=1; Max-Age=2592000; Path=/; HttpOnly; Secure; SameSite=Lax')
+          res.end()
+          return
+        }
+        res.statusCode = 401
+        res.setHeader('WWW-Authenticate', 'Basic realm="Restricted"')
+        res.end()
+      } catch {
+        res.statusCode = 500
+        res.end()
+      }
+      return
+    }
     const hasRealBinanceKeys = (): boolean => {
     // Static UI (serve built frontend from dist/)
     try {
@@ -295,7 +343,8 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store')
       try {
         if (!hasRealBinanceKeysGlobal()) {
-          res.statusCode = 401
+          // Avoid 401 to prevent browser Basic Auth re-prompt under reverse proxy
+          res.statusCode = 403
           res.setHeader('content-type', 'application/json')
           res.end(JSON.stringify({ error: 'missing_binance_keys' }))
           return
@@ -317,6 +366,13 @@ const server = http.createServer(async (req, res) => {
           return
         }
         const r = await cancelOrder(symbol, orderId)
+        // Remove from in-memory snapshot immediately to keep /api/orders_console fresh
+        try {
+          const map: any = (global as any).openOrdersById || undefined
+          if (map && typeof map.delete === 'function') {
+            map.delete(orderId)
+          }
+        } catch {}
         try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'server', symbol, orderId, reason: 'manual_delete' }) } catch {}
         
         // Auto-cleanup waiting TP if this was an ENTRY order
@@ -363,7 +419,8 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store')
       try {
         if (!hasRealBinanceKeys()) {
-          res.statusCode = 401
+          // 403 instead of 401 to avoid Basic Auth modal on periodic polls
+          res.statusCode = 403
           res.setHeader('content-type', 'application/json')
           res.end(JSON.stringify({ error: 'missing_binance_keys' }))
           return
@@ -432,7 +489,8 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store')
       try {
         if (!hasRealBinanceKeys()) {
-          res.statusCode = 401
+          // 403 instead of 401 to avoid Basic Auth modal on periodic polls
+          res.statusCode = 403
           res.setHeader('content-type', 'application/json')
           res.end(JSON.stringify({ error: 'missing_binance_keys' }))
           return
@@ -495,6 +553,25 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: true }))
       return
     }
+    if (url.pathname === '/api/limits' && req.method === 'GET') {
+      try {
+        const snap = getLimitsSnapshot()
+        if (Number.isFinite((snap?.backoff?.untilMs as any))) {
+          const until = Number(snap.backoff.untilMs)
+          if (until > Date.now()) {
+            __binanceBackoffUntilMs = until
+          }
+        }
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, limits: snap }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
     if (url.pathname === '/api/ws/health') {
       res.statusCode = 200
       res.setHeader('content-type', 'application/json')
@@ -505,55 +582,47 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/orders_console' && req.method === 'GET') {
       res.setHeader('Cache-Control', 'no-store')
       try {
-        if (!hasRealBinanceKeys()) { res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_binance_keys' })); return }
-        // WS user-data: pokud ještě nepřišla událost, vrátíme prázdná pole (NO REST fallback pro user-data)
-        let positionsRaw = isUserDataReady('positions') ? getPositionsInMemory() : []
-        let ordersRaw = isUserDataReady('orders') ? getOpenOrdersInMemory() : []
-        let seededFromRest = false
-        // Cold-start seed via REST only if not in backoff window
+        if (!hasRealBinanceKeys()) { res.statusCode = 403; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_binance_keys' })); return }
+        const nowIso = new Date().toISOString()
+        // Použij vždy in-memory snapshoty (bez REST fallbacku) – mohou být prázdné do času rehydratace
+        let positionsRaw = getPositionsInMemory()
+        let ordersRaw = getOpenOrdersInMemory()
+        const ordersReady = isUserDataReady('orders')
+        const positionsReady = isUserDataReady('positions')
+        // Strict mode: žádné REST seedování – pouze aktuální WS data
+        // Fast-path auto-clean čekajících TP jen pokud jsou WS data READY (jinak hrozí falešné mazání)
         try {
-          if (!(Number(__binanceBackoffUntilMs) > Date.now())) {
-            const needOrders = !Array.isArray(ordersRaw) || ordersRaw.length === 0
-            const needPositions = !Array.isArray(positionsRaw) || positionsRaw.length === 0
-            if ((needOrders || needPositions) && hasRealBinanceKeys()) {
-              const [o, p] = await Promise.allSettled([
-                needOrders ? fetchAllOpenOrders() : Promise.resolve(ordersRaw),
-                needPositions ? fetchPositions() : Promise.resolve(positionsRaw)
-              ])
-              if (o.status === 'fulfilled' && Array.isArray(o.value)) { ordersRaw = o.value as any[]; seededFromRest = true }
-              if (p.status === 'fulfilled' && Array.isArray(p.value)) { positionsRaw = p.value as any[]; seededFromRest = true }
+          if (ordersReady && positionsReady) {
+            const hasEntry = (o: any): boolean => String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT' && !(o?.reduceOnly || o?.closePosition)
+            const entrySymbols = new Set<string>()
+            for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
+              try { if (hasEntry(o)) entrySymbols.add(String(o?.symbol || '')) } catch {}
+            }
+            const posSizeBySym = new Map<string, number>()
+            for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
+              try {
+                const sym = String(p?.symbol || '')
+                const amt = Number(p?.positionAmt)
+                const size = Number.isFinite(amt) ? Math.abs(amt) : 0
+                if (sym) posSizeBySym.set(sym, size)
+              } catch {}
+            }
+            const pending = getWaitingTpList()
+            for (const w of (Array.isArray(pending) ? pending : [])) {
+              try {
+                const sym = String(w?.symbol || '')
+                if (!sym) continue
+                const size = Number(posSizeBySym.get(sym) || 0)
+                if (!entrySymbols.has(sym) && size === 0) {
+                  cleanupWaitingTpForSymbol(sym)
+                }
+              } catch {}
             }
           }
         } catch {}
-        // Fast-path: průběžně uklízej waiting TP, pokud už není ENTRY a ani pozice
-        try {
-          const hasEntry = (o: any): boolean => String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT' && !(o?.reduceOnly || o?.closePosition)
-          const entrySymbols = new Set<string>()
-          for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
-            try { if (hasEntry(o)) entrySymbols.add(String(o?.symbol || '')) } catch {}
-          }
-          const posSizeBySym = new Map<string, number>()
-          for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
-            try {
-              const sym = String(p?.symbol || '')
-              const amt = Number(p?.positionAmt)
-              const size = Number.isFinite(amt) ? Math.abs(amt) : 0
-              if (sym) posSizeBySym.set(sym, size)
-            } catch {}
-          }
-          const pending = getWaitingTpList()
-          for (const w of (Array.isArray(pending) ? pending : [])) {
-            try {
-              const sym = String(w?.symbol || '')
-              if (!sym) continue
-              const size = Number(posSizeBySym.get(sym) || 0)
-              if (!entrySymbols.has(sym) && size === 0) {
-                cleanupWaitingTpForSymbol(sym)
-              }
-            } catch {}
-          }
-        } catch {}
-        // Spusť waiting TP processing pass na základě pozic (bez dalšího REST čtení)
+        // Strict režim: ŽÁDNÉ REST refresh fallbacky uvnitř orders_console – pouze aktuální WS snapshoty
+
+        // Spusť waiting TP processing pass na základě pozic (bez dalšího dodatečného REST čtení)
         try { waitingTpProcessPassFromPositions(positionsRaw).catch(()=>{}) } catch {}
         // Build marks map via REST for a SMALL prioritized set to avoid rate limits
         const marks: Record<string, number> = {}
@@ -615,8 +684,27 @@ const server = http.createServer(async (req, res) => {
         } catch {}
         const waiting = getWaitingTpList()
         const last = __lastPlaceOrders ? { request: __lastPlaceOrders.request, result: __lastPlaceOrders.result } : null
+        // Augment last_planned_by_symbol from last place_orders request if available (no extra calls)
+        try {
+          const reqOrders = (last?.request && Array.isArray((last as any).request?.orders)) ? (last as any).request.orders : []
+          for (const o of reqOrders) {
+            try {
+              const sym = String((o as any)?.symbol || '')
+              if (!sym) continue
+              const amt = Number((o as any)?.amount)
+              const lev = Number((o as any)?.leverage)
+              if (!__lastPlannedBySymbol[sym]) {
+                __lastPlannedBySymbol[sym] = {
+                  amount: Number.isFinite(amt) && amt > 0 ? amt : null,
+                  leverage: Number.isFinite(lev) && lev > 0 ? Math.floor(lev) : null,
+                  ts: nowIso
+                }
+              }
+            } catch {}
+          }
+        } catch {}
         // Normalize open orders to UI shape (consistent with /api/open_orders)
-        const openOrdersUi = (Array.isArray(ordersRaw) ? ordersRaw : []).map((o: any) => ({
+        let openOrdersUi = (Array.isArray(ordersRaw) ? ordersRaw : []).map((o: any) => ({
           orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0,
           symbol: String(o?.symbol || ''),
           side: String(o?.side || ''),
@@ -628,12 +716,127 @@ const server = http.createServer(async (req, res) => {
           reduceOnly: Boolean(o?.reduceOnly ?? false),
           closePosition: Boolean(o?.closePosition ?? false),
           positionSide: (typeof o?.positionSide === 'string' && o.positionSide) ? String(o.positionSide) : null,
-          createdAt: (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })(),
-          updatedAt: (() => { const t = Number(o?.updateTime); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })()
+          createdAt: (() => {
+            if (typeof (o as any)?.createdAt === 'string') return String((o as any).createdAt)
+            const t = Number((o as any)?.time)
+            return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null
+          })(),
+          updatedAt: (() => {
+            if (typeof (o as any)?.updatedAt === 'string') return String((o as any).updatedAt)
+            const tu = Number((o as any)?.updateTime)
+            if (Number.isFinite(tu) && tu > 0) return new Date(tu).toISOString()
+            const tt = Number((o as any)?.time)
+            return Number.isFinite(tt) && tt > 0 ? new Date(tt).toISOString() : null
+          })()
         }))
+        // Attach leverage and investedUsd per order for complete UI rendering (no extra calls)
+        try {
+          openOrdersUi = openOrdersUi.map((o: any) => {
+            const planned = __lastPlannedBySymbol[o.symbol]
+            const levFromPos = Number(levBySymbol[o.symbol])
+            const levFromPlanned = Number(planned?.leverage)
+            const leverage = Number.isFinite(levFromPos) && levFromPos > 0
+              ? Math.floor(levFromPos)
+              : (Number.isFinite(levFromPlanned) && levFromPlanned > 0 ? Math.floor(levFromPlanned) : null)
+            let investedUsd: number | null = null
+            try {
+              const isEntry = String(o.side || '').toUpperCase() === 'BUY' && !(o.reduceOnly || o.closePosition)
+              if (isEntry) {
+                // Prefer planned amount if available (exact UI input)
+                const amt = Number(planned?.amount)
+                if (Number.isFinite(amt) && amt > 0) investedUsd = amt
+                if (investedUsd == null) {
+                  const px = Number(o.price)
+                  const qty = Number(o.qty)
+                  if (Number.isFinite(px) && px > 0 && Number.isFinite(qty) && qty > 0 && Number.isFinite(leverage as any) && (leverage as number) > 0) {
+                    investedUsd = (px * qty) / (leverage as number)
+                  }
+                }
+              }
+            } catch {}
+            return { ...o, leverage, investedUsd }
+          })
+        } catch {}
+        // Normalize positions and filter zero-size entries (match /api/positions)
+        const positionsUi = (Array.isArray(positionsRaw) ? positionsRaw : [])
+          .map((p: any) => {
+            const amt = Number(p?.positionAmt)
+            const size = Number.isFinite(amt) ? Math.abs(amt) : 0
+            const entry = Number(p?.entryPrice)
+            const markMem = Number((p as any)?.markPrice)
+            const markFromMem = Number.isFinite(markMem) && markMem > 0 ? markMem : Number((marks as any)?.[String(p?.symbol||'')])
+            const mark = Number.isFinite(markFromMem) && markFromMem > 0 ? markFromMem : null
+            const pnl = Number(p?.unRealizedProfit ?? p?.unrealizedPnl)
+            const levRaw = (p as any)?.leverage
+            const levNum = Number(levRaw)
+            const lev = (levRaw == null || !Number.isFinite(levNum)) ? null : levNum
+            const side = (typeof p?.positionSide === 'string' && p.positionSide) ? String(p.positionSide) : (Number.isFinite(amt) ? (amt >= 0 ? 'LONG' : 'SHORT') : '')
+            const upd = Number(p?.updateTime)
+            return {
+              symbol: String(p?.symbol || ''),
+              positionSide: side || null,
+              size: Number.isFinite(size) ? size : 0,
+              entryPrice: Number.isFinite(entry) ? entry : null,
+              markPrice: mark,
+              unrealizedPnl: Number.isFinite(pnl) ? pnl : null,
+              leverage: lev,
+              updatedAt: Number.isFinite(upd) && upd > 0 ? new Date(upd).toISOString() : (Number.isFinite((p as any)?.updatedAt) ? new Date((p as any).updatedAt).toISOString() : null)
+            }
+          })
+          .filter((p: any) => Number.isFinite(p.size) && p.size > 0)
+        // Build leverage map for ALL symbols (even zero-size) from raw positions
+        const levBySymbol: Record<string, number> = {}
+        try {
+          for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
+            try {
+              const sym = String((p as any)?.symbol || '')
+              const lev = Number((p as any)?.leverage)
+              if (sym && Number.isFinite(lev) && lev > 0) levBySymbol[sym] = Math.floor(lev)
+            } catch {}
+          }
+        } catch {}
+        // Timestamps overview for UI (diagnostic and clarity)
+        const maxIso = (arr: any[], key: string): string | null => {
+          try {
+            let best: number = 0
+            for (const x of (Array.isArray(arr) ? arr : [])) {
+              const v = String((x as any)?.[key] || '')
+              const t = v ? Date.parse(v) : 0
+              if (Number.isFinite(t) && t > best) best = t
+            }
+            return best > 0 ? new Date(best).toISOString() : null
+          } catch { return null }
+        }
+        const updated_at = {
+          orders: maxIso(openOrdersUi, 'updatedAt'),
+          positions: maxIso(positionsUi, 'updatedAt'),
+          marks: Object.keys(marks || {}).length > 0 ? nowIso : null
+        }
+        // Attach Binance rate-limit usage snapshot (no extra calls)
+        const limits = getLimitsSnapshot()
+        const WEIGHT_LIMIT = (() => {
+          const cfg = Number((tradingCfg as any)?.BINANCE_WEIGHT_LIMIT_1M)
+          if (Number.isFinite(cfg) && cfg > 0) return Math.floor(cfg)
+          const env = Number(process.env.BINANCE_WEIGHT_LIMIT_1M)
+          if (Number.isFinite(env) && env > 0) return Math.floor(env)
+          return 1200
+        })()
+        const wUsedNum = Number(limits?.maxUsedWeight1mLast60s ?? limits?.lastUsedWeight1m)
+        const pct = Number.isFinite(wUsedNum) && wUsedNum >= 0 ? Math.min(999, Math.round((wUsedNum / WEIGHT_LIMIT) * 100)) : null
+        const binance_usage = {
+          weight1m_used: Number.isFinite(wUsedNum) ? wUsedNum : null,
+          weight1m_limit: WEIGHT_LIMIT,
+          orderCount10s: limits?.lastOrderCount10s ?? null,
+          orderCount1m: limits?.lastOrderCount1m ?? null,
+          percent: pct,
+          callRate: limits?.callRate ?? null,
+          risk: limits?.risk ?? 'normal',
+          backoff_active: Boolean(limits?.backoff),
+          backoff_remaining_sec: limits?.backoff?.remainingSec ?? null
+        }
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, positions: positionsRaw, open_orders: openOrdersUi, marks, waiting, last_place: last }))
+        res.end(JSON.stringify({ ok: true, positions: positionsUi, open_orders: openOrdersUi, marks, waiting, last_place: last, server_time: nowIso, updated_at, aux: { last_planned_by_symbol: __lastPlannedBySymbol, leverage_by_symbol: levBySymbol }, binance_usage }))
       } catch (e: any) {
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')
@@ -1223,11 +1426,66 @@ const server = http.createServer(async (req, res) => {
             } catch {}
           }
         } catch {}
+        // Cross-request throttle: prevent duplicate ENTRY submissions per symbol for a short window
+        try {
+          const memOrders = isUserDataReady('orders') ? getOpenOrdersInMemory() : []
+          const hasEntryOpen = (sym: string): boolean => {
+            try {
+              return (Array.isArray(memOrders) ? memOrders : []).some((o: any) => (
+                String(o?.symbol || '') === sym &&
+                String(o?.side || '').toUpperCase() === 'BUY' &&
+                String(o?.type || '').toUpperCase() === 'LIMIT' &&
+                !(o?.reduceOnly || o?.closePosition)
+              ))
+            } catch { return false }
+          }
+          const THROTTLE_MS = 8000
+          const filtered: PlaceOrdersRequest['orders'] = [] as any
+          for (const o of parsed.orders) {
+            const sym = String((o as any)?.symbol || '')
+            if (!sym) continue
+            const key = makeKey('entry_throttle', sym)
+            const recent = ttlGet(key)
+            if (recent != null) { try { console.error('[ENTRY_THROTTLED_RECENT]', { symbol: sym }) } catch {} ; continue }
+            if (hasEntryOpen(sym)) {
+              try { console.error('[ENTRY_THROTTLED_OPEN]', { symbol: sym }) } catch {}
+              try { ttlSet(key, Date.now(), Math.ceil(THROTTLE_MS/1000)) } catch {}
+              continue
+            }
+            filtered.push(o)
+            try { ttlSet(key, Date.now(), Math.ceil(THROTTLE_MS/1000)) } catch {}
+          }
+          parsed.orders = filtered
+          if (parsed.orders.length === 0) {
+            res.statusCode = 200
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify({ success: true, orders: [], throttled: true }))
+            return
+          }
+        } catch {}
+
         const tStart = Date.now()
         try { console.error('[BATCH_START]', { ts: new Date().toISOString(), count: parsed.orders.length }) } catch {}
         const result = await executeHotTradingOrders(parsed)
         try { console.error('[BATCH_DONE]', { ts: new Date().toISOString(), dur_ms: Date.now() - tStart, success: !!(result as any)?.success }) } catch {}
-        try { __lastPlaceOrders = { request: parsed, result } } catch {}
+        try {
+          __lastPlaceOrders = { request: parsed, result }
+          // Populate per-symbol planned amount/leverage hints for UI completeness
+          try {
+            const orders = Array.isArray(parsed?.orders) ? parsed.orders : []
+            for (const o of orders) {
+              const sym = String((o as any)?.symbol || '')
+              if (!sym) continue
+              const amount = Number((o as any)?.amount)
+              const leverage = Number((o as any)?.leverage)
+              __lastPlannedBySymbol[sym] = {
+                amount: Number.isFinite(amount) && amount > 0 ? amount : null,
+                leverage: Number.isFinite(leverage) && leverage > 0 ? Math.floor(leverage) : null,
+                ts: new Date().toISOString()
+              }
+            }
+          } catch {}
+        } catch {}
         if (!result?.success) {
           try {
             const firstErr = Array.isArray((result as any)?.orders)
@@ -1255,7 +1513,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/test/market_fill' && req.method === 'POST') {
       res.setHeader('Cache-Control', 'no-store')
       try {
-        if (!hasRealBinanceKeysGlobal()) { res.statusCode = 401; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ ok:false, error:'missing_binance_keys' })); return }
+        if (!hasRealBinanceKeysGlobal()) { res.statusCode = 403; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ ok:false, error:'missing_binance_keys' })); return }
         const chunks: Buffer[] = []
         for await (const ch of req) chunks.push(ch as Buffer)
         const bodyStr = Buffer.concat(chunks).toString('utf8')
@@ -1546,7 +1804,8 @@ const server = http.createServer(async (req, res) => {
       try {
         const mode = String(process.env.DECIDER_MODE || 'mock').toLowerCase()
         if (mode === 'gpt' && !process.env.OPENAI_API_KEY) {
-          res.statusCode = 401
+          // 403 to avoid triggering proxy Basic Auth dialogs
+          res.statusCode = 403
           res.setHeader('content-type', 'application/json')
           res.end(JSON.stringify({ ok: false, error: 'missing_openai_key' }))
           return

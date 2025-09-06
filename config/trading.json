@@ -11,6 +11,7 @@
   "DISABLE_LIMIT_TP": false
   ,"SAFE_MODE_LONG_ONLY": false
   ,"RAW_PASSTHROUGH": true
+  ,"BINANCE_WEIGHT_LIMIT_1M": 6000
 }
 
 

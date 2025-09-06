@@ -1,5 +1,6 @@
 import WebSocket from 'ws'
 import { fetch } from 'undici'
+import { getBinanceAPI } from '../../trading/binance_futures'
 
 export type AuditFn = (evt: { type: 'cancel' | 'filled'; symbol: string; orderId?: number; side?: string | null; otype?: string | null; source: 'binance_ws'; reason?: string | null; payload?: any }) => void
 
@@ -24,6 +25,87 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
   let listenKey: string | null = null
   let ws: WebSocket | null = null
   let refreshTimer: NodeJS.Timeout | null = null
+
+  async function rehydratePositionsOnce(): Promise<void> {
+    try {
+      const api = getBinanceAPI() as any
+      const list = await api.getPositions()
+      const now = Date.now()
+      if (Array.isArray(list)) {
+        for (const p of list) {
+          try {
+            const sym = String(p?.symbol || '')
+            if (!sym) continue
+            const pa = Number(p?.positionAmt)
+            const ep = Number(p?.entryPrice)
+            const psdRaw = String(p?.positionSide || '')
+            const psd = psdRaw === 'LONG' ? 'LONG' : psdRaw === 'SHORT' ? 'SHORT' : (Number.isFinite(pa) ? (pa < 0 ? 'SHORT' : 'LONG') : null)
+            const lev = Number(p?.leverage)
+            positions.set(sym, {
+              symbol: sym,
+              positionAmt: Number.isFinite(pa) ? pa : 0,
+              entryPrice: Number.isFinite(ep) ? ep : null,
+              positionSide: psd,
+              leverage: Number.isFinite(lev) ? lev : null,
+              updatedAt: now
+            })
+          } catch {}
+        }
+        hadAccountUpdate = true
+        try { console.info('[USERDATA_WS_REHYDRATE_POS]', { count: positions.size }) } catch {}
+      }
+    } catch (e) {
+      try { console.error('[USERDATA_WS_REHYDRATE_POS_ERR]', (e as any)?.message || e) } catch {}
+    }
+  }
+
+  async function rehydrateOpenOrdersOnce(): Promise<void> {
+    try {
+      const api = getBinanceAPI() as any
+      const list = await api.getAllOpenOrders()
+      if (Array.isArray(list)) {
+        for (const o of list) {
+          try {
+            const id = Number(o?.orderId ?? o?.orderID)
+            const sym = String(o?.symbol || '')
+            if (!id || !sym) continue
+            const side = String(o?.side || '')
+            const otype = String(o?.type || '')
+            const price = Number(o?.price)
+            const stopPrice = Number(o?.stopPrice)
+            const tif = String(o?.timeInForce || '')
+            const reduceOnly = Boolean(o?.reduceOnly ?? false)
+            const closePosition = Boolean(o?.closePosition ?? false)
+            const positionSideRaw = String(o?.positionSide || '')
+            const positionSide = positionSideRaw === 'LONG' ? 'LONG' : positionSideRaw === 'SHORT' ? 'SHORT' : null
+            const createdMs = Number((o as any)?.time)
+            const updatedMs = Number((o as any)?.updateTime)
+            const qty = Number(o?.origQty ?? o?.quantity ?? o?.qty)
+            openOrdersById.set(id, {
+              orderId: id,
+              symbol: sym,
+              side,
+              type: otype,
+              qty: Number.isFinite(qty) ? qty : null,
+              price: Number.isFinite(price) ? price : null,
+              stopPrice: Number.isFinite(stopPrice) ? stopPrice : null,
+              timeInForce: tif || null,
+              reduceOnly,
+              closePosition,
+              positionSide,
+              createdAt: Number.isFinite(createdMs) && createdMs > 0 ? new Date(createdMs).toISOString() : null,
+              updatedAt: Number.isFinite(updatedMs) && updatedMs > 0 ? new Date(updatedMs).toISOString() : null,
+              status: 'NEW'
+            })
+          } catch {}
+        }
+        hadOrderUpdate = true
+        try { console.info('[USERDATA_WS_REHYDRATE_ORDERS]', { count: openOrdersById.size }) } catch {}
+      }
+    } catch (e) {
+      try { console.error('[USERDATA_WS_REHYDRATE_ORDERS_ERR]', (e as any)?.message || e) } catch {}
+    }
+  }
 
   function parseAccountUpdate(msg: any) {
     try {
@@ -69,6 +151,15 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
       const ts = Number(o?.T ?? o?.E ?? Date.now())
       const status = String(o?.X || '')
       const qty = Number(o?.q ?? o?.Q ?? o?.origQty)
+
+      // Preserve first-seen creation time per orderId for accurate Age in UI
+      const prev = openOrdersById.get(id)
+      const createdCandidate = Number((o as any)?.O ?? (o as any)?.orderCreationTime ?? (o as any)?.T ?? (o as any)?.E)
+      const createdMs = Number.isFinite(createdCandidate) && createdCandidate > 0 ? createdCandidate : ts
+      const createdAt = (prev && typeof prev.createdAt === 'string')
+        ? prev.createdAt
+        : (Number.isFinite(createdMs) ? new Date(createdMs).toISOString() : null)
+
       const obj = {
         orderId: id,
         symbol: sym,
@@ -81,7 +172,7 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
         reduceOnly,
         closePosition,
         positionSide,
-        createdAt: null as string | null,
+        createdAt: createdAt as string | null,
         updatedAt: Number.isFinite(ts) ? new Date(ts).toISOString() : null,
         status
       }
@@ -140,7 +231,7 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
     const url = `wss://fstream.binance.com/ws/${listenKey}`
     try { console.info('[USERDATA_WS_CONNECT]', { url_end: url.slice(-8) }) } catch {}
     ws = new WebSocket(url)
-    ws.on('open', () => { try { console.info('[USERDATA_WS_OPEN]') } catch {} })
+    ws.on('open', () => { try { console.info('[USERDATA_WS_OPEN]') } catch {}; rehydratePositionsOnce().catch(()=>{}); rehydrateOpenOrdersOnce().catch(()=>{}) })
     ws.on('close', (code) => { try { console.warn('[USERDATA_WS_CLOSE]', { code }) } catch {}; reconnect() })
     ws.on('error', (e) => { try { console.error('[USERDATA_WS_ERROR]', (e as any)?.message || e) } catch {}; reconnect() })
     ws.on('message', (data) => { handleMessage(String(data)) })
