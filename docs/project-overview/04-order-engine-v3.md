@@ -24,11 +24,13 @@ Implementace: `services/trading/binance_futures.ts` → `executeHotTradingOrders
 ```
 
 ### Politika V3
-- Batch flow:
+- Batch flow (aktuální):
   1) paralelně odešle VŠECHNY ENTRY LIMIT objednávky (BUY)
   2) čeká pevně 3s (konfig)
   3) paralelně odešle VŠECHNY SL (STOP_MARKET, closePosition=true)
-  4) TP LIMIT reduceOnly se NEOdesílá hned – naplánuje se „waiting TP“ a odešle se AUTOMATICKY, jakmile existuje pozice (viz Waiting TP)
+  4) TP se řídí přepínačem `V3_TP_IMMEDIATE_MARKET` v `config/trading.json`:
+     - `true` (immediate): odešle se okamžitě TP MARKET (closePosition=true) – funguje i bez fillu, hedge-aware (`positionSide`)
+     - `false` (waiting) – AKTUÁLNÍ STAV: TP MARKET (closePosition=true) se odešle automaticky, jakmile existuje pozice (viz Waiting TP)
 
 - Rounding: v režimu `RAW_PASSTHROUGH=true` engine neposouvá ceny – používá přesně UI hodnoty.
 - Leverage: před ENTRY se pokusí nastavit `POST /fapi/v1/leverage` na požadovanou hodnotu (bez tvrdého failu při chybě).
@@ -37,8 +39,8 @@ Implementace: `services/trading/binance_futures.ts` → `executeHotTradingOrders
 
 ### Waiting TP
 - Registry: in-memory `waitingTpBySymbol` + persist `runtime/waiting_tp.json`.
-- Odeslání TP LIMIT (reduceOnly) se provede v `waitingTpProcessPassFromPositions()` během průchodu `/api/orders_console` nebo `/api/positions`, jakmile pozice existuje.
-- Parametry TP LIMIT: SELL LIMIT s `price=tp * 1.03`, `stopPrice=tp`, `timeInForce=GTC`, `quantity = abs(positionAmt)`, `reduceOnly=true`.
+- Odeslání se provede v `waitingTpProcessPassFromPositions()` během průchodu `/api/orders_console` nebo `/api/positions`, jakmile pozice existuje.
+- Parametry TP (AKTUÁLNĚ): TP MARKET (closePosition=true), `workingType=MARK_PRICE`, hedge-aware (`positionSide`). Žádné zaokrouhlování – RAW UI `tp`.
 
 ### Sanitizace a whitelist
 - Bezpečnostní pravidla v několika vrstvách:
@@ -49,7 +51,11 @@ Implementace: `services/trading/binance_futures.ts` → `executeHotTradingOrders
   - `BinanceFuturesAPI.request()` a `placeOrder()` – identická pravidla + robustní logování `[OUTGOING_ORDER]` / `[BINANCE_ERROR]`
 
 ### Guardy proti okamžitému triggeru
-- SL/TP MARKET se kontrolují proti MARK pouze v SAFE sekvencích v jiných režimech; V3 používá waiting TP s delay – tím minimalizuje -2021 chyby.
+- SL/TP MARKET se proti MARK neblokují (fungují i bez fillu); waiting varianta minimalizuje -2021 (would immediately trigger) u TP.
+
+### Sweeper (auto-cancel stáří)
+- Přepínač: `pending_cancel_age_min` (0 = vypnuto)
+- Bezpečné chování (opraveno): Sweeper ruší POUZE BUY LIMIT ENTRY (bez `reduceOnly/closePosition`). EXIT objednávky (STOP/TP) NIKDY nemaže.
 
 ### Výstup (server → UI)
 Server vrací `engine: "v3_batch_2s"` plus list výsledků (per symbol `executed|error`) a echo struktur. UI následně čte `/api/orders_console` pro živý stav a waiting TP list.

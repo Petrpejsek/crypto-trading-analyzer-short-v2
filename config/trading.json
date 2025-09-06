@@ -12,6 +12,7 @@
   ,"SAFE_MODE_LONG_ONLY": false
   ,"RAW_PASSTHROUGH": true
   ,"BINANCE_WEIGHT_LIMIT_1M": 6000
+  ,"V3_TP_IMMEDIATE_MARKET": false
 }
 
 

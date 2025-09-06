@@ -663,26 +663,14 @@ export async function waitingTpProcessPassFromPositions(positionsRaw: any[]): Pr
       const size = rec.size
       waitingTpOnCheck(symbol, size)
       // Žádné REST dotazy na openOrders – cleanup řeší server na základě WS snapshotu
-      // Place TP LIMIT as soon as pozice existuje (bez čekání na druhý průchod)
+      // Place TP MARKET (closePosition) as soon as pozice existuje (bez čekání na druhý průchod)
       if (size > 0 && w.checks >= 1) {
-        const qtyStr = String(size)
         const workingType = (w.workingType === 'CONTRACT_PRICE') ? 'CONTRACT_PRICE' : 'MARK_PRICE'
         const positionSide = (w.positionSide === 'SHORT' || rec.side === 'SHORT') ? 'SHORT' : 'LONG'
-        const tpParams: OrderParams & { __engine?: string } = {
-          symbol,
-          side: positionSide === 'SHORT' ? 'BUY' : 'SELL',
-          type: 'TAKE_PROFIT',
-          price: String(w.tp * 1.03), // Price o 3% vyšší pro lepší "chycení"
-          stopPrice: String(w.tp),
-          timeInForce: 'GTC',
-          quantity: qtyStr,
-          workingType,
-          positionSide,
-          newClientOrderId: `x_tp_l_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,6)}`,
-          newOrderRespType: 'RESULT',
-          __engine: 'v3_batch_2s'
-        }
-        try { console.info('[BATCH_TP_PARAMS]', { symbol, type: tpParams.type, price: tpParams.price, stopPrice: tpParams.stopPrice, qty: tpParams.quantity, reduceOnly: false }) } catch {}
+        const tpParams: OrderParams & { __engine?: string } = positionSide === 'SHORT'
+          ? { symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET', stopPrice: String(w.tp), closePosition: true, workingType, positionSide, newClientOrderId: `x_tp_tm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,6)}`, newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' }
+          : { symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: String(w.tp), closePosition: true, workingType, positionSide, newClientOrderId: `x_tp_tm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,6)}`, newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' }
+        try { console.info('[BATCH_TP_PARAMS]', { symbol, type: tpParams.type, stopPrice: tpParams.stopPrice, closePosition: true }) } catch {}
         try {
           const tpRes = await (api as any).placeOrder(tpParams)
           console.error('[TP_DELAY_SENT]', { symbol, orderId: tpRes?.orderId })
@@ -1400,12 +1388,13 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
   console.error('[BATCH_PHASE_2_WAIT]', { ms: 3000, ts: new Date().toISOString() })
   await sleep(3000)
 
-  // Phase 3: Send ALL SL immediately; TP LIMIT reduceOnly will be deferred until position exists
-  console.error('[BATCH_PHASE_3_ALL_EXITS_PARALLEL]', { ts: new Date().toISOString() })
+  // Phase 3: Send ALL SL immediately; TP policy depends on config (default immediate)
+  const tpImmediateMarket = Boolean((tradingCfg as any)?.V3_TP_IMMEDIATE_MARKET !== false)
+  console.error('[BATCH_PHASE_3_ALL_EXITS_PARALLEL]', { ts: new Date().toISOString(), tp_policy: tpImmediateMarket ? 'IMMEDIATE_MARKET' : 'WAITING_LIMIT' })
   const exitPromises: Array<Promise<any>> = []
-  const exitIndex: Array<{ symbol: string; kind: 'SL' }> = []
+  const exitIndex: Array<{ symbol: string; kind: 'SL' | 'TP' }> = []
 
-  // Start SL now for all symbols
+  // Start SL now for all symbols (and TP MARKET immediately when enabled)
   for (const p of prepared) {
     const slParams: OrderParams & { __engine?: string } = {
       symbol: p.symbol,
@@ -1421,27 +1410,40 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
     }
     exitPromises.push(api.placeOrder(slParams))
     exitIndex.push({ symbol: p.symbol, kind: 'SL' })
+
+    if (tpImmediateMarket) {
+      const tpParams: OrderParams & { __engine?: string } = p.positionSide
+        ? { symbol: p.symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: p.rounded.tp, closePosition: true, workingType, positionSide: p.positionSide, newClientOrderId: makeId('x_tp_tm'), newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' }
+        : { symbol: p.symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: p.rounded.tp, closePosition: true, workingType, newClientOrderId: makeId('x_tp_tm'), newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' }
+      exitPromises.push(api.placeOrder(tpParams))
+      exitIndex.push({ symbol: p.symbol, kind: 'TP' })
+    }
   }
 
-  // Defer TP LIMIT reduceOnly until a real position exists; schedule background pollers per symbol
-  for (const p of prepared) {
-    spawnDeferredTpPoller(p.symbol, p.rounded.tp, String(p.rounded.qty), p.positionSide, workingType).catch(()=>{})
+  if (!tpImmediateMarket) {
+    // Defer TP LIMIT reduceOnly until a real position exists; schedule background pollers per symbol
+    for (const p of prepared) {
+      spawnDeferredTpPoller(p.symbol, p.rounded.tp, String(p.rounded.qty), p.positionSide, workingType).catch(()=>{})
+    }
   }
 
   const exitSettledRaw = await Promise.allSettled(exitPromises)
-  const exitSettled: Array<any> = []
+  const combined: Record<string, { sl: any; tp: any; errors: string[] }> = {}
   for (let i = 0; i < exitSettledRaw.length; i += 1) {
-    const slRes = exitSettledRaw[i]
-    const symbol = exitIndex[i]?.symbol || 'UNKNOWN'
-    const ok = slRes.status === 'fulfilled'
-    exitSettled.push({
-      symbol,
-      ok,
-      sl: slRes.status === 'fulfilled' ? slRes.value : null,
-      tp: null,
-      error: ok ? null : (slRes as any)?.reason?.message || 'unknown'
-    })
+    const r = exitSettledRaw[i]
+    const idx = exitIndex[i]
+    const symbol = idx?.symbol || 'UNKNOWN'
+    const kind = idx?.kind || 'SL'
+    if (!combined[symbol]) combined[symbol] = { sl: null, tp: null, errors: [] }
+    if (r.status === 'fulfilled') {
+      if (kind === 'SL') combined[symbol].sl = r.value
+      else combined[symbol].tp = r.value
+    } else {
+      const msg = (r as any)?.reason?.message || 'unknown'
+      combined[symbol].errors.push(`${kind}:${msg}`)
+    }
   }
+  const exitSettled: Array<any> = Object.entries(combined).map(([symbol, v]) => ({ symbol, ok: v.errors.length === 0, sl: v.sl ?? null, tp: v.tp ?? null, error: v.errors.length ? v.errors.join('; ') : null }))
 
   // Aggregate
   const bySymbol: Record<string, any> = {}
