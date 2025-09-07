@@ -13,10 +13,11 @@ export function scheduleWatch(symbol: string, side: 'LONG'|'SHORT'|null): void {
 }
 
 async function cancelAllOpenOrders(symbol: string): Promise<void> {
-  // direct REST call to avoid cyclic import; uses same env credentials via server
+  // OPRAVA: Ruš všechny ordery pouze pokud NENÍ pozice
+  // Pokud je pozice, SL/TP se nesmí rušit!
   try {
     const qs = new URLSearchParams({ symbol }).toString()
-    const url = `http://localhost:8788/__proxy/binance/cancelAllOpenOrders?${qs}`
+    const url = `http://localhost:8789/__proxy/binance/cancelAllOpenOrders?${qs}`
     await undiciRequest(url, { method: 'DELETE' })
   } catch {}
 }
@@ -24,7 +25,7 @@ async function cancelAllOpenOrders(symbol: string): Promise<void> {
 async function reduceOnlyMarket(symbol: string, side: 'LONG'|'SHORT'): Promise<void> {
   try {
     const qs = new URLSearchParams({ symbol, side }).toString()
-    const url = `http://localhost:8788/__proxy/binance/flatten?${qs}`
+    const url = `http://localhost:8789/__proxy/binance/flatten?${qs}`
     await undiciRequest(url, { method: 'POST' })
   } catch {}
 }
@@ -35,6 +36,13 @@ function hasExitsForSymbol(openOrders: any[], symbol: string, hasPosition: boole
   const hasTPLimitReduceOnly = bySym.some(o => String(o?.type||'') === 'LIMIT' && o?.reduceOnly)
   const hasTPMarketCloseOnly = bySym.some(o => String(o?.type||'') === 'TAKE_PROFIT_MARKET' && (o?.closePosition || o?.reduceOnly))
   const hasAnyTP = hasTPLimitReduceOnly || hasTPMarketCloseOnly
+  
+  // KRITICKÁ OCHRANA: Pozice MUSÍ mít SL! Pokud ne, je to emergency
+  if (hasPosition && !hasSL) {
+    console.error('[CRITICAL_MISSING_SL]', { symbol, hasPosition, hasSL, hasAnyTP })
+    // Emergency SL recovery bude implementován později
+  }
+  
   // Policy:
   // - If we already have a position, require both SL and TP present
   // - If we do NOT have a position yet (pre-entry), accept SL-only as sufficient
@@ -59,11 +67,12 @@ export function startWatchdog(): void {
         const pos = posList.find(p => String(p?.symbol||'') === w.symbol && Number(p?.size) > 0) || null
         const exitsOk = hasExitsForSymbol(openOrders, w.symbol, !!pos)
         if (pos && !exitsOk) {
+          // KRITICKÁ SITUACE: Máme pozici ale nemáme exits (SL/TP)
+          // Pouze flatten pozici, NERUŠÍME ordery (mohly by tam být jiné SL/TP)
           await reduceOnlyMarket(w.symbol, w.side || 'LONG')
-          await cancelAllOpenOrders(w.symbol)
-          // eslint-disable-next-line no-console
-          console.warn('[WATCHDOG_FLATTEN]', w.symbol)
+          console.warn('[WATCHDOG_EMERGENCY_FLATTEN]', { symbol: w.symbol, reason: 'position_without_exits' })
         } else if (!pos && !exitsOk) {
+          // Žádná pozice, žádné exits → můžeme bezpečně zrušit všechny ordery
           await cancelAllOpenOrders(w.symbol)
           // eslint-disable-next-line no-console
           console.warn('[WATCHDOG_CANCEL_ENTRY]', w.symbol)

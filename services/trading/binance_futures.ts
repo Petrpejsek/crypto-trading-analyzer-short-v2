@@ -663,8 +663,22 @@ export async function waitingTpProcessPassFromPositions(positionsRaw: any[]): Pr
       const size = rec.size
       waitingTpOnCheck(symbol, size)
       // Žádné REST dotazy na openOrders – cleanup řeší server na základě WS snapshotu
-      // Place TP MARKET (closePosition) as soon as pozice existuje (bez čekání na druhý průchod)
+      // ANTI-DUPLICATE: Zkontroluj, jestli už TP order pro tento symbol neexistuje
       if (size > 0 && w.checks >= 1) {
+        try {
+          const allOrders = await getBinanceAPI().getOpenOrders(symbol)
+          const existingTp = (Array.isArray(allOrders) ? allOrders : []).some((o: any) => 
+            String(o?.side) === 'SELL' && 
+            String(o?.type).includes('TAKE_PROFIT')
+          )
+          
+          if (existingTp) {
+            console.warn('[WAITING_TP_DEDUP_SKIP]', { symbol, reason: 'TP_already_exists_for_symbol' })
+            waitingTpOnSent(symbol) // Cleanup waiting state
+            continue
+          }
+        } catch {}
+        
         const workingType = (w.workingType === 'CONTRACT_PRICE') ? 'CONTRACT_PRICE' : 'MARK_PRICE'
         const positionSide = (w.positionSide === 'SHORT' || rec.side === 'SHORT') ? 'SHORT' : 'LONG'
         const tpParams: OrderParams & { __engine?: string } = positionSide === 'SHORT'
@@ -1394,29 +1408,53 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
   const exitPromises: Array<Promise<any>> = []
   const exitIndex: Array<{ symbol: string; kind: 'SL' | 'TP' }> = []
 
+  // ANTI-DUPLICATE CHECK: Zkontroluj existující SL/TP před vytvořením nových
+  const existingOrders = await fetchAllOpenOrders() || []
+  const ordersBySym = new Map<string, any[]>()
+  for (const o of (Array.isArray(existingOrders) ? existingOrders : [])) {
+    const sym = String(o?.symbol || '')
+    if (!sym) continue
+    if (!ordersBySym.has(sym)) ordersBySym.set(sym, [])
+    ordersBySym.get(sym)!.push(o)
+  }
+
   // Start SL now for all symbols (and TP MARKET immediately when enabled)
   for (const p of prepared) {
-    const slParams: OrderParams & { __engine?: string } = {
-      symbol: p.symbol,
-      side: 'SELL',
-      type: 'STOP_MARKET',
-      stopPrice: p.rounded.sl,
-      closePosition: true,
-      workingType,
-      positionSide: p.positionSide,
-      newClientOrderId: makeId('x_sl'),
-      newOrderRespType: 'RESULT',
-      __engine: 'v3_batch_2s'
+    const existing = ordersBySym.get(p.symbol) || []
+    const hasSL = existing.some(o => String(o?.side) === 'SELL' && String(o?.type).includes('STOP'))
+    const hasTP = existing.some(o => String(o?.side) === 'SELL' && String(o?.type).includes('TAKE_PROFIT'))
+    
+    // ANTI-DUPLICATE: Nevytvářej SL pokud už existuje
+    if (hasSL) {
+      console.warn('[DEDUP_SKIP_SL]', { symbol: p.symbol, reason: 'SL_already_exists' })
+    } else {
+      const slParams: OrderParams & { __engine?: string } = {
+        symbol: p.symbol,
+        side: 'SELL',
+        type: 'STOP_MARKET',
+        stopPrice: p.rounded.sl,
+        closePosition: true,
+        workingType,
+        positionSide: p.positionSide,
+        newClientOrderId: makeId('x_sl'),
+        newOrderRespType: 'RESULT',
+        __engine: 'v3_batch_2s'
+      }
+      exitPromises.push(api.placeOrder(slParams))
+      exitIndex.push({ symbol: p.symbol, kind: 'SL' })
     }
-    exitPromises.push(api.placeOrder(slParams))
-    exitIndex.push({ symbol: p.symbol, kind: 'SL' })
 
     if (tpImmediateMarket) {
-      const tpParams: OrderParams & { __engine?: string } = p.positionSide
-        ? { symbol: p.symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: p.rounded.tp, closePosition: true, workingType, positionSide: p.positionSide, newClientOrderId: makeId('x_tp_tm'), newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' }
-        : { symbol: p.symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: p.rounded.tp, closePosition: true, workingType, newClientOrderId: makeId('x_tp_tm'), newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' }
-      exitPromises.push(api.placeOrder(tpParams))
-      exitIndex.push({ symbol: p.symbol, kind: 'TP' })
+      // ANTI-DUPLICATE: Nevytvářej TP pokud už existuje
+      if (hasTP) {
+        console.warn('[DEDUP_SKIP_TP]', { symbol: p.symbol, reason: 'TP_already_exists' })
+      } else {
+        const tpParams: OrderParams & { __engine?: string } = p.positionSide
+          ? { symbol: p.symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: p.rounded.tp, closePosition: true, workingType, positionSide: p.positionSide, newClientOrderId: makeId('x_tp_tm'), newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' }
+          : { symbol: p.symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: p.rounded.tp, closePosition: true, workingType, newClientOrderId: makeId('x_tp_tm'), newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' }
+        exitPromises.push(api.placeOrder(tpParams))
+        exitIndex.push({ symbol: p.symbol, kind: 'TP' })
+      }
     }
   }
 

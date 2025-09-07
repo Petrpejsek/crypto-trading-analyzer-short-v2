@@ -36,7 +36,7 @@ try {
   }
 } catch {}
 
-const PORT = 8788
+const PORT = process.env.PORT ? Number(process.env.PORT) : 8789
 // WS market collector disabled – REST-only mode for klines
 
 // Ephemeral in-memory store of last place_orders request/response for diagnostics
@@ -151,7 +151,8 @@ async function sweepStaleOrdersOnce(): Promise<number> {
       .filter(o => o.symbol && o.orderId && Number.isFinite(o.createdAtMs as any))
       .filter(o => (now - (o.createdAtMs as number)) > ageMs)
 
-    // Bezpečné čištění osiřelých exitů (SELL STOP/TAKE_PROFIT (+MARKET)) – pouze pokud není pozice a není otevřený ENTRY
+    // KRITICKÁ OPRAVA: SL ordery NIKDY nesmí být rušeny automaticky!
+    // Pouze TP ordery mohou být rušeny jako "orphan exits" 
     const entrySymbols = new Set<string>((Array.isArray(raw) ? raw : [])
       .filter((o: any) => {
         try {
@@ -168,10 +169,18 @@ async function sweepStaleOrdersOnce(): Promise<number> {
           const reduceOnly = Boolean(o?.reduceOnly)
           const closePosition = Boolean(o?.closePosition)
           const sym = String(o?.symbol||'')
-          const isExitType = type.includes('STOP') || type.includes('TAKE_PROFIT')
-          const noPos = (Number(posSizeBySym.get(sym)||0)===0)
+          const isExitType = type.includes('STOP') || type.includes('TAKE_PROFIT') // SL i TP
+          const hasPos = (Number(posSizeBySym.get(sym)||0) > 0)
           const noEntryOpen = !entrySymbols.has(sym)
-          return side==='SELL' && isExitType && (reduceOnly || closePosition) && noPos && noEntryOpen
+          
+          // KRITICKÁ OCHRANA: Pokud máme pozici, NIKDY neruš SL ani TP!
+          if (hasPos && isExitType) {
+            console.warn('[SWEEPER_POSITION_PROTECTION]', { symbol: sym, orderId: o?.orderId, type, reason: 'position_exists_never_cancel_exits' })
+            return false
+          }
+          
+          // Pokud není pozice, sweeper může mazat normálně
+          return side==='SELL' && isExitType && (reduceOnly || closePosition) && !hasPos && noEntryOpen
         } catch { return false }
       })
       .map((o: any) => ({
@@ -216,6 +225,53 @@ function startOrderSweeper(): void {
   if (__sweeperTimer) return
   const ms = Number((tradingCfg as any)?.OPEN_ORDERS_SWEEP_MS ?? 10000)
   __sweeperTimer = setInterval(() => { sweepStaleOrdersOnce().catch(()=>{}) }, ms)
+}
+
+// KRITICKÁ OCHRANA: Continuous SL monitoring
+let __slMonitorTimer: NodeJS.Timeout | null = null
+async function slProtectionMonitor(): Promise<void> {
+  try {
+    if (!hasRealBinanceKeysGlobal()) return
+    console.info('[SL_MONITOR_PASS]')
+    
+    const [positions, orders] = await Promise.all([fetchPositions(), fetchAllOpenOrders()])
+    const posList = Array.isArray(positions) ? positions : []
+    const ordersList = Array.isArray(orders) ? orders : []
+    
+    for (const pos of posList) {
+      try {
+        const symbol = String(pos?.symbol || '')
+        const size = Math.abs(Number(pos?.positionAmt || 0))
+        if (!symbol || size === 0) continue
+        
+        const slOrders = ordersList.filter(o => 
+          String(o?.symbol) === symbol && 
+          String(o?.side) === 'SELL' && 
+          String(o?.type).includes('STOP')
+        )
+        
+        if (slOrders.length === 0) {
+          console.error('[CRITICAL_NO_SL_FOR_POSITION]', { 
+            symbol, 
+            positionSize: size, 
+            entryPrice: pos?.entryPrice,
+            unrealizedPnl: pos?.unRealizedProfit 
+          })
+          // TODO: Auto-create emergency SL based on position entry price - 5%
+          // Pro NMR: pokud entry ~19, emergency SL na 18.05 (5% ztráta)
+        }
+      } catch (e: any) {
+        console.error('[SL_MONITOR_ERR]', { symbol: pos?.symbol, error: e?.message })
+      }
+    }
+  } catch (e: any) {
+    console.error('[SL_MONITOR_GLOBAL_ERR]', e?.message)
+  }
+}
+
+function startSlProtectionMonitor(): void {
+  if (__slMonitorTimer) return
+  __slMonitorTimer = setInterval(() => { slProtectionMonitor().catch(()=>{}) }, 30_000) // every 30s
 }
 
 // Rehydrate waiting TP list from disk (if any) early during startup
@@ -532,6 +588,7 @@ const server = http.createServer(async (req, res) => {
           closePosition: Boolean(o?.closePosition ?? false),
           positionSide: (typeof o?.positionSide === 'string' && o.positionSide) ? String(o.positionSide) : null,
           clientOrderId: ((): string | null => { const id = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || ''); return id || null })(),
+          isExternal: ((): boolean => { const id = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || ''); return id ? !/^(e_l_|x_sl_|x_tp_tm_|x_tp_l_)/.test(id) : true })(),
           createdAt: (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })(),
           updatedAt: (() => { const t = Number(o?.updateTime); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })()
         })) : []
@@ -2151,6 +2208,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`)
   try { startOrderSweeper() } catch (e) { console.error('[SWEEPER_START_ERR]', (e as any)?.message || e) }
+  try { startSlProtectionMonitor() } catch (e) { console.error('[SL_MONITOR_START_ERR]', (e as any)?.message || e) }
 })
 
 
