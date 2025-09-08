@@ -127,9 +127,13 @@ async function sweepStaleOrdersOnce(): Promise<number> {
     try {
       for (const p of (Array.isArray(positionsForSweep) ? positionsForSweep : [])) {
         const sym = String((p as any)?.symbol || '')
-        const amt = Number((p as any)?.positionAmt)
+        // KRITICKÁ OPRAVA: API vrací "size" ne "positionAmt"!
+        const amt = Number((p as any)?.size || (p as any)?.positionAmt || 0)
         const size = Number.isFinite(amt) ? Math.abs(amt) : 0
-        if (sym) posSizeBySym.set(sym, size)
+        if (sym && size > 0) {
+          posSizeBySym.set(sym, size)
+          console.info('[SWEEPER_POSITION_DETECTED]', { symbol: sym, size })
+        }
       }
     } catch {}
     // Strict: mazat pouze ENTRY BUY LIMIT bez reduceOnly/closePosition; nikdy ne EXITy (STOP/TP)
@@ -274,10 +278,174 @@ function startSlProtectionMonitor(): void {
   __slMonitorTimer = setInterval(() => { slProtectionMonitor().catch(()=>{}) }, 30_000) // every 30s
 }
 
+// BACKGROUND AUTOPILOT - běží identicky jako UI pipeline podle posledních UI kritérií
+let __backgroundTimer: NodeJS.Timeout | null = null
+let __lastSuccessfulTradingParams: any = null // ponecháno pro budoucí diagnostiku
+
+type SnapshotCriteria = { universe: 'gainers' | 'volume'; topN: number | null; fresh: boolean }
+const CRITERIA_FILE = path.resolve(process.cwd(), 'runtime', 'background_criteria.json')
+const PARAMS_FILE = path.resolve(process.cwd(), 'runtime', 'background_trading.json')
+
+function persistBackgroundSettings(params: any): void {
+  try {
+    const dir = path.dirname(PARAMS_FILE)
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(PARAMS_FILE, JSON.stringify({ 
+      enabled: true,
+      last_params: params,
+      saved_at: new Date().toISOString()
+    }, null, 2))
+    console.info('[BACKGROUND_PERSIST]', { symbols: params?.orders?.length || 0 })
+  } catch {}
+}
+
+let __lastSnapshotCriteria: SnapshotCriteria | null = null
+function persistBackgroundCriteria(criteria: SnapshotCriteria): void {
+  try {
+    const dir = path.dirname(CRITERIA_FILE)
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(CRITERIA_FILE, JSON.stringify({ 
+      enabled: true,
+      last_criteria: criteria,
+      saved_at: new Date().toISOString()
+    }, null, 2))
+    __lastSnapshotCriteria = criteria
+    console.info('[BACKGROUND_CRITERIA_SAVED]', criteria)
+  } catch {}
+}
+function loadBackgroundCriteria(): void {
+  try {
+    if (!fs.existsSync(CRITERIA_FILE)) return
+    const raw = fs.readFileSync(CRITERIA_FILE, 'utf8')
+    const parsed = JSON.parse(raw)
+    if (parsed?.enabled && parsed?.last_criteria) {
+      __lastSnapshotCriteria = parsed.last_criteria as SnapshotCriteria
+      console.info('[BACKGROUND_CRITERIA_LOADED]', __lastSnapshotCriteria)
+    }
+  } catch {}
+}
+
+async function backgroundTradingCycle(): Promise<void> {
+  try {
+    if (!hasRealBinanceKeysGlobal()) return
+    const criteria = __lastSnapshotCriteria
+    if (!criteria) {
+      console.info('[BACKGROUND_PIPELINE_SKIP]', { reason: 'no_criteria' })
+      return
+    }
+
+    console.info('[BACKGROUND_PIPELINE_START]', { criteria })
+
+    // 1) Snapshot přes API se stejnými parametry jako v UI
+    const params = new URLSearchParams({ universe: criteria.universe, fresh: criteria.fresh ? '1' : '0' })
+    if (Number.isFinite(criteria.topN as any) && (criteria.topN as any) > 0) params.set('topN', String(criteria.topN))
+    const snapRes = await fetch(`http://127.0.0.1:${PORT}/api/snapshot?${params.toString()}`)
+    if (!snapRes.ok) { console.info('[BACKGROUND_PIPELINE_SKIP]', { reason: `snapshot_failed_${snapRes.status}` }); return }
+    const snapshot = await snapRes.json() as any
+
+    // 2) Compute features
+    const { computeFeatures } = await import('../services/features/compute')
+    const features = computeFeatures(snapshot)
+
+    // 3) Build compact
+    const { buildMarketCompact } = await import('../services/decider/market_compact')
+    const compact = buildMarketCompact(features, snapshot)
+
+    // 4) Decision (API stejně jako UI)
+    const decisionRes = await fetch(`http://127.0.0.1:${PORT}/api/decide`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(compact) })
+    if (!decisionRes.ok) { console.info('[BACKGROUND_PIPELINE_SKIP]', { reason: `decision_failed_${decisionRes.status}` }); return }
+    const decision = await decisionRes.json() as any
+    if (!decision?.flag || decision.flag === 'NO-TRADE') { console.info('[BACKGROUND_PIPELINE_SKIP]', { reason: decision?.flag || 'no_decision' }); return }
+
+    // 5) Kandidáti (stejná logika jako UI)
+    const { selectCandidates } = await import('../services/signals/candidate_selector')
+    const signalsCfg = await import('../config/signals.json').then(m => (m as any).default ?? m)
+    const candLimit = (signalsCfg as any)?.max_setups ?? 3
+    const candidates = selectCandidates(features, snapshot, {
+      decisionFlag: decision.flag,
+      allowWhenNoTrade: false,
+      limit: candLimit,
+      cfg: { 
+        atr_pct_min: (signalsCfg as any).atr_pct_min, 
+        atr_pct_max: (signalsCfg as any).atr_pct_max, 
+        min_liquidity_usdt: (signalsCfg as any).min_liquidity_usdt 
+      },
+      canComputeSimPreview: false,
+      finalPickerStatus: 'idle'
+    })
+    if (!Array.isArray(candidates) || candidates.length === 0) { console.info('[BACKGROUND_PIPELINE_SKIP]', { reason: 'no_candidates' }); return }
+
+    // 6) Final picker (GPT stejně jako UI)
+    const { buildFinalPickerCandidates } = await import('../services/decider/build_final_picker_candidates')
+    const finalCandidates = buildFinalPickerCandidates(candidates)
+    const finalResp = await runFinalPickerServer(finalCandidates, decision)
+    if (!finalResp?.ok || !Array.isArray(finalResp?.data?.picks) || finalResp.data.picks.length === 0) { console.info('[BACKGROUND_PIPELINE_SKIP]', { reason: 'no_final_picks' }); return }
+
+    // 7) Spuštění objednávek
+    const orderReq = { orders: finalResp.data.picks }
+    const tradingResult = await executeHotTradingOrders(orderReq)
+    console.info('[BACKGROUND_PIPELINE_SUCCESS]', { 
+      decision_flag: decision.flag,
+      picks_count: finalResp.data.picks.length,
+      success: (tradingResult as any)?.success,
+      executed_orders: (tradingResult as any)?.orders?.length || 0
+    })
+
+  } catch (e: any) {
+    console.error('[BACKGROUND_PIPELINE_ERROR]', e?.message || 'unknown')
+  }
+}
+
+function startBackgroundTrading(): void {
+  // Nepoužívá pevný interval! Načte uživatelské nastavení z runtime (bude se ukládat po UI runu)
+  const intervalMs = __lastUiAutoCopyInterval
+  if (!intervalMs || intervalMs <= 0) {
+    console.info('[BACKGROUND_DISABLED]', { reason: 'no_ui_auto_copy_interval' })
+    return
+  }
+  if (__backgroundTimer) return
+  console.info('[BACKGROUND_START]', { interval_ms: intervalMs, source: 'ui_auto_copy_settings' })
+  __backgroundTimer = setInterval(() => { backgroundTradingCycle().catch(()=>{}) }, intervalMs)
+}
+
+let __lastUiAutoCopyInterval: number | null = null
+
+function persistUiSettings(settings: { auto_copy_enabled: boolean; auto_copy_minutes: number }): void {
+  try {
+    if (!settings.auto_copy_enabled || settings.auto_copy_minutes <= 0) {
+      __lastUiAutoCopyInterval = null
+      if (__backgroundTimer) { clearInterval(__backgroundTimer); __backgroundTimer = null }
+      console.info('[BACKGROUND_STOP]', { reason: 'auto_copy_disabled_or_zero' })
+      return
+    }
+    const intervalMs = settings.auto_copy_minutes * 60 * 1000
+    __lastUiAutoCopyInterval = intervalMs
+    console.info('[UI_SETTINGS_PERSIST]', { auto_copy_minutes: settings.auto_copy_minutes, interval_ms: intervalMs })
+    
+    // Restart timer s novým intervalem
+    if (__backgroundTimer) { clearInterval(__backgroundTimer); __backgroundTimer = null }
+    startBackgroundTrading()
+  } catch {}
+}
+
+function loadBackgroundSettings(): void {
+  try {
+    const file = PARAMS_FILE
+    if (!fs.existsSync(file)) return
+    const raw = fs.readFileSync(file, 'utf8')
+    const parsed = JSON.parse(raw)
+    if (parsed?.enabled && parsed?.last_params) {
+      __lastSuccessfulTradingParams = parsed.last_params
+      console.info('[BACKGROUND_LOADED]', { orders: parsed.last_params?.orders?.length || 0 })
+    }
+  } catch {}
+}
+
 // Rehydrate waiting TP list from disk (if any) early during startup
 try { rehydrateWaitingFromDiskOnce().catch(()=>{}) } catch {}
 // Load persisted settings on startup
 try { loadSettings() } catch {}
+try { loadBackgroundSettings() } catch {}
 
 // Start Binance user-data WS to capture cancel/filled events into audit log
 try {
@@ -620,6 +788,44 @@ const server = http.createServer(async (req, res) => {
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: true, pending_cancel_age_min: __pendingCancelAgeMin }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    // Manual trigger to run background pipeline once (useful for validation/tests)
+    if (url.pathname === '/api/background/run_once' && req.method === 'POST') {
+      try {
+        backgroundTradingCycle().catch(()=>{})
+        res.statusCode = 202
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    // UI nastavení Auto Copy - přijme nastavení z UI a nastaví background timer
+    if (url.pathname === '/api/ui/auto_copy' && req.method === 'POST') {
+      try {
+        const chunks: Buffer[] = []
+        for await (const ch of req) chunks.push(ch as Buffer)
+        const bodyStr = Buffer.concat(chunks).toString('utf8')
+        const parsed = bodyStr ? JSON.parse(bodyStr) : null
+        if (parsed && typeof parsed === 'object' && typeof parsed.auto_copy_enabled === 'boolean' && typeof parsed.auto_copy_minutes === 'number') {
+          persistUiSettings(parsed)
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: true, interval_ms: __lastUiAutoCopyInterval }))
+        } else {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'invalid_settings' }))
+        }
       } catch (e: any) {
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')
@@ -1015,6 +1221,10 @@ const server = http.createServer(async (req, res) => {
         const universeStrategy = uniParam === 'gainers' ? 'gainers' : 'volume'
         const fresh = String(url.searchParams.get('fresh') || '1') === '1'
         const topN = Number(url.searchParams.get('topN') || '')
+        // Persist poslední UI snapshot kritéria pro background autopilot
+        try {
+          persistBackgroundCriteria({ universe: universeStrategy as any, topN: Number.isFinite(topN) ? topN : null, fresh })
+        } catch {}
         const snapshot = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh, allowPartial: true })
         ;(snapshot as any).duration_ms = Math.round(performance.now() - t0)
         delete (snapshot as any).latency_ms
@@ -1667,6 +1877,14 @@ const server = http.createServer(async (req, res) => {
         try { console.error('[BATCH_START]', { ts: new Date().toISOString(), count: parsed.orders.length }) } catch {}
         const result = await executeHotTradingOrders(parsed)
         try { console.error('[BATCH_DONE]', { ts: new Date().toISOString(), dur_ms: Date.now() - tStart, success: !!(result as any)?.success }) } catch {}
+        
+        // Po úspěšném volání z UI → uložit pro background repeat
+        if (result?.success && Array.isArray(parsed?.orders) && parsed.orders.length > 0) {
+          __lastSuccessfulTradingParams = parsed
+          persistBackgroundSettings(parsed)
+          console.info('[UI_PARAMS_SAVED]', { orders: parsed.orders.length, for_background_repeat: true })
+        }
+        
         try {
           __lastPlaceOrders = { request: parsed, result }
           // Populate per-symbol planned amount/leverage hints for UI completeness
@@ -2209,6 +2427,8 @@ server.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`)
   try { startOrderSweeper() } catch (e) { console.error('[SWEEPER_START_ERR]', (e as any)?.message || e) }
   try { startSlProtectionMonitor() } catch (e) { console.error('[SL_MONITOR_START_ERR]', (e as any)?.message || e) }
+  try { loadBackgroundCriteria() } catch {}
+  try { startBackgroundTrading() } catch (e) { console.error('[BACKGROUND_START_ERR]', (e as any)?.message || e) }
 })
 
 
