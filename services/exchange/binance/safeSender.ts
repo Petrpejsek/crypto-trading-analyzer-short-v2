@@ -47,7 +47,7 @@ export function sanitizeOne(o: AnyObj): AnyObj {
   if (p.side === 'SELL' && p.type === 'LIMIT') {
     console.error('[SANITIZE] SELL LIMIT - returning with closePosition preserved', { symbol: p.symbol })
     // Return a clean copy that preserves closePosition if it was set
-    const clean = {
+    const clean: any = {
       symbol: p.symbol,
       side: p.side,
       type: p.type,

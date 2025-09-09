@@ -5,7 +5,7 @@ type WatchItem = { symbol: string; deadline: number; side: 'LONG'|'SHORT'|null }
 
 const queue: WatchItem[] = []
 const TICK_MS = 1000
-const TIMEOUT_MS = 20_000
+const TIMEOUT_MS = 300_000  // 5 minut místo 20 sekund - KRITICKÁ OPRAVA!
 
 export function scheduleWatch(symbol: string, side: 'LONG'|'SHORT'|null): void {
   const now = Date.now()

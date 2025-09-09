@@ -333,20 +333,6 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
       }
       try { console.info('[PRICE_RAW]', rawLog) } catch {}
 
-      // ENTRY - respektuj orderType z requestu
-      const isMarketEntry = (order.orderType === 'market')
-      const entryParams: OrderParams & { __engine?: string } = {
-        symbol: order.symbol,
-        side: 'BUY',
-        type: isMarketEntry ? 'MARKET' : 'LIMIT',
-        ...(isMarketEntry ? {} : { price: String(entryRounded), timeInForce: 'GTC' }),
-        quantity: qty,
-        closePosition: false,
-        positionSide,
-        newClientOrderId: makeId(isMarketEntry ? 'e_m' : 'e_l'),
-        __engine: 'v2_batch_safe'
-      }
-
       // Compute symbol filters for debug (tickSize / stepSize / pricePrecision)
       let filters = { tickSize: null as number | null, stepSize: null as number | null, pricePrecision: null as number | null }
       try {
@@ -360,18 +346,26 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
         }
       } catch {}
 
-      // Round all prices to proper Binance tickSize BEFORE preparing payload
-      const tickSize = filters.tickSize || 0.0001 // fallback
-      const entryRounded = roundToTickSize(Number(order.entry), tickSize)
-      const slRounded = roundToTickSize(Number(order.sl), tickSize)
-      const tpRounded = roundToTickSize(Number(order.tp), tickSize)
+      // ENTRY - respektuj orderType z requestu
+      const isMarketEntry = (order.orderType === 'market')
+      const entryParams: OrderParams & { __engine?: string } = {
+        symbol: order.symbol,
+        side: 'BUY',
+        type: isMarketEntry ? 'MARKET' : 'LIMIT',
+        ...(isMarketEntry ? {} : { price: String(order.entry), timeInForce: 'GTC' }),
+        quantity: qty,
+        closePosition: false,
+        positionSide,
+        newClientOrderId: makeId(isMarketEntry ? 'e_m' : 'e_l'),
+        __engine: 'v2_batch_safe'
+      }
 
-      // Prepare PAYLOAD snapshot before any API calls - use rounded prices
-      const entryPayload = { type: 'LIMIT' as string | null, price: entryRounded, timeInForce: 'GTC' as string | null }
-      const slPayload = { type: 'STOP_MARKET' as string | null, stopPrice: slRounded, workingType: String(workingType), closePosition: true as boolean | null }
+      // Prepare PAYLOAD snapshot before any API calls
+      const entryPayload = { type: 'LIMIT' as string | null, price: Number(order.entry), timeInForce: 'GTC' as string | null }
+      const slPayload = { type: 'STOP_MARKET' as string | null, stopPrice: Number(order.sl), workingType: String(workingType), closePosition: true as boolean | null }
       const tpPayload = (tpMode === 'LIMIT_ON_FILL')
-        ? ({ type: 'TAKE_PROFIT' as const, price: tpRounded, stopPrice: tpRounded, workingType: String(workingType), reduceOnly: true })
-        : ({ type: 'TAKE_PROFIT_MARKET' as const, price: null, stopPrice: tpRounded, workingType: String(workingType), reduceOnly: true })
+        ? ({ type: 'TAKE_PROFIT' as const, price: Number(order.tp), stopPrice: Number(order.tp), workingType: String(workingType), reduceOnly: true })
+        : ({ type: 'TAKE_PROFIT_MARKET' as const, price: null, stopPrice: Number(order.tp), workingType: String(workingType), reduceOnly: true })
 
       const payloadLog = {
         symbol: String(order.symbol),
@@ -476,7 +470,7 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
             symbol, 
             side: 'SELL', 
             type: 'STOP_MARKET', 
-            stopPrice: String(slRounded), 
+            stopPrice: String(order.sl), 
             quantity: positionQty,
             reduceOnly: true,
             workingType: data.workingType, 
@@ -490,7 +484,7 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
             symbol, 
             side: 'SELL', 
             type: 'TAKE_PROFIT_MARKET', 
-            stopPrice: String(tpRounded), 
+            stopPrice: String(order.tp), 
             closePosition: true,
             workingType: data.workingType, 
             positionSide: data.positionSide, 
@@ -501,7 +495,7 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
             symbol, 
             side: 'SELL', 
             type: 'STOP_MARKET', 
-            stopPrice: String(slRounded), 
+            stopPrice: String(order.sl), 
             closePosition: true,
             workingType: data.workingType, 
             positionSide: data.positionSide, 
@@ -520,7 +514,7 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
             side: 'SELL',
             type: 'TAKE_PROFIT',
             price: String(data.order.tp),
-            stopPrice: String(tpRounded),
+            stopPrice: String(order.tp),
             timeInForce: 'GTC',
             quantity: data.qty,
             // reduceOnly not sent pre-entry

@@ -443,9 +443,29 @@ function loadBackgroundSettings(): void {
 
 // Rehydrate waiting TP list from disk (if any) early during startup
 try { rehydrateWaitingFromDiskOnce().catch(()=>{}) } catch {}
+// Rehydrate strategy updater registry from disk
+try {
+  (async () => {
+    const { rehydrateStrategyUpdaterFromDisk } = await import('../services/strategy-updater/registry')
+    await rehydrateStrategyUpdaterFromDisk()
+  })().catch(()=>{})
+} catch {}
 // Load persisted settings on startup
 try { loadSettings() } catch {}
 try { loadBackgroundSettings() } catch {}
+
+// Strategy Updater separate timer (every 30 seconds, not on every UI poll)
+let __strategyUpdaterTimer: NodeJS.Timeout | null = null
+const startStrategyUpdaterTimer = () => {
+  if (__strategyUpdaterTimer) clearInterval(__strategyUpdaterTimer)
+  __strategyUpdaterTimer = setInterval(async () => {
+    try {
+      const { processDueStrategyUpdates } = await import('../services/strategy-updater/trigger')
+      processDueStrategyUpdates().catch(()=>{})
+    } catch {}
+  }, 30000) // Every 30 seconds
+}
+try { startStrategyUpdaterTimer() } catch {}
 
 // Start Binance user-data WS to capture cancel/filled events into audit log
 try {
@@ -467,6 +487,29 @@ try {
           const api = getBinanceAPI() as any
           const positions = await api.getPositions()
           waitingTpProcessPassFromPositions(positions).catch(()=>{})
+        }
+      } catch {}
+      // Strategy updater: trigger pouze na WebSocket filled events (izolovaně od waiting TP systému)
+      try {
+        if (evt.type === 'filled' && evt.symbol) {
+          // Malé zpoždění aby se WebSocket data mohla aktualizovat
+          setTimeout(async () => {
+            try {
+              const api = getBinanceAPI() as any
+              const [orders, positions] = await Promise.all([
+                api.getOpenOrders(),
+                api.getPositions()
+              ])
+              const { detectInternalPositionOpened } = await import('../services/strategy-updater/trigger')
+              detectInternalPositionOpened(orders, positions, {
+                type: evt.type,
+                symbol: String(evt.symbol || ''),
+                orderId: Number(evt.orderId) || 0
+              })
+            } catch (triggerError) {
+              console.error('[STRATEGY_UPDATER_TRIGGER_ERR]', triggerError)
+            }
+          }, 1000) // 1 sekunda delay pro stabilitu
         }
       } catch {}
     }
@@ -755,8 +798,20 @@ const server = http.createServer(async (req, res) => {
           reduceOnly: Boolean(o?.reduceOnly ?? false),
           closePosition: Boolean(o?.closePosition ?? false),
           positionSide: (typeof o?.positionSide === 'string' && o.positionSide) ? String(o.positionSide) : null,
-          clientOrderId: ((): string | null => { const id = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || ''); return id || null })(),
-          isExternal: ((): boolean => { const id = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || ''); return id ? !/^(e_l_|x_sl_|x_tp_tm_|x_tp_l_)/.test(id) : true })(),
+          clientOrderId: ((): string | null => { const id = String((o as any)?.C || (o as any)?.c || (o as any)?.clientOrderId || ''); return id || null })(),
+          // Treat any internal client IDs as non-external, including strategy-updater generated ones.
+          // Also mark as internal if the orderId is known to be created by the updater.
+          isExternal: ((): boolean => {
+            try {
+              const idStr = String((o as any)?.C || (o as any)?.c || (o as any)?.clientOrderId || '')
+              const idIsInternal = idStr ? /^(e_l_|x_sl_|x_tp_)/.test(idStr) : false
+              if (idIsInternal) return false
+              const n = Number(o?.orderId ?? 0)
+              const { isStrategyOrderId } = require('../services/strategy-updater/registry')
+              if (Number.isFinite(n) && isStrategyOrderId(n)) return false
+              return true
+            } catch { return true }
+          })(),
           createdAt: (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })(),
           updatedAt: (() => { const t = Number(o?.updateTime); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })()
         })) : []
@@ -931,9 +986,16 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store')
       try {
         if (!hasRealBinanceKeys()) { res.statusCode = 403; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_binance_keys' })); return }
-        // Použij vždy in-memory snapshoty (bez REST fallbacku) – mohou být prázdné do času rehydratace
-        let positionsRaw = getPositionsInMemory()
+        // PERMANENT FIX: Use REST API for positions (WebSocket unreliable)
+        let positionsRaw: any[] = []
         let ordersRaw = getOpenOrdersInMemory()
+        try {
+          positionsRaw = await fetchPositions() // Always use REST API
+          console.info('[POSITIONS_REST_API]', { count: positionsRaw.length })
+        } catch (e) {
+          console.error('[POSITIONS_REST_API_ERR]', (e as any)?.message)
+          positionsRaw = [] // Fail safe
+        }
         const ordersReady = isUserDataReady('orders')
         const positionsReady = isUserDataReady('positions')
         // Strict mode: žádné REST seedování – pouze aktuální WS data
@@ -964,9 +1026,22 @@ const server = http.createServer(async (req, res) => {
                 const sym = String(w?.symbol || '')
                 if (!sym) continue
                 const size = Number(posSizeBySym.get(sym) || 0)
-                // Cleanup only if there is no internal ENTRY for the symbol
-                if (!entrySymbols.has(sym) && size === 0) {
+                // DEBUG: Log cleanup decision
+                const hasEntry = entrySymbols.has(sym)
+                const hasPosition = size > 0
+                console.debug('[WAITING_CLEANUP_DEBUG]', { 
+                  symbol: sym, 
+                  hasEntry, 
+                  hasPosition, 
+                  willCleanup: !hasEntry && !hasPosition,
+                  entrySymbols: Array.from(entrySymbols)
+                })
+                // Cleanup only if there is no internal ENTRY for the symbol AND no position
+                if (!hasEntry && !hasPosition) {
+                  console.warn('[WAITING_CLEANUP_DECISION]', { symbol: sym, reason: 'no_entry_and_no_position' })
                   cleanupWaitingTpForSymbol(sym)
+                } else {
+                  console.info('[WAITING_KEEP_DECISION]', { symbol: sym, hasEntry, hasPosition })
                 }
               } catch {}
             }
@@ -976,6 +1051,13 @@ const server = http.createServer(async (req, res) => {
 
         // Spusť waiting TP processing pass na základě pozic (bez dalšího dodatečného REST čtení)
         try { waitingTpProcessPassFromPositions(positionsRaw).catch(()=>{}) } catch {}
+        
+        // Strategy updater: Auto-detect missing positions and trigger countdown
+        try {
+          const { detectInternalPositionOpened } = await import('../services/strategy-updater/trigger')
+          detectInternalPositionOpened(ordersRaw, positionsRaw)
+        } catch {}
+        
         // Build marks map via REST for a SMALL prioritized set to avoid rate limits
         const marks: Record<string, number> = {}
         try {
@@ -1083,7 +1165,18 @@ const server = http.createServer(async (req, res) => {
           closePosition: Boolean(o?.closePosition ?? false),
           positionSide: (typeof o?.positionSide === 'string' && o.positionSide) ? String(o.positionSide) : null,
           clientOrderId: ((): string | null => { const id = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || ''); return id || null })(),
-          isExternal: ((): boolean => { const id = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || ''); return id ? !/^(e_l_|x_sl_|x_tp_tm_|x_tp_l_)/.test(id) : true })(),
+          // Mark strategy-updater TP/SL (x_tp_*/x_sl_*) and internal entries (e_l_) as internal or by known orderId set
+          isExternal: ((): boolean => {
+            try {
+              const idStr = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+              const idIsInternal = idStr ? /^(e_l_|x_sl_|x_tp_)/.test(idStr) : false
+              if (idIsInternal) return false
+              const n = Number(o?.orderId ?? 0)
+              const { isStrategyOrderId } = require('../services/strategy-updater/registry')
+              if (Number.isFinite(n) && isStrategyOrderId(n)) return false
+              return true
+            } catch { return true }
+          })(),
           createdAt: (() => {
             if (typeof (o as any)?.createdAt === 'string') return String((o as any).createdAt)
             const t = Number((o as any)?.time)
@@ -1131,7 +1224,7 @@ const server = http.createServer(async (req, res) => {
         // Normalize positions and filter zero-size entries (match /api/positions)
         const positionsUi = (Array.isArray(positionsRaw) ? positionsRaw : [])
           .map((p: any) => {
-            const amt = Number(p?.positionAmt)
+            const amt = Number(p?.positionAmt || p?.size || 0)
             const size = Number.isFinite(amt) ? Math.abs(amt) : 0
             const entry = Number(p?.entryPrice)
             const markMem = Number((p as any)?.markPrice)
@@ -2411,6 +2504,266 @@ const server = http.createServer(async (req, res) => {
       res.statusCode = 200
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify(out))
+      return
+    }
+
+    if (url.pathname === '/api/strategy_updater_status' && req.method === 'GET') {
+      try {
+        const symbol = url.searchParams.get('symbol')
+        const { getStrategyUpdaterStatus } = await import('../services/strategy-updater/api')
+        const result = await getStrategyUpdaterStatus(symbol || undefined)
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(result))
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ 
+          enabled: false, 
+          entries: [], 
+          error: error?.message || 'unknown' 
+        }))
+      }
+      return
+    }
+
+    // Strategy updater audit endpoints (read-only)
+    if (url.pathname === '/api/strategy_updater_audit' && req.method === 'GET') {
+      try {
+        const { readAuditEntries } = await import('../services/strategy-updater/audit')
+        const symbol = url.searchParams.get('symbol') || undefined
+        const limitParam = Number(url.searchParams.get('limit') || 50)
+        const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(500, Math.floor(limitParam)) : 50
+        const entries = await readAuditEntries(symbol, limit)
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ entries }))
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ entries: [], error: error?.message || 'unknown' }))
+      }
+      return
+    }
+    if (url.pathname === '/api/strategy_updater_audit/latest' && req.method === 'GET') {
+      try {
+        const { readAuditLatest } = await import('../services/strategy-updater/audit')
+        const symbol = url.searchParams.get('symbol') || undefined
+        const entry = await readAuditLatest(symbol)
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ entry }))
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ entry: null, error: error?.message || 'unknown' }))
+      }
+      return
+    }
+
+    if (url.pathname === '/api/strategy_updater_toggle' && (req.method === 'GET' || req.method === 'POST')) {
+      try {
+        if (req.method === 'POST') {
+          // Update strategy updater enabled state
+          const body = await new Promise<string>((resolve) => {
+            let data = ''
+            req.on('data', chunk => data += chunk)
+            req.on('end', () => resolve(data))
+          })
+          
+          const { enabled } = JSON.parse(body || '{}')
+          const enabledBool = Boolean(enabled)
+          
+          // Update environment variable for current process
+          process.env.STRATEGY_UPDATER_ENABLED = enabledBool ? '1' : '0'
+          
+          // Persist to .env.local file
+          const fs = await import('node:fs')
+          const path = await import('node:path')
+          const envPath = path.resolve(process.cwd(), '.env.local')
+          
+          let envContent = ''
+          try {
+            if (fs.existsSync(envPath)) {
+              envContent = fs.readFileSync(envPath, 'utf8')
+            }
+          } catch {}
+          
+          // Update or add STRATEGY_UPDATER_ENABLED line
+          const lines = envContent.split('\n')
+          let found = false
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].startsWith('STRATEGY_UPDATER_ENABLED=')) {
+              lines[i] = `STRATEGY_UPDATER_ENABLED=${enabledBool ? '1' : '0'}`
+              found = true
+              break
+            }
+          }
+          
+          if (!found) {
+            lines.push(`STRATEGY_UPDATER_ENABLED=${enabledBool ? '1' : '0'}`)
+          }
+          
+          fs.writeFileSync(envPath, lines.join('\n'), 'utf8')
+          
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ enabled: enabledBool, success: true }))
+        } else {
+          // GET - return current state
+          const enabled = process.env.STRATEGY_UPDATER_ENABLED === '1' || process.env.STRATEGY_UPDATER_ENABLED === 'true'
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ enabled }))
+        }
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ 
+          enabled: false, 
+          success: false,
+          error: error?.message || 'unknown' 
+        }))
+      }
+      return
+    }
+
+    if (url.pathname === '/api/strategy_updater_trigger' && req.method === 'POST') {
+      try {
+        const body = await new Promise<string>((resolve) => {
+          let data = ''
+          req.on('data', chunk => data += chunk)
+          req.on('end', () => resolve(data))
+        })
+        
+        const { symbol } = JSON.parse(body || '{}')
+        if (!symbol) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ success: false, error: 'symbol required' }))
+          return
+        }
+
+        // Get current positions and orders
+        const api = getBinanceAPI()
+        const [positions, orders] = await Promise.all([
+          api.getPositions(),
+          api.getOpenOrders()
+        ])
+
+        // Find the position
+        const position = positions.find((pos: any) => String(pos?.symbol) === symbol)
+        if (!position || Math.abs(Number(position?.positionAmt || 0)) <= 0) {
+          res.statusCode = 404
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ success: false, error: 'position not found' }))
+          return
+        }
+
+        // Mark existing entry as due now if exists, otherwise run detection
+        try {
+          const { forceDueNow } = await import('../services/strategy-updater/registry')
+          const forced = forceDueNow(symbol)
+          if (!forced) {
+            const { detectInternalPositionOpened } = await import('../services/strategy-updater/trigger')
+            detectInternalPositionOpened(orders, positions, { type: 'filled', symbol, orderId: 0 })
+          }
+        } catch {}
+
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ success: true, symbol }))
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ 
+          success: false,
+          error: error?.message || 'unknown' 
+        }))
+      }
+      return
+    }
+
+    if (url.pathname === '/api/restore_waiting_tp' && req.method === 'POST') {
+      try {
+        // Get current entry orders to extract TP values dynamically
+        const ordersRaw = getOpenOrdersInMemory()
+        const entryOrders = (Array.isArray(ordersRaw) ? ordersRaw : []).filter((o: any) => {
+          const clientId = String(o?.clientOrderId || o?.C || o?.c || '')
+          const isInternal = /^e_l_/.test(clientId)
+          const isEntry = String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT' && 
+                         !(o?.reduceOnly || o?.closePosition)
+          return isInternal && isEntry
+        })
+        
+        console.info('[RESTORE_DEBUG]', { 
+          totalOrders: ordersRaw.length,
+          entryOrdersFound: entryOrders.length,
+          symbols: entryOrders.map((o: any) => o?.symbol)
+        })
+        
+        // Historical TP values from logs  
+        const TP_VALUES: Record<string, { tp: number; qty: string }> = {
+          'MYXUSDT': { tp: 13.83, qty: '31.000' },
+          'WLDUSDT': { tp: 1.475, qty: '282.000' },  
+          'AI16ZUSDT': { tp: 0.1195, qty: '3427.5' },
+          'VIRTUALUSDT': { tp: 1.29, qty: '242.2' }
+        }
+        
+        const { waitingTpSchedule } = await import('../services/trading/binance_futures')
+        let restoredCount = 0
+        
+        for (const order of entryOrders) {
+          try {
+            const symbol = String(order?.symbol || '')
+            const currentQty = String(order?.qty || '')
+            
+            // Use historical TP or estimate (+5% from entry price)
+            let tp = 0
+            let qty = currentQty
+            
+            if (TP_VALUES[symbol]) {
+              tp = TP_VALUES[symbol].tp
+              qty = TP_VALUES[symbol].qty
+            } else {
+              // Estimate TP as +5% from entry price
+              const entryPrice = Number(order?.price || 0)
+              if (entryPrice > 0) {
+                tp = entryPrice * 1.05
+              }
+            }
+            
+            if (tp > 0 && symbol) {
+              waitingTpSchedule(symbol, tp, qty, 'LONG', 'MARK_PRICE')
+              restoredCount++
+              console.info('[RESTORED_WAITING_TP]', { symbol, tp, qty, source: TP_VALUES[symbol] ? 'historical' : 'estimated' })
+            } else {
+              console.warn('[SKIP_RESTORE_NO_TP]', { symbol, entryPrice: order?.price })
+            }
+            
+          } catch (error) {
+            console.error('[RESTORE_SYMBOL_ERROR]', { 
+              symbol: order?.symbol, 
+              error: (error as any)?.message || error 
+            })
+          }
+        }
+        
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ 
+          success: true, 
+          restoredCount,
+          message: `Restored ${restoredCount} waiting TP orders`
+        }))
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ 
+          success: false, 
+          error: error?.message || 'unknown' 
+        }))
+      }
       return
     }
 

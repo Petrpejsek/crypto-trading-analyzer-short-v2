@@ -838,9 +838,19 @@ export const App: React.FC = () => {
       setError(null)
       const includedControls = coinControls.filter(c => c.include)
       if (includedControls.length === 0) { setError('No coins selected'); return }
-      // Pre-validate against MARK price
+      // Pre-validate against MARK price (fail-fast: 5s timeout; server vynutí MARK guard tak jako tak)
       const getMark = async (s: string): Promise<number|null> => {
-        try { const r = await fetch(`/api/mark?symbol=${encodeURIComponent(s)}`); if (!r.ok) return null; const j = await r.json(); return Number(j?.mark) } catch { return null }
+        const ac = new AbortController()
+        const timeoutMs = 5000
+        const to = window.setTimeout(() => {
+          try { ac.abort(new DOMException(`timeout after ${timeoutMs}ms`, 'TimeoutError')) } catch { ac.abort() }
+        }, timeoutMs)
+        try {
+          const r = await fetch(`/api/mark?symbol=${encodeURIComponent(s)}`, { signal: ac.signal })
+          if (!r.ok) return null
+          const j = await r.json().catch(()=>null)
+          return Number(j?.mark)
+        } catch { return null } finally { clearTimeout(to) }
       }
       // Map selected plan to numeric entry/SL/TP
       const findPlan = (symbol: string, strategy: 'conservative'|'aggressive') => {
@@ -909,6 +919,7 @@ export const App: React.FC = () => {
         }
       }
       // STRICT 1:1 preflight – ověř, že klient posílá přesně čísla z aktuálního plánu (zobrazeného v UI)
+      // Nezastavuj odeslání při drobných odchylkách; pouze varuj a pokračuj s UI hodnotami 1:1
       {
         const diffs: string[] = []
         for (const c of includedControls) {
@@ -929,8 +940,8 @@ export const App: React.FC = () => {
           add(String(c.tpLevel).toUpperCase(), expTP, got.tp)
         }
         if (diffs.length > 0) {
-          setError(`STRICT 1:1: Mismatch detekován – objednávky neodeslány.\n${diffs.join('\n')}`)
-          return
+          // Pouze informuj; odeslání pokračuje s UI přenesenými hodnotami
+          setError(`STRICT 1:1: Mismatch detekován – pokračuji s UI čísly.\n${diffs.join('\n')}`)
         }
       }
       const uniqMap = new Map<string, any>()

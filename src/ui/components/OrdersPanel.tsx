@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { StrategyUpdateStatus } from './StrategyUpdateStatus'
+import { StrategyUpdaterControl } from './StrategyUpdaterControl'
 
 type OpenOrderUI = {
   orderId: number
@@ -65,6 +67,8 @@ export const OrdersPanel: React.FC = () => {
   const [pendingCancelAgeMin, setPendingCancelAgeMin] = useState<number>(() => {
     try { const v = localStorage.getItem('pending_cancel_age_min'); const n = v == null ? 0 : Number(v); return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0 } catch { return 0 }
   })
+  const [strategyUpdaterEntries, setStrategyUpdaterEntries] = useState<any[]>([])
+  const [strategyUpdaterEnabled, setStrategyUpdaterEnabled] = useState<boolean>(false)
 
   // Source of truth is the server – sync on mount
   const syncPendingCancelFromServer = async (): Promise<void> => {
@@ -187,6 +191,18 @@ export const OrdersPanel: React.FC = () => {
       setLastRefresh(new Date().toISOString())
       // Successful fetch clears any previous backoff window
       setBackoffUntilMs(null)
+      
+      // Load strategy updater status (single consolidated call; pass entries to row component)
+      fetchJson('/api/strategy_updater_status', { timeoutMs: 5000 })
+        .then(r => {
+          if (r.ok) {
+            const en = Boolean(r.json?.enabled)
+            const arr = Array.isArray(r.json?.entries) ? r.json.entries : []
+            setStrategyUpdaterEnabled(en)
+            setStrategyUpdaterEntries(arr)
+          }
+        })
+        .catch(() => { /* ignore */ })
     } catch (e: any) {
       const msg = String(e?.message || 'unknown_error')
       setError(msg)
@@ -284,6 +300,11 @@ export const OrdersPanel: React.FC = () => {
   }, [orders])
 
   const isExternalOrder = (o: OpenOrderUI): boolean => Boolean((o as any)?.isExternal === true)
+  
+  const isStrategyUpdaterOrder = (o: OpenOrderUI): boolean => {
+    const clientId = String(o?.clientOrderId || '')
+    return /^(x_sl_upd_|x_tp_upd_)/.test(clientId)
+  }
 
   const stableWaiting = useMemo(() => {
     const list = Array.isArray(waiting) ? [...waiting] : []
@@ -570,6 +591,16 @@ export const OrdersPanel: React.FC = () => {
         </div>
       ) : null}
 
+      {/* Strategy Updater Control */}
+      <div style={{ marginTop: 10, marginBottom: 8, padding: 8, border: '1px solid #333', borderRadius: 4, background: 'rgba(0,0,0,0.2)' }}>
+        <StrategyUpdaterControl 
+          hasPositions={positions.length > 0}
+          hasActiveCountdowns={strategyUpdaterEntries.some((entry: any) => 
+            entry.status === 'waiting' && new Date(entry.triggerAt).getTime() > Date.now()
+          )}
+        />
+      </div>
+
       <div style={{ marginTop: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <strong>Positions</strong>
@@ -597,11 +628,13 @@ export const OrdersPanel: React.FC = () => {
                   <th style={{ textAlign: 'right' }}>P&L %</th>
                   <th style={{ textAlign: 'right' }}>SL Lev % · TP Lev %</th>
                   <th style={{ textAlign: 'right' }}>Lev</th>
+                  <th style={{ textAlign: 'center' }}>Strategy Update</th>
                   <th style={{ textAlign: 'left' }}>Updated</th>
                 </tr>
               </thead>
               <tbody>
                 {positionsView.map((p, idx) => {
+                  const entry = strategyUpdaterEntries.find((e: any) => e.symbol === p.symbol) || null
                   const pnlLevStr = fmtPct((p as any).pnlPctLev, 2)
                   const pnlLevColor = Number((p as any).pnlPctLev) > 0 ? '#16a34a' : Number((p as any).pnlPctLev) < 0 ? '#dc2626' : undefined
                   const slLev = (p as any).slLevPct as number | null
@@ -632,6 +665,9 @@ export const OrdersPanel: React.FC = () => {
                         ) : ''}
                       </td>
                       <td style={{ textAlign: 'right' }}>{fmtNum(p.leverage, 0)}</td>
+                      <td style={{ textAlign: 'center' }}>
+                        <StrategyUpdateStatus symbol={p.symbol} entry={entry} enabled={strategyUpdaterEnabled} />
+                      </td>
                       <td>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                           <span>{p.updatedAt ? new Date(p.updatedAt).toLocaleTimeString() : '-'}</span>
@@ -704,8 +740,8 @@ export const OrdersPanel: React.FC = () => {
                     <td>{(() => { const ps = String(w.positionSide||''); if (!ps) return '-'; const col = ps==='LONG'?'#16a34a': ps==='SHORT'?'#dc2626': undefined; return <span style={{ color: col }}>{ps}</span> })()}</td>
                     <td>{'TAKE_PROFIT'}</td>
                     <td style={{ textAlign: 'right' }}>{w.qtyPlanned ?? '-'}</td>
-                    <td style={{ textAlign: 'right' }}>20.00</td>
-                    <td style={{ textAlign: 'right' }}>20</td>
+                    <td style={{ textAlign: 'right' }}>-</td>
+                    <td style={{ textAlign: 'right' }}>-</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(Number(w.tp) * 1.03, 6)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(Number(w.tp), 6)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(marks[w.symbol] as any, 6)}</td>
@@ -762,15 +798,22 @@ export const OrdersPanel: React.FC = () => {
               </thead>
               <tbody>
                 {stableOrders.map((o) => {
-                  const ext = isExternalOrder(o)
+                  const isStrategyOrder = isStrategyUpdaterOrder(o)
+                  // External badge only if NOT a strategy-updater order
+                  const ext = isExternalOrder(o) && !isStrategyOrder
+                  const rowStyle = isStrategyOrder
+                    ? { background: 'rgba(34, 197, 94, 0.15)', border: '1px solid rgba(34, 197, 94, 0.3)' }
+                    : (ext ? { background: 'rgba(30,41,59,0.35)' } : undefined)
                   return (
-                  <tr key={o.orderId} style={ext ? { background: 'rgba(30,41,59,0.35)' } : undefined}>
+                  <tr key={o.orderId} style={rowStyle}>
                     <td>{o.orderId}</td>
                     <td>{o.symbol}</td>
                     <td>
                       {o.side}
                       {ext ? (
                         <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 4px', borderRadius: 4, background: '#334155', color: '#e2e8f0' }}>external</span>
+                      ) : isStrategyOrder ? (
+                        <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 4px', borderRadius: 4, background: '#22c55e', color: '#fff' }}>🤖 AI</span>
                       ) : null}
                     </td>
                     <td>{(() => { const ps = String(o.positionSide||''); if (!ps) return '-'; const col = ps==='LONG'?'#16a34a': ps==='SHORT'?'#dc2626': undefined; return <span style={{ color: col }}>{ps}</span> })()}</td>
@@ -779,14 +822,18 @@ export const OrdersPanel: React.FC = () => {
                     <td style={{ textAlign: 'right' }}>{(() => {
                       const isEntry = String(o.side).toUpperCase() === 'BUY' && !(o.reduceOnly || o.closePosition)
                       if (!isEntry) return '-'
-                      const px = Number(o.price)
-                      const qty = Number(o.qty)
-                      if (Number.isFinite(px) && px > 0 && Number.isFinite(qty) && qty > 0) {
-                        return fmtNum((px * qty) / 20, 2)
+                      // Use investedUsd from backend if available
+                      const invested = Number((o as any)?.investedUsd)
+                      if (Number.isFinite(invested) && invested > 0) {
+                        return fmtNum(invested, 2)
                       }
                       return '-'
                     })()}</td>
-                    <td style={{ textAlign: 'right' }}>20</td>
+                    <td style={{ textAlign: 'right' }}>{(() => {
+                      // Use leverage from backend if available
+                      const lev = Number((o as any)?.leverage)
+                      return Number.isFinite(lev) && lev > 0 ? lev : '-'
+                    })()}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(o.price, 6)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(o.stopPrice, 6)}</td>
                     <td style={{ textAlign: 'right' }}>{String(o.side).toUpperCase() === 'BUY' ? fmtNum(marks[o.symbol], 6) : '-'}</td>

@@ -55,27 +55,38 @@ export async function runMarketDecider(input: MarketCompact): Promise<{ ok: bool
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, organization: (process as any)?.env?.OPENAI_ORG_ID, project: (process as any)?.env?.OPENAI_PROJECT } as any)
     const instructions = 'Reply with JSON only. No prose. Follow the JSON schema exactly.'
     const timeoutMs = Number(m3.timeoutMs ?? cfg.timeoutMs ?? 6000)
-    const body: any = {
-      model,
-      messages: [
-        { role: 'system', content: instructions },
-        { role: 'user', content: JSON.stringify(input) }
-      ],
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'market_decision',
-          schema: decisionSchema as any,
-          strict: true
-        }
-      }
-    }
-    // gpt-5 expects max_completion_tokens instead of max_tokens
     const outTokens = Number(m3.max_output_tokens ?? 512)
-    if (String(model).startsWith('gpt-5')) body.max_completion_tokens = outTokens
-    else body.max_completion_tokens = outTokens
-    const resp = await client.chat.completions.create(body)
-    const text = resp.choices?.[0]?.message?.content || ''
+
+    const useResponses = Boolean(m3.use_responses_api) || String(model).startsWith('gpt-5')
+    let text = ''
+    if (useResponses) {
+      const resp: any = await client.responses.create({
+        model,
+        input: JSON.stringify(input),
+        instructions,
+        response_format: {
+          type: 'json_schema',
+          json_schema: { name: 'market_decision', schema: decisionSchema as any, strict: true }
+        },
+        max_output_tokens: outTokens
+      } as any)
+      text = extractText(resp)
+    } else {
+      const body: any = {
+        model,
+        messages: [
+          { role: 'system', content: instructions },
+          { role: 'user', content: JSON.stringify(input) }
+        ],
+        response_format: {
+          type: 'json_schema',
+          json_schema: { name: 'market_decision', schema: decisionSchema as any, strict: true }
+        },
+        max_tokens: outTokens
+      }
+      const resp = await client.chat.completions.create(body)
+      text = resp?.choices?.[0]?.message?.content || ''
+    }
     let parsed: any
     try { parsed = JSON.parse(text) } catch { throw new Error('invalid_json') }
     const valid = validateDecision(parsed)

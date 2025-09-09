@@ -73,6 +73,7 @@ export const SettingsDrawer: React.FC<Props & { finalPickerStatus?: 'idle'|'load
   const [maxCoins, setMaxCoins] = React.useState<number>(() => {
     try { return Number(localStorage.getItem('max_coins_count')) || 5 } catch { return 5 }
   })
+  // Strategy Updater moved to OrdersPanel - no longer needed here
   const [defaultStrategy, setDefaultStrategy] = React.useState<'conservative' | 'aggressive'>(() => {
     try { return (localStorage.getItem('default_hot_strategy') as any) || 'conservative' } catch { return 'conservative' }
   })
@@ -80,6 +81,8 @@ export const SettingsDrawer: React.FC<Props & { finalPickerStatus?: 'idle'|'load
     try { return (localStorage.getItem('default_tp_level') as any) || 'tp2' } catch { return 'tp2' }
   })
   const [confirmReset, setConfirmReset] = React.useState(false)
+
+  // Strategy Updater sync moved to OrdersPanel
 
   const persist = () => {
     try {
@@ -102,6 +105,7 @@ export const SettingsDrawer: React.FC<Props & { finalPickerStatus?: 'idle'|'load
       localStorage.setItem('max_coins_count', String(Math.max(1, Math.min(20, maxCoins))))
       localStorage.setItem('default_hot_strategy', defaultStrategy)
       localStorage.setItem('default_tp_level', defaultTPLevel)
+      // Strategy Updater handled in OrdersPanel now
       window.dispatchEvent(new Event('app-settings-changed'))
     } catch {}
   }
@@ -183,6 +187,7 @@ export const SettingsDrawer: React.FC<Props & { finalPickerStatus?: 'idle'|'load
               <span style={{ color:'var(--muted)' }}>Go NOW min confidence</span>
               <input type="number" step={0.01} min={0.5} max={0.9} value={confGoNow} onChange={e=>setConfGoNow(Number(e.target.value))} />
             </label>
+            {/* Strategy Updater moved to OrdersPanel */}
           </div>
           <h4 className="mt-12" style={{ margin: '8px 0' }}>NO-TRADE override</h4>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap: 12, opacity: posture==='NO-TRADE' ? 1 : .6 }}>

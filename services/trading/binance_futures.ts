@@ -512,6 +512,9 @@ export async function fetchPositions(): Promise<any[]> {
   return api.getPositions()
 }
 
+// Utility function for generating unique client order IDs
+export const makeId = (p: string) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+
 export async function cancelOrder(symbol: string, orderId: number | string): Promise<any> {
   const api = getBinanceAPI()
   return (api as any).request('DELETE', '/fapi/v1/order', { symbol, orderId })
@@ -573,7 +576,7 @@ export function getWaitingTpList(): WaitingTpEntry[] {
   } catch { return [] }
 }
 
-function waitingTpSchedule(symbol: string, tp: number, qtyPlanned: string | null, positionSide?: 'LONG'|'SHORT'|undefined, workingType?: 'MARK_PRICE' | 'CONTRACT_PRICE'): void {
+export function waitingTpSchedule(symbol: string, tp: number, qtyPlanned: string | null, positionSide?: 'LONG'|'SHORT'|undefined, workingType?: 'MARK_PRICE' | 'CONTRACT_PRICE'): void {
   try {
     waitingTpBySymbol[symbol] = {
       symbol,
@@ -590,6 +593,7 @@ function waitingTpSchedule(symbol: string, tp: number, qtyPlanned: string | null
       lastErrorAt: null
     }
     persistWaitingState()
+    console.info('[WAITING_TP_SCHEDULED]', { symbol, tp, qtyPlanned, positionSide, workingType })
   } catch {}
 }
 
