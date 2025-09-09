@@ -173,18 +173,30 @@ async function sweepStaleOrdersOnce(): Promise<number> {
           const reduceOnly = Boolean(o?.reduceOnly)
           const closePosition = Boolean(o?.closePosition)
           const sym = String(o?.symbol||'')
+          const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
           const isExitType = type.includes('STOP') || type.includes('TAKE_PROFIT') // SL i TP
+          const isTpType = type.includes('TAKE_PROFIT')
+          const isSlType = type.includes('STOP')
+          const isInternalTp = clientId ? /^x_tp_/.test(clientId) : false
+          const isInternalSl = clientId ? /^x_sl_/.test(clientId) : false
           const hasPos = (Number(posSizeBySym.get(sym)||0) > 0)
           const noEntryOpen = !entrySymbols.has(sym)
           
           // KRITICKÁ OCHRANA: Pokud máme pozici, NIKDY neruš SL ani TP!
-          if (hasPos && isExitType) {
+          if (hasPos && (isExitType || isInternalTp)) {
             console.warn('[SWEEPER_POSITION_PROTECTION]', { symbol: sym, orderId: o?.orderId, type, reason: 'position_exists_never_cancel_exits' })
             return false
           }
           
-          // Pokud není pozice, sweeper může mazat normálně
-          return side==='SELL' && isExitType && (reduceOnly || closePosition) && !hasPos && noEntryOpen
+          // Pokud není pozice a není otevřen ENTRY, lze bezpečně mazat:
+          if (!hasPos && noEntryOpen) {
+            // A) Interní TP/SL (x_tp_* / x_sl_*) – i bez reduceOnly/closePosition
+            if (isTpType && isInternalTp) return true
+            if (isSlType && isInternalSl) return true
+            // B) Původní pravidlo pro orphan exity se "stop" nebo "take_profit" s exit flagy
+            return side==='SELL' && isExitType && (reduceOnly || closePosition)
+          }
+          return false
         } catch { return false }
       })
       .map((o: any) => ({
@@ -481,6 +493,59 @@ try {
           reason: (evt as any)?.reason || null
         })
       } catch {}
+      // Bezpečný okamžitý úklid interních TP po uzavření pozice (pos->0) s debounce
+      try {
+        if (evt.type === 'filled' && evt.symbol) {
+          const sym = String(evt.symbol)
+          setTimeout(async () => {
+            try {
+              const api = getBinanceAPI() as any
+              const [orders, positions] = await Promise.all([
+                api.getOpenOrders(sym),
+                api.getPositions()
+              ])
+              const pos = (Array.isArray(positions) ? positions : []).find((p: any) => String(p?.symbol) === sym)
+              const size = (() => { try { const n = Number(pos?.size ?? pos?.positionAmt ?? 0); return Number.isFinite(n) ? Math.abs(n) : 0 } catch { return 0 } })()
+              const hasPos = size > 0
+              const noEntryOpen = (() => {
+                try {
+                  return !(Array.isArray(orders) ? orders : []).some((o: any) => {
+                    const side = String(o?.side || '').toUpperCase()
+                    const type = String(o?.type || '').toUpperCase()
+                    const reduceOnly = Boolean(o?.reduceOnly)
+                    const closePosition = Boolean(o?.closePosition)
+                    const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+                    const isInternalEntry = /^e_l_/.test(clientId)
+                    return isInternalEntry && side === 'BUY' && type === 'LIMIT' && !(reduceOnly || closePosition)
+                  })
+                } catch { return true }
+              })()
+
+              if (!hasPos && noEntryOpen) {
+                // Zruš interní TP/SL (x_tp_* / x_sl_*) pro daný symbol, max 3 kusy, audituj
+                const internalExits = (Array.isArray(orders) ? orders : []).filter((o: any) => {
+                  try {
+                    const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+                    const type = String(o?.type || '').toUpperCase()
+                    const isExit = type.includes('TAKE_PROFIT') || type.includes('STOP')
+                    const isInternal = /^x_tp_|^x_sl_/.test(cid)
+                    return String(o?.symbol) === sym && isExit && isInternal
+                  } catch { return false }
+                }).slice(0, 3)
+
+                for (const o of internalExits) {
+                  try {
+                    await cancelOrder(sym, Number(o?.orderId))
+                    try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'server', symbol: sym, orderId: Number(o?.orderId)||undefined, reason: 'cleanup_on_pos_close_internal_exit' }) } catch {}
+                  } catch (e) {
+                    try { console.error('[CLEANUP_ON_CLOSE_ERR]', { symbol: sym, orderId: o?.orderId, error: (e as any)?.message || e }) } catch {}
+                  }
+                }
+              }
+            } catch {}
+          }, 700)
+        }
+      } catch {}
       // Trigger immediate waiting TP processing on fill without waiting for HTTP poll
       try {
         if (evt.type === 'filled' && evt.symbol) {
@@ -506,6 +571,26 @@ try {
                 symbol: String(evt.symbol || ''),
                 orderId: Number(evt.orderId) || 0
               })
+              // Pokud existuje pozice bez SL/TP, urychli SU (force due now)
+              try {
+                const symbol = String(evt.symbol || '')
+                if (symbol) {
+                  const pos = (Array.isArray(positions) ? positions : []).find((p: any) => String(p?.symbol) === symbol)
+                  const amt = Number(pos?.positionAmt || pos?.size || 0)
+                  if (Number.isFinite(amt) && Math.abs(amt) > 0) {
+                    const open = (Array.isArray(orders) ? orders : []).filter((o: any) => String(o?.symbol) === symbol)
+                    const hasSL = open.some((o: any) => String(o?.type||'').toUpperCase().includes('STOP'))
+                    const hasTP = open.some((o: any) => String(o?.type||'').toUpperCase().includes('TAKE_PROFIT'))
+                    if (!hasSL || !hasTP) {
+                      try {
+                        const { forceDueNow } = await import('../services/strategy-updater/registry')
+                        const ok = forceDueNow(symbol)
+                        if (ok) console.info('[SU_FORCE_DUE_NOW]', { symbol, reason: 'missing_exit_detected' })
+                      } catch {}
+                    }
+                  }
+                }
+              } catch {}
             } catch (triggerError) {
               console.error('[STRATEGY_UPDATER_TRIGGER_ERR]', triggerError)
             }
@@ -726,18 +811,7 @@ const server = http.createServer(async (req, res) => {
         } catch {}
         try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'server', symbol, orderId, reason: 'manual_delete' }) } catch {}
         
-        // Auto-cleanup waiting TP if this was an ENTRY order
-        try {
-          const orderInfo = r || {}
-          const wasEntryOrder = (
-            String(orderInfo?.side) === 'BUY' && 
-            String(orderInfo?.type) === 'LIMIT' && 
-            !(orderInfo?.reduceOnly || orderInfo?.closePosition)
-          )
-          if (wasEntryOrder) {
-            cleanupWaitingTpForSymbol(symbol)
-          }
-        } catch {}
+        // Do NOT auto-cleanup waiting TP on manual ENTRY delete
         
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
@@ -1021,6 +1095,10 @@ const server = http.createServer(async (req, res) => {
               } catch {}
             }
             const pending = getWaitingTpList()
+            // Grace window to avoid premature cleanup right after ENTRY fill before position snapshot catches up
+            const nowMs = Date.now()
+            const graceMsRaw = Number((process as any)?.env?.WAITING_TP_CLEANUP_GRACE_MS)
+            const graceMs = (Number.isFinite(graceMsRaw) && graceMsRaw >= 0) ? graceMsRaw : 15000
             for (const w of (Array.isArray(pending) ? pending : [])) {
               try {
                 const sym = String(w?.symbol || '')
@@ -1029,20 +1107,20 @@ const server = http.createServer(async (req, res) => {
                 // DEBUG: Log cleanup decision
                 const hasEntry = entrySymbols.has(sym)
                 const hasPosition = size > 0
-                console.debug('[WAITING_CLEANUP_DEBUG]', { 
-                  symbol: sym, 
-                  hasEntry, 
-                  hasPosition, 
-                  willCleanup: !hasEntry && !hasPosition,
+                const sinceMs = (() => { try { return new Date(String((w as any)?.since || Date.now())).getTime() } catch { return 0 } })()
+                const ageMs = Math.max(0, nowMs - sinceMs)
+                const willCleanup = (!hasEntry && !hasPosition && ageMs > graceMs)
+                console.debug('[WAITING_CLEANUP_DEBUG]', {
+                  symbol: sym,
+                  hasEntry,
+                  hasPosition,
+                  ageMs,
+                  graceMs,
+                  willCleanup,
                   entrySymbols: Array.from(entrySymbols)
                 })
-                // Cleanup only if there is no internal ENTRY for the symbol AND no position
-                if (!hasEntry && !hasPosition) {
-                  console.warn('[WAITING_CLEANUP_DECISION]', { symbol: sym, reason: 'no_entry_and_no_position' })
-                  cleanupWaitingTpForSymbol(sym)
-                } else {
-                  console.info('[WAITING_KEEP_DECISION]', { symbol: sym, hasEntry, hasPosition })
-                }
+                // Do NOT auto-clean waiting TP here; keep until sent or explicitly cancelled
+                console.info('[WAITING_KEEP_DECISION]', { symbol: sym, hasEntry, hasPosition })
               } catch {}
             }
           }
@@ -1810,6 +1888,13 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify(out))
       } catch (e: any) {
+        try {
+          console.error('[METRICS_ERROR]', {
+            message: e?.message || String(e),
+            name: e?.name || null,
+            stack: e?.stack || null
+          })
+        } catch {}
         const name = String(e?.name||'').toLowerCase()
         const msg = String(e?.message||'').toLowerCase()
         const abortLike = name.includes('abort') || msg.includes('abort') || msg.includes('timeout')

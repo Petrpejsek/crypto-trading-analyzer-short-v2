@@ -21,7 +21,7 @@ export type StrategyUpdaterEntry = {
 const strategyUpdaterBySymbol: Record<string, StrategyUpdaterEntry> = {}
 const REGISTRY_DIR = path.resolve(process.cwd(), 'runtime')
 const REGISTRY_FILE = path.resolve(REGISTRY_DIR, 'strategy_updater.json')
-const UPDATE_DELAY_MS = 5 * 60 * 1000 // 5 minutes
+const UPDATE_DELAY_MS = 5 * 60 * 1000 // 5 minutes (subsequent updates)
 
 // Track orderIds created by Strategy Updater so UI can highlight them reliably
 const strategyUpdaterOrderIds = new Set<number>()
@@ -74,7 +74,9 @@ export function scheduleStrategyUpdate(
 ): void {
   try {
     const now = new Date()
-    const triggerAt = new Date(now.getTime() + UPDATE_DELAY_MS)
+    // First-run policy: if either SL or TP chybí, udělej první průchod okamžitě (1s)
+    const initialDelayMs = (currentSL == null || currentTP == null) ? 1000 : UPDATE_DELAY_MS
+    const triggerAt = new Date(now.getTime() + initialDelayMs)
     
     strategyUpdaterBySymbol[symbol] = {
       symbol,
@@ -97,7 +99,8 @@ export function scheduleStrategyUpdate(
       symbol,
       side,
       entryPrice,
-      triggerAt: triggerAt.toISOString()
+      triggerAt: triggerAt.toISOString(),
+      initialDelayMs
     })
   } catch (e) {
     console.error('[STRATEGY_UPDATER_SCHEDULE_ERR]', (e as any)?.message || e)

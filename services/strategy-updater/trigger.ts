@@ -36,18 +36,8 @@ function detectMissingStrategyUpdaters(orders: any[], positions: any[]): void {
         const amt = Number(position?.positionAmt || position?.size || 0)
         
         if (symbol && Math.abs(amt) > 0 && !existingEntries.has(symbol)) {
-          // Consider position "ours" if exist ANY internal orders for this symbol
-          // (either pre-entry e_l_* or existing exits x_sl_*/x_tp_*)
-          const hasInternalOrders = orders.some((order: any) => {
-            const clientId = String(order?.clientOrderId || '')
-            const isInternal = /^(e_l_|x_sl_|x_tp_)/.test(clientId)
-            return isInternal && String(order?.symbol) === symbol
-          })
-          
-          if (hasInternalOrders) {
-            // This is our position but no Strategy Updater - trigger it
-            startStrategyUpdaterForPosition(symbol, position, orders)
-          }
+          // Attach Strategy Updater to ANY active position (no fallback logic)
+          startStrategyUpdaterForPosition(symbol, position, orders)
         }
       } catch {}
     }
@@ -185,18 +175,12 @@ function cleanupExpiredTracking(positions: any[]): void {
 // Check if strategy updater is enabled (controlled by UI toggle)
 export function isStrategyUpdaterEnabled(): boolean {
   try {
-    // In server context, check environment variable or config file
-    // Default is disabled for safety
-    const envEnabled = process.env.STRATEGY_UPDATER_ENABLED
-    if (envEnabled === '1' || envEnabled === 'true') {
-      return true
-    }
-    
-    // TODO: Could also read from a config file or other persistent storage
-    // For now, default to disabled for safety
-    return false
+    // Default to enabled; allow explicit disable via env
+    const envVar = String(process.env.STRATEGY_UPDATER_ENABLED || '').toLowerCase()
+    if (envVar === '0' || envVar === 'false' || envVar === 'off') return false
+    return true
   } catch {
-    return false
+    return true
   }
 }
 

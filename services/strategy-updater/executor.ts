@@ -50,7 +50,8 @@ export async function executeStrategyUpdate(
     const positionSize = Math.abs(positionAmt).toString()
     const positionSide = positionAmt > 0 ? 'LONG' : 'SHORT'
     
-    // Guard: if internal ENTRY order still exists (pre-entry phase), do NOT run updater
+    // Guard: pokud je otevřen interní ENTRY a NEEXISTUJE skutečná pozice, nespouštěj updater (pre-entry fáze)
+    // Pokud ale POZICE existuje (>0), updater musí běžet (bezpečnostní priorita: doplnit SL/TP)
     try {
       const openOrders = await api.getOpenOrders(symbol)
       const entryStillOpen = (Array.isArray(openOrders) ? openOrders : []).some((order: any) => {
@@ -60,7 +61,8 @@ export async function executeStrategyUpdate(
         const isExitFlag = Boolean(order?.reduceOnly || order?.closePosition)
         return isInternalEntry && isBuyLimit && !isExitFlag
       })
-      if (entryStillOpen) {
+      const hasRealPosition = Math.abs(Number(position?.positionAmt || 0)) > 0
+      if (entryStillOpen && !hasRealPosition) {
         return { success: false, error: 'entry_still_open' }
       }
     } catch {}

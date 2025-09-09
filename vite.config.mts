@@ -14,8 +14,8 @@ export default defineConfig({
     }
   },
   server: {
-    host: '0.0.0.0',
-    port: 4000,
+    host: '::',
+    port: 4201,
     strictPort: true,
     proxy: {
       '/api': {
@@ -35,8 +35,8 @@ export default defineConfig({
     }
   },
   preview: {
-    host: '0.0.0.0',
-    port: 4000,
+    host: '::',
+    port: 4201,
     strictPort: true,
     proxy: {
       '/api': {
