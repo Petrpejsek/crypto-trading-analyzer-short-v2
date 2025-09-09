@@ -464,7 +464,7 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
     const core = sym === 'BTCUSDT' ? (btc.klines as any) : (eth.klines as any)
     const coreOkNow = !!(core?.H1 && core?.H4 && core.H1.length && core.H4.length)
     if (!coreOkNow) { warnings.push(`drop:core:no_klines:${sym}`); continue }
-    const item: UniverseItem = { symbol: sym, klines: { H1: core?.H1, M15: core?.M15, H4: core?.H4 }, funding: fundingMap[sym], oi_now: oiNowMap[sym], oi_hist: [], depth1pct_usd: undefined, spread_bps: undefined, volume24h_usd: tickerMap[sym]?.volume24h_usd, price: tickerMap[sym]?.lastPrice, exchange: 'Binance', market_type: 'perp', fees_bps: null, tick_size: (exchangeFilters as any)?.[sym]?.tickSize ?? null }
+    const item: UniverseItem = { symbol: sym, klines: { H1: core?.H1, M15: core?.M15 }, funding: fundingMap[sym], oi_now: oiNowMap[sym], oi_hist: [], depth1pct_usd: undefined, spread_bps: undefined, volume24h_usd: tickerMap[sym]?.volume24h_usd, price: tickerMap[sym]?.lastPrice, exchange: 'Binance', market_type: 'perp', fees_bps: null, tick_size: (exchangeFilters as any)?.[sym]?.tickSize ?? null }
     // Analytics
     const h1 = item.klines.H1 || []
     const m15 = item.klines.M15 || []
