@@ -21,7 +21,8 @@ export type StrategyUpdaterEntry = {
 const strategyUpdaterBySymbol: Record<string, StrategyUpdaterEntry> = {}
 const REGISTRY_DIR = path.resolve(process.cwd(), 'runtime')
 const REGISTRY_FILE = path.resolve(REGISTRY_DIR, 'strategy_updater.json')
-const UPDATE_DELAY_MS = 5 * 60 * 1000 // 5 minutes (subsequent updates)
+const UPDATE_DELAY_MS = 3 * 60 * 1000 // 3 minutes (subsequent updates)
+const INITIAL_DELAY_MS = 1 * 60 * 1000 // 1 minute (first run)
 
 // Track orderIds created by Strategy Updater so UI can highlight them reliably
 const strategyUpdaterOrderIds = new Set<number>()
@@ -74,8 +75,8 @@ export function scheduleStrategyUpdate(
 ): void {
   try {
     const now = new Date()
-    // First-run policy: if either SL or TP chybí, udělej první průchod okamžitě (1s)
-    const initialDelayMs = (currentSL == null || currentTP == null) ? 1000 : UPDATE_DELAY_MS
+    // First-run policy: always delay first run by 1 minute (no immediate trigger on open)
+    const initialDelayMs = INITIAL_DELAY_MS
     const triggerAt = new Date(now.getTime() + initialDelayMs)
     
     strategyUpdaterBySymbol[symbol] = {
@@ -151,6 +152,21 @@ export function markStrategyUpdateProcessing(symbol: string): void {
     }
   } catch (e) {
     console.error('[STRATEGY_UPDATER_MARK_PROCESSING_ERR]', (e as any)?.message || e)
+  }
+}
+
+// Reschedule existing entry for the next cycle (default 5 minutes)
+export function rescheduleStrategyUpdate(symbol: string, delayMs: number = UPDATE_DELAY_MS): void {
+  try {
+    const entry = strategyUpdaterBySymbol[symbol]
+    if (!entry) return
+    const nextTrigger = new Date(Date.now() + delayMs)
+    entry.triggerAt = nextTrigger.toISOString()
+    entry.status = 'waiting'
+    persistRegistry()
+    console.info('[STRATEGY_UPDATER_RESCHEDULED]', { symbol, nextTrigger: entry.triggerAt, delayMs })
+  } catch (e) {
+    console.error('[STRATEGY_UPDATER_RESCHEDULE_ERR]', (e as any)?.message || e)
   }
 }
 

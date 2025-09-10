@@ -408,6 +408,16 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
         return { symbol: data.order.symbol, result: entryRes, data }
       } catch (e: any) {
         console.error('[ENTRY_ERROR]', { symbol: data.order.symbol, error: e?.message })
+        
+        // CRITICAL FIX: Immediate cleanup waiting TP when entry fails
+        try {
+          const { cleanupWaitingTpForSymbol } = await import('./binance_futures')
+          cleanupWaitingTpForSymbol(data.order.symbol)
+          console.error('[ENTRY_FAIL_CLEANUP_WAITING_TP]', { symbol: data.order.symbol, reason: 'entry_failed' })
+        } catch (cleanupErr) {
+          console.error('[ENTRY_FAIL_CLEANUP_ERROR]', { symbol: data.order.symbol, error: (cleanupErr as any)?.message })
+        }
+        
         return { symbol: data.order.symbol, error: e?.message || 'entry_failed', data }
       }
     })

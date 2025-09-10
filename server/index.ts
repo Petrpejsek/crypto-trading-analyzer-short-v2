@@ -571,26 +571,7 @@ try {
                 symbol: String(evt.symbol || ''),
                 orderId: Number(evt.orderId) || 0
               })
-              // Pokud existuje pozice bez SL/TP, urychli SU (force due now)
-              try {
-                const symbol = String(evt.symbol || '')
-                if (symbol) {
-                  const pos = (Array.isArray(positions) ? positions : []).find((p: any) => String(p?.symbol) === symbol)
-                  const amt = Number(pos?.positionAmt || pos?.size || 0)
-                  if (Number.isFinite(amt) && Math.abs(amt) > 0) {
-                    const open = (Array.isArray(orders) ? orders : []).filter((o: any) => String(o?.symbol) === symbol)
-                    const hasSL = open.some((o: any) => String(o?.type||'').toUpperCase().includes('STOP'))
-                    const hasTP = open.some((o: any) => String(o?.type||'').toUpperCase().includes('TAKE_PROFIT'))
-                    if (!hasSL || !hasTP) {
-                      try {
-                        const { forceDueNow } = await import('../services/strategy-updater/registry')
-                        const ok = forceDueNow(symbol)
-                        if (ok) console.info('[SU_FORCE_DUE_NOW]', { symbol, reason: 'missing_exit_detected' })
-                      } catch {}
-                    }
-                  }
-                }
-              } catch {}
+              // SU: No immediate force; first run waits 1 minute by design
             } catch (triggerError) {
               console.error('[STRATEGY_UPDATER_TRIGGER_ERR]', triggerError)
             }
@@ -1196,6 +1177,194 @@ const server = http.createServer(async (req, res) => {
             }
           }
         } catch {}
+
+        // Delta-based cleanup: cancel internal ENTRY orders far from mark (Δ% >= 10)
+        // and remove related internal exits (x_tp_*, x_sl_*), including waiting TP.
+        // No additional REST reads are performed beyond what's already used above.
+        try {
+          const DELTA_THRESHOLD = 10
+          // Build quick map of current position sizes per symbol (>= 0)
+          const posSizeBySym: Map<string, number> = new Map()
+          try {
+            for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
+              try {
+                const sym = String((p as any)?.symbol || '')
+                if (!sym) continue
+                const amt = Number((p as any)?.positionAmt ?? (p as any)?.size ?? 0)
+                const size = Number.isFinite(amt) ? Math.abs(amt) : 0
+                posSizeBySym.set(sym, size)
+              } catch {}
+            }
+          } catch {}
+
+          // Identify symbols whose internal ENTRY (e_l_*) have Δ% >= 10 and no open position
+          const qualifiedSymbols: Set<string> = new Set()
+          try {
+            for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
+              try {
+                const side = String((o as any)?.side || '').toUpperCase()
+                const type = String((o as any)?.type || '').toUpperCase()
+                const reduceOnly = Boolean((o as any)?.reduceOnly)
+                const closePosition = Boolean((o as any)?.closePosition)
+                const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+                const isInternalEntry = /^e_l_/.test(clientId) && side === 'BUY' && type === 'LIMIT' && !reduceOnly && !closePosition
+                if (!isInternalEntry) continue
+                const sym = String((o as any)?.symbol || '')
+                if (!sym) continue
+                const mark = Number((marks as any)?.[sym])
+                const s1 = Number((o as any)?.stopPrice)
+                const s2 = Number((o as any)?.price)
+                const target = Number.isFinite(s1) && s1 > 0 ? s1 : (Number.isFinite(s2) && s2 > 0 ? s2 : NaN)
+                if (!Number.isFinite(mark) || !(mark > 0) || !Number.isFinite(target)) continue
+                const delta = Math.abs((target - (mark as number)) / (mark as number)) * 100
+                const posSize = Number(posSizeBySym.get(sym) || 0)
+                if (delta >= DELTA_THRESHOLD && posSize <= 0) {
+                  qualifiedSymbols.add(sym)
+                }
+              } catch {}
+            }
+          } catch {}
+
+          if (qualifiedSymbols.size > 0) {
+            // Collect cancellations: internal entries and internal exits (x_tp_*, x_sl_)
+            const toCancel: Array<{ symbol: string; orderId: number }> = []
+            const seen = new Set<string>()
+            try {
+              for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
+                try {
+                  const sym = String((o as any)?.symbol || '')
+                  if (!sym || !qualifiedSymbols.has(sym)) continue
+                  const orderId = Number((o as any)?.orderId ?? (o as any)?.orderID ?? 0) || 0
+                  if (!orderId) continue
+                  const side = String((o as any)?.side || '').toUpperCase()
+                  const type = String((o as any)?.type || '').toUpperCase()
+                  const reduceOnly = Boolean((o as any)?.reduceOnly)
+                  const closePosition = Boolean((o as any)?.closePosition)
+                  const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+                  const isInternalEntry = /^e_l_/.test(clientId) && side === 'BUY' && type === 'LIMIT' && !reduceOnly && !closePosition
+                  const isInternalTp = /^x_tp_/.test(clientId)
+                  const isInternalSl = /^x_sl_/.test(clientId)
+                  if (isInternalEntry || isInternalTp || isInternalSl) {
+                    const key = `${sym}:${orderId}`
+                    if (!seen.has(key)) { seen.add(key); toCancel.push({ symbol: sym, orderId }) }
+                  }
+                } catch {}
+              }
+            } catch {}
+
+            if (toCancel.length > 0) {
+              const maxParallel = 4
+              for (let i = 0; i < toCancel.length; i += maxParallel) {
+                const batch = toCancel.slice(i, i + maxParallel)
+                const settled = await Promise.allSettled(batch.map(async (c) => {
+                  const r = await cancelOrder(c.symbol, c.orderId)
+                  try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'sweeper', symbol: c.symbol, orderId: c.orderId, reason: 'delta10_auto_cancel' }) } catch {}
+                  return r
+                }))
+                void settled
+              }
+            }
+
+            // Clean waiting TP registry for affected symbols
+            try {
+              for (const sym of Array.from(qualifiedSymbols)) {
+                try { cleanupWaitingTpForSymbol(sym) } catch {}
+              }
+            } catch {}
+
+            try { console.error('[SWEEPER_DELTA10]', { symbols: Array.from(qualifiedSymbols), cancelled: toCancel.length }) } catch {}
+          }
+        } catch {}
+
+        // No-entry cleanup: remove internal exits if no ENTRY and no position (create-then-clean)
+        try {
+          if (ordersReady && positionsReady) {
+            const nowMs = Date.now()
+            const graceMsRaw = Number((process as any)?.env?.NO_ENTRY_CLEANUP_GRACE_MS)
+            const graceMs = (Number.isFinite(graceMsRaw) && graceMsRaw >= 0) ? graceMsRaw : 60000 // default 1 minute
+            const hasInternalEntry = (o: any): boolean => {
+              try {
+                const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+                const side = String((o as any)?.side || '').toUpperCase()
+                const type = String((o as any)?.type || '').toUpperCase()
+                const reduceOnly = Boolean((o as any)?.reduceOnly)
+                const closePosition = Boolean((o as any)?.closePosition)
+                return /^e_l_/.test(clientId) && side === 'BUY' && type === 'LIMIT' && !reduceOnly && !closePosition
+              } catch { return false }
+            }
+            const isInternalExit = (o: any): boolean => {
+              try {
+                const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+                return /^x_sl_/.test(cid) || /^x_tp_/.test(cid)
+              } catch { return false }
+            }
+
+            const entryBySym = new Set<string>()
+            try {
+              for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
+                try { if (hasInternalEntry(o)) entryBySym.add(String((o as any)?.symbol || '')) } catch {}
+              }
+            } catch {}
+
+            const posSizeBySym: Map<string, number> = new Map()
+            try {
+              for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
+                try {
+                  const sym = String((p as any)?.symbol || '')
+                  if (!sym) continue
+                  const amt = Number((p as any)?.positionAmt ?? (p as any)?.size ?? 0)
+                  const size = Number.isFinite(amt) ? Math.abs(amt) : 0
+                  posSizeBySym.set(sym, size)
+                } catch {}
+              }
+            } catch {}
+
+            const toCancel: Array<{ symbol: string; orderId: number }> = []
+            const affectedSymbols: Set<string> = new Set()
+            try {
+              for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
+                try {
+                  if (!isInternalExit(o)) continue
+                  const sym = String((o as any)?.symbol || '')
+                  if (!sym) continue
+                  const hasPos = (Number(posSizeBySym.get(sym) || 0) > 0)
+                  if (hasPos) continue // Never cancel exits when a position exists
+                  const hasEntry = entryBySym.has(sym)
+                  if (hasEntry) continue // Keep exits if there is an internal entry open
+                  const createdAtMs = (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? t : null })()
+                  if (!Number.isFinite(createdAtMs as any)) continue
+                  const ageMs = nowMs - (createdAtMs as number)
+                  if (ageMs < graceMs) continue // Respect grace window to avoid races
+                  const orderId = Number((o as any)?.orderId ?? (o as any)?.orderID ?? 0) || 0
+                  if (!orderId) continue
+                  toCancel.push({ symbol: sym, orderId })
+                  affectedSymbols.add(sym)
+                } catch {}
+              }
+            } catch {}
+
+            if (toCancel.length > 0) {
+              const maxParallel = 4
+              for (let i = 0; i < toCancel.length; i += maxParallel) {
+                const batch = toCancel.slice(i, i + maxParallel)
+                const settled = await Promise.allSettled(batch.map(async (c) => {
+                  const r = await cancelOrder(c.symbol, c.orderId)
+                  try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'sweeper', symbol: c.symbol, orderId: c.orderId, reason: 'no_entry_auto_cancel' }) } catch {}
+                  return r
+                }))
+                void settled
+              }
+              // Clean waiting TP registry for affected symbols
+              try {
+                for (const sym of Array.from(affectedSymbols)) {
+                  try { cleanupWaitingTpForSymbol(sym) } catch {}
+                }
+              } catch {}
+              try { console.error('[NO_ENTRY_CLEANUP]', { symbols: Array.from(affectedSymbols), cancelled: toCancel.length, grace_ms: graceMs }) } catch {}
+            }
+          }
+        } catch {}
+
         const waiting = getWaitingTpList()
         const last = __lastPlaceOrders ? { request: __lastPlaceOrders.request, result: __lastPlaceOrders.result } : null
         // Augment last_planned_by_symbol from last place_orders request if available (no extra calls)

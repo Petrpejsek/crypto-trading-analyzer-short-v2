@@ -163,8 +163,19 @@ function cleanupExpiredTracking(positions: any[]): void {
       } catch {}
     }
 
-    // This will be called by the registry cleanup function when needed
-    // For now, we just log active positions
+    // Cleanup Strategy Updater entries for symbols without active positions
+    try {
+      const { getStrategyUpdaterList, cleanupStrategyUpdaterForSymbol } = require('./registry')
+      const entries: any[] = getStrategyUpdaterList()
+      for (const e of (Array.isArray(entries) ? entries : [])) {
+        try {
+          const sym = String(e?.symbol || '')
+          if (sym && !activeSymbols.has(sym)) {
+            cleanupStrategyUpdaterForSymbol(sym)
+          }
+        } catch {}
+      }
+    } catch {}
     console.debug('[STRATEGY_UPDATER_ACTIVE_POSITIONS]', Array.from(activeSymbols))
 
   } catch (error) {
@@ -191,6 +202,7 @@ export async function processDueStrategyUpdates(): Promise<void> {
   try {
     const { getDueUpdates } = await import('./registry')
     const { markStrategyUpdateProcessing } = await import('./registry')
+    const { rescheduleStrategyUpdate } = await import('./registry')
     const { appendAudit, isAuditEnabled } = await import('./audit')
     const { runStrategyUpdate, fetchMarketDataForSymbol } = await import('./strategy_updater_gpt')
     const { executeStrategyUpdate } = await import('./executor')
@@ -258,8 +270,8 @@ export async function processDueStrategyUpdates(): Promise<void> {
         
         // 5. Check confidence threshold
         if (response.confidence < 0.5) {
-          const { markStrategyUpdateCompleted } = await import('./registry')
-          markStrategyUpdateCompleted(entry.symbol)
+          // Low confidence: keep cadence; reschedule next pass in 5 minutes
+          rescheduleStrategyUpdate(entry.symbol)
           if (isAuditEnabled()) appendAudit({ id: `su_${Date.now()}_${entry.symbol}`, symbol: entry.symbol, phase: 'skipped_low_conf', confidence: response.confidence })
           console.info('[STRATEGY_UPDATER_LOW_CONFIDENCE]', { 
             symbol: entry.symbol, 
@@ -272,8 +284,8 @@ export async function processDueStrategyUpdates(): Promise<void> {
         const execResult = await executeStrategyUpdate(entry.symbol, response, entry)
         
         if (execResult.success) {
-          const { markStrategyUpdateCompleted } = await import('./registry')
-          markStrategyUpdateCompleted(entry.symbol)
+          // Success: maintain 5-minute cadence while position is open
+          rescheduleStrategyUpdate(entry.symbol)
           if (isAuditEnabled()) appendAudit({ id: `su_${Date.now()}_${entry.symbol}`, symbol: entry.symbol, phase: 'success', created: { sl: execResult.newSlOrderId, tp: execResult.newTpOrderId }, cancelled: execResult.cancelledOrderIds })
           console.info('[STRATEGY_UPDATER_SUCCESS]', { 
             symbol: entry.symbol,

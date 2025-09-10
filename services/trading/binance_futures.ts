@@ -658,7 +658,13 @@ export async function waitingTpProcessPassFromPositions(positionsRaw: any[]): Pr
         const amt = Number(p?.positionAmt)
         const size = Number.isFinite(amt) ? Math.abs(amt) : 0
         const side: 'LONG' | 'SHORT' | null = Number.isFinite(amt) ? (amt < 0 ? 'SHORT' : 'LONG') : null
-        sizeBySymbol[sym] = { size, side }
+        // Hedge-mode safe aggregation: prefer non-zero and larger absolute size; avoid overwriting with zero
+        const prev = sizeBySymbol[sym]
+        if (!prev || size > prev.size || prev.size <= 0) {
+          if (size > 0 || !prev) {
+            sizeBySymbol[sym] = { size, side }
+          }
+        }
       } catch {}
     }
     const entries = Object.entries(waitingTpBySymbol)
@@ -669,12 +675,34 @@ export async function waitingTpProcessPassFromPositions(positionsRaw: any[]): Pr
       // Žádné REST dotazy na openOrders – cleanup řeší server na základě WS snapshotu
       // ANTI-DUPLICATE: Zkontroluj, jestli už TP order pro tento symbol neexistuje
       if (size > 0 && w.checks >= 1) {
+        // Předem určeme očekávaný positionSide a exit side pro konzistentní deduplikaci
+        const positionSideComputed = (w.positionSide === 'SHORT' || rec.side === 'SHORT') ? 'SHORT' : 'LONG'
+        const expectedExitSide = positionSideComputed === 'SHORT' ? 'BUY' : 'SELL'
+        // V one-way módu (bez hedge) Binance vyžaduje neposílat positionSide parametr vůbec.
+        // Detekce bez extra API dotazu: z REST snapshotu pozic zjistíme, zda Binance posílá positionSide=LONG/SHORT pro tento symbol
+        const posRecord = (() => {
+          try { return list.find((pp: any) => String(pp?.symbol || '') === symbol) } catch { return null }
+        })()
+        const positionSideField = (() => {
+          try {
+            const raw = String((posRecord as any)?.positionSide || '')
+            return raw === 'LONG' || raw === 'SHORT' ? raw as 'LONG'|'SHORT' : null
+          } catch { return null }
+        })()
+        const includePositionSide = Boolean(positionSideField || w.positionSide)
         try {
           const allOrders = await getBinanceAPI().getOpenOrders(symbol)
-          const existingTp = (Array.isArray(allOrders) ? allOrders : []).some((o: any) => 
-            String(o?.side) === 'SELL' && 
-            String(o?.type).includes('TAKE_PROFIT')
-          )
+          // Deduplikuj pouze TP MARKET closePosition:true, shodný side (BUY pro SHORT, SELL pro LONG) a shodný positionSide (pokud jej posíláme)
+          const existingTp = (Array.isArray(allOrders) ? allOrders : []).some((o: any) => {
+            try {
+              const side = String(o?.side || '').toUpperCase()
+              const type = String(o?.type || '').toUpperCase()
+              const closePosition = Boolean(o?.closePosition)
+              const ps = String(o?.positionSide || '').toUpperCase()
+              const psMatch = includePositionSide ? (ps === positionSideComputed) : true
+              return side === expectedExitSide && type === 'TAKE_PROFIT_MARKET' && closePosition === true && psMatch
+            } catch { return false }
+          })
           
           if (existingTp) {
             console.warn('[WAITING_TP_DEDUP_SKIP]', { symbol, reason: 'TP_already_exists_for_symbol' })
@@ -684,10 +712,12 @@ export async function waitingTpProcessPassFromPositions(positionsRaw: any[]): Pr
         } catch {}
         
         const workingType = (w.workingType === 'CONTRACT_PRICE') ? 'CONTRACT_PRICE' : 'MARK_PRICE'
-        const positionSide = (w.positionSide === 'SHORT' || rec.side === 'SHORT') ? 'SHORT' : 'LONG'
-        const tpParams: OrderParams & { __engine?: string } = positionSide === 'SHORT'
-          ? { symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET', stopPrice: String(w.tp), closePosition: true, workingType, positionSide, newClientOrderId: `x_tp_tm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,6)}`, newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' }
-          : { symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: String(w.tp), closePosition: true, workingType, positionSide, newClientOrderId: `x_tp_tm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,6)}`, newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' }
+        const baseParams = positionSideComputed === 'SHORT'
+          ? { symbol, side: 'BUY' as const, type: 'TAKE_PROFIT_MARKET' as const, stopPrice: String(w.tp), closePosition: true as const, workingType, newClientOrderId: `x_tp_tm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,6)}`, newOrderRespType: 'RESULT' as const, __engine: 'v3_batch_2s' as const }
+          : { symbol, side: 'SELL' as const, type: 'TAKE_PROFIT_MARKET' as const, stopPrice: String(w.tp), closePosition: true as const, workingType, newClientOrderId: `x_tp_tm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,6)}`, newOrderRespType: 'RESULT' as const, __engine: 'v3_batch_2s' as const }
+        const tpParams: OrderParams & { __engine?: string } = includePositionSide
+          ? ({ ...baseParams, positionSide: positionSideComputed } as any)
+          : (baseParams as any)
         try { console.info('[BATCH_TP_PARAMS]', { symbol, type: tpParams.type, stopPrice: tpParams.stopPrice, closePosition: true }) } catch {}
         try {
           const tpRes = await (api as any).placeOrder(tpParams)
@@ -1252,6 +1282,15 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
       results.push({ symbol: order.symbol, status: 'executed', entry_order: entryRes, sl_order: slRes, tp_order: tpRes })
     } catch (e:any) {
       console.error(`[SIMPLE_BRACKET_ERROR] ${order.symbol}:`, e?.message || e)
+      
+      // CRITICAL FIX: Immediate cleanup waiting TP when entry fails
+      try {
+        cleanupWaitingTpForSymbol(order.symbol)
+        console.error('[ENTRY_FAIL_CLEANUP_WAITING_TP]', { symbol: order.symbol, reason: 'entry_failed' })
+      } catch (cleanupErr) {
+        console.error('[ENTRY_FAIL_CLEANUP_ERROR]', { symbol: order.symbol, error: (cleanupErr as any)?.message })
+      }
+      
       results.push({ symbol: order.symbol, status: 'error', error: e?.message || 'unknown', entry_order: entryRes, sl_order: slRes, tp_order: tpRes })
     }
   }
@@ -1399,6 +1438,14 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
     } catch (e: any) {
       console.error('[ENTRY_ERROR]', { symbol: p.symbol, error: e?.message })
       entrySettled.push({ status: 'fulfilled', value: { symbol: p.symbol, ok: false, error: e?.message } })
+      
+      // CRITICAL FIX: Immediate cleanup waiting TP when entry fails
+      try {
+        cleanupWaitingTpForSymbol(p.symbol)
+        console.error('[ENTRY_FAIL_CLEANUP_WAITING_TP]', { symbol: p.symbol, reason: 'entry_failed' })
+      } catch (cleanupErr) {
+        console.error('[ENTRY_FAIL_CLEANUP_ERROR]', { symbol: p.symbol, error: (cleanupErr as any)?.message })
+      }
     }
   }))
 
