@@ -14,16 +14,16 @@ export default defineConfig({
     }
   },
   server: {
-    host: '::',
+    host: '127.0.0.1',
     port: 4201,
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8789',
+        target: 'http://127.0.0.1:8789',
         changeOrigin: true
       },
       '/__proxy': {
-        target: 'http://localhost:8789',
+        target: 'http://127.0.0.1:8789',
         changeOrigin: true
       },
       '/binance': {
@@ -35,16 +35,16 @@ export default defineConfig({
     }
   },
   preview: {
-    host: '::',
+    host: '127.0.0.1',
     port: 4201,
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8789',
+        target: 'http://127.0.0.1:8789',
         changeOrigin: true
       },
       '/__proxy': {
-        target: 'http://localhost:8789',
+        target: 'http://127.0.0.1:8789',
         changeOrigin: true
       },
       '/binance': {

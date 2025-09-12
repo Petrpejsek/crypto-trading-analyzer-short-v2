@@ -15,7 +15,7 @@ import { preflightCompact } from '../services/decider/market_compact'
 import deciderCfg from '../config/decider.json'
 import tradingCfg from '../config/trading.json'
 import { calculateKlineChangePercent, calculateRegime } from './lib/calculations'
-import { startBinanceUserDataWs, getPositionsInMemory, getOpenOrdersInMemory, isUserDataReady } from '../services/exchange/binance/userDataWs'
+import { startBinanceUserDataWs, getPositionsInMemory, getOpenOrdersInMemory, isUserDataReady, rehydrateOpenOrdersFromRest, forgetUnknownOrdersUsingRest } from '../services/exchange/binance/userDataWs'
 import { getLimitsSnapshot, setBanUntilMs } from './lib/rateLimits'
  
 
@@ -792,7 +792,8 @@ const server = http.createServer(async (req, res) => {
         } catch {}
         try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'server', symbol, orderId, reason: 'manual_delete' }) } catch {}
         
-        // Do NOT auto-cleanup waiting TP on manual ENTRY delete
+        // Auto-cleanup waiting TP on manual ENTRY delete (safe housekeeping only)
+        try { const { cleanupWaitingTpForSymbol } = await import('../services/trading/binance_futures'); cleanupWaitingTpForSymbol(symbol) } catch {}
         
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
@@ -814,6 +815,32 @@ const server = http.createServer(async (req, res) => {
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: true, events }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    if (url.pathname === '/api/debug/rehydrate_orders' && req.method === 'POST') {
+      try {
+        const n = await rehydrateOpenOrdersFromRest()
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, count: n }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    if (url.pathname === '/api/debug/forget_unknown_orders' && req.method === 'POST') {
+      try {
+        const r = await forgetUnknownOrdersUsingRest()
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, ...r }))
       } catch (e: any) {
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')

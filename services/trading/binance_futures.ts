@@ -645,6 +645,11 @@ export function cleanupWaitingTpForSymbol(symbol: string): void {
   } catch {}
 }
 
+// Public wrapper: safe cleanup only if no ENTRY order exists (uses existing helper)
+export function cleanupWaitingTpIfNoEntry(symbol: string): void {
+  try { waitingTpCleanupIfNoEntry(symbol) } catch {}
+}
+
 // Jediný pass přes všechny waiting TP: využijeme již získané pozice (např. z /api/positions)
 export async function waitingTpProcessPassFromPositions(positionsRaw: any[]): Promise<void> {
   const api = getBinanceAPI()
@@ -672,6 +677,12 @@ export async function waitingTpProcessPassFromPositions(positionsRaw: any[]): Pr
       const rec = sizeBySymbol[symbol] || { size: 0, side: null }
       const size = rec.size
       waitingTpOnCheck(symbol, size)
+      // Safe auto-cleanup: no position → check if ENTRY still exists; if not, remove waiting
+      if (size <= 0) {
+        try { waitingTpCleanupIfNoEntry(symbol) } catch {}
+        // No position -> skip sending in this pass
+        continue
+      }
       // Žádné REST dotazy na openOrders – cleanup řeší server na základě WS snapshotu
       // ANTI-DUPLICATE: Zkontroluj, jestli už TP order pro tento symbol neexistuje
       if (size > 0 && w.checks >= 1) {

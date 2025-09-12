@@ -2,6 +2,9 @@ import OpenAI from 'openai'
 import Ajv from 'ajv'
 import addFormats from 'ajv-formats'
 import { buildMarketRawSnapshot } from '../../server/fetcher/binance'
+import { request as undiciRequest } from 'undici'
+import cfg from '../../config/fetcher.json'
+import type { Kline } from '../../types/market_raw'
 
 // Input type for strategy updater
 export type StrategyUpdateInput = {
@@ -48,18 +51,15 @@ addFormats(ajv)
 const validateResponse = ajv.compile(responseSchema)
 
 const STRATEGY_UPDATE_PROMPT = `Jsi profesionální intradenní trader kryptoměn.  
-Máš otevřenou LONG pozici a každých 5 minut musíš aktualizovat SL a TP tak, aby byl zajištěn profit i ochrana kapitálu.  
-Styl se automaticky přizpůsobuje síle trendu a volatilitě.
+Máš otevřenou LONG pozici a každých 5 minut musíš aktualizovat SL a TP tak, aby byl kapitál maximálně chráněn a zisk rychle zajištěn.
 
 ### Priority
-1. **Ochrana kapitálu** – nikdy neposouvej SL do horší pozice.  
-2. **Dynamická strategie**:
-   - Pokud je bias a momentum silné → použij agresivní přístup (volnější SL, vzdálenější TP).  
-   - Pokud bias slábne nebo hrozí obrat → použij konzervativní přístup (utáhnout SL, blízký TP).  
-3. **Zamykání zisku** – jakmile je pozice v zisku, SL minimálně na break-even.  
-4. **Volatilita (ATR)** – určuj vzdálenosti podle aktuální volatility.  
-5. **S/R úrovně** – respektuj nově vzniklé supporty a rezistence pro SL a TP.  
-6. **Efektivní profit** – TP nastavuj jen tak daleko, jak je procentuálně realistické vzhledem k momentu a objemu.  
+1. Ochrana kapitálu je nadřazená profitu.  
+2. Jakmile je pozice v menším zisku, okamžitě přesunout SL minimálně na break-even.  
+3. Při růstu zamykat profit postupně posouváním SL výš.  
+4. TP nastavuj blíže – tak, aby se zisk realizoval s vysokou pravděpodobností.  
+5. Pokud se bias nebo momentum zhorší, okamžitě přitáhni SL těsně pod aktuální cenu.  
+6. SL nikdy neposouvej do horší pozice.
 
 ### Vstupní data
 - symbol  
@@ -72,10 +72,10 @@ Styl se automaticky přizpůsobuje síle trendu a volatilitě.
 {
   "symbol": "BTCUSDT",
   "newSL": 27850,
-  "newTP": 28600,
-  "reasoning": "Pozice +2.3 % v zisku. Bias stále silně long (EMA20 pod cenou, RSI 61, rostoucí objem) → volnější nastavení. SL posunut do profitu (27850) pod support. TP dál na 28600, kde je další rezistence a 2× ATR. Pokud bias oslabí, příště SL utáhnu těsně pod aktuální cenu.",
-  "confidence": 0.9,
-  "urgency": "medium"
+  "newTP": 28100,
+  "reasoning": "Pozice +1.4 % v zisku, momentum oslabuje. SL přesunut na break-even +0.2 % pro ochranu kapitálu. TP blízký 28100 na lokální rezistenci.",
+  "confidence": 0.85,
+  "urgency": "high"
 }
 \`\`\``
 
@@ -231,10 +231,10 @@ export async function runStrategyUpdate(input: StrategyUpdateInput): Promise<{
 // Fetch fresh market data for a specific symbol (NO CACHE)
 export async function fetchMarketDataForSymbol(symbol: string): Promise<any> {
   try {
-    // Use buildMarketRawSnapshot with proper backend configuration
+    // Use buildMarketRawSnapshot for a narrow universe (desiredTopN=1) and include the symbol.
     const snapshot = await buildMarketRawSnapshot({ 
       universeStrategy: 'volume', 
-      desiredTopN: 50,
+      desiredTopN: 1,
       includeSymbols: [symbol], 
       fresh: true, 
       allowPartial: true 
@@ -257,6 +257,19 @@ export async function fetchMarketDataForSymbol(symbol: string): Promise<any> {
       throw new Error(`Symbol ${symbol} not found in market data`)
     }
 
+    // Enrich with M5 data (last 20 candles) and basic M5 indicators (RSI14, EMA10, EMA20)
+    const m5 = await fetchM5(symbol, 20)
+    if (!Array.isArray(m5) || m5.length === 0) throw new Error('M5_EMPTY')
+    const m5Close = m5.map(k => k.close)
+    const ema10 = ema(m5Close, 10)
+    const ema20 = ema(m5Close, 20)
+    const rsi14 = rsi(m5Close, 14)
+    ;(coinData as any).klines = (coinData as any).klines || {}
+    ;(coinData as any).klines.M5 = m5
+    ;(coinData as any).ema10_M5 = ema10
+    ;(coinData as any).ema20_M5 = ema20
+    ;(coinData as any).rsi_M5 = rsi14
+
     return coinData
   } catch (error) {
     console.error('[FETCH_MARKET_DATA_ERR]', {
@@ -265,4 +278,65 @@ export async function fetchMarketDataForSymbol(symbol: string): Promise<any> {
     })
     throw error
   }
+}
+
+// --- Local helpers (M5 fetch + indicators) ---
+
+async function fetchM5(symbol: string, limit: number): Promise<Kline[]> {
+  const qs = new URLSearchParams({ symbol, interval: '5m', limit: String(limit) }).toString()
+  const url = `https://fapi.binance.com/fapi/v1/klines?${qs}`
+  const ac = new AbortController()
+  const to = setTimeout(() => ac.abort(), (cfg as any)?.timeoutMs ?? 12000)
+  try {
+    const res = await undiciRequest(url, { method: 'GET', signal: ac.signal })
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw new Error(`HTTP ${res.statusCode} for ${url}`)
+    }
+    const text = await res.body.text()
+    const raw = JSON.parse(text)
+    if (!Array.isArray(raw)) return []
+    const toNum = (v: any): number => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
+    const toIso = (n: number): string => new Date(n > 1e12 ? n : n * 1000).toISOString()
+    return raw.map((k: any) => ({
+      openTime: toIso(k[0]),
+      open: toNum(k[1]),
+      high: toNum(k[2]),
+      low: toNum(k[3]),
+      close: toNum(k[4]),
+      volume: toNum(k[5]),
+      closeTime: toIso(k[6])
+    })).filter(k => Number.isFinite(k.open) && Number.isFinite(k.close))
+  } finally {
+    clearTimeout(to)
+  }
+}
+
+function ema(values: number[], period: number): number | null {
+  if (!Array.isArray(values) || values.length === 0) return null
+  const k = 2 / (period + 1)
+  let e = values[0]
+  for (let i = 1; i < values.length; i++) e = values[i] * k + e * (1 - k)
+  return Number.isFinite(e) ? e : null
+}
+
+function rsi(values: number[], period = 14): number | null {
+  if (!Array.isArray(values) || values.length <= period) return null
+  let gains = 0
+  let losses = 0
+  for (let i = 1; i <= period; i++) {
+    const diff = values[i] - values[i - 1]
+    if (diff >= 0) gains += diff; else losses -= diff
+  }
+  let avgGain = gains / period
+  let avgLoss = losses / period
+  for (let i = period + 1; i < values.length; i++) {
+    const diff = values[i] - values[i - 1]
+    const gain = diff > 0 ? diff : 0
+    const loss = diff < 0 ? -diff : 0
+    avgGain = (avgGain * (period - 1) + gain) / period
+    avgLoss = (avgLoss * (period - 1) + loss) / period
+  }
+  if (avgLoss === 0) return 100
+  const rs = avgGain / avgLoss
+  return 100 - 100 / (1 + rs)
 }

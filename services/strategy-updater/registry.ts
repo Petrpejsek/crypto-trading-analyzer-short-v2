@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-// Strategy Updater Registry - tracks 5min timers for internal positions
+// Strategy Updater Registry - tracks 3min timers for internal positions
 export type StrategyUpdaterEntry = {
   symbol: string
   side: 'LONG' | 'SHORT'
@@ -128,7 +128,7 @@ export function markStrategyUpdateError(symbol: string, error: string): void {
       entry.lastErrorAt = new Date().toISOString()
       entry.checks += 1
       
-      // Reschedule for next 5min cycle on error
+      // Reschedule for next 3min cycle on error
       const nextTrigger = new Date(Date.now() + UPDATE_DELAY_MS)
       entry.triggerAt = nextTrigger.toISOString()
       entry.status = 'waiting'
@@ -155,7 +155,7 @@ export function markStrategyUpdateProcessing(symbol: string): void {
   }
 }
 
-// Reschedule existing entry for the next cycle (default 5 minutes)
+// Reschedule existing entry for the next cycle (default 3 minutes)
 export function rescheduleStrategyUpdate(symbol: string, delayMs: number = UPDATE_DELAY_MS): void {
   try {
     const entry = strategyUpdaterBySymbol[symbol]

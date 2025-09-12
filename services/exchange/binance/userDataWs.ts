@@ -14,6 +14,8 @@ interface StartOpts {
 const positions: Map<string, { symbol: string; positionAmt: number; entryPrice: number | null; positionSide: 'LONG'|'SHORT'|null; leverage: number | null; updatedAt: number }>
   = new Map()
 const openOrdersById: Map<number, any> = new Map()
+// Expose for rare manual maintenance paths (e.g., server-side cleanup endpoints)
+try { (global as any).openOrdersById = openOrdersById } catch {}
 let hadAccountUpdate = false
 let hadOrderUpdate = false
 
@@ -284,6 +286,94 @@ export function isUserDataReady(kind: 'positions' | 'orders' | 'any' = 'any'): b
   if (kind === 'positions') return hadAccountUpdate
   if (kind === 'orders') return hadOrderUpdate
   return hadAccountUpdate || hadOrderUpdate
+}
+
+// --- Maintenance helpers (explicitly exported; no UI fallbacks) ---
+/**
+ * Rebuild in-memory open orders map from a single REST snapshot.
+ * Returns number of orders after rebuild.
+ */
+export async function rehydrateOpenOrdersFromRest(): Promise<number> {
+  try {
+    const api = getBinanceAPI() as any
+    const list = await api.getAllOpenOrders()
+    // Clear and rebuild
+    openOrdersById.clear()
+    if (Array.isArray(list)) {
+      for (const o of list) {
+        try {
+          const id = Number(o?.orderId ?? o?.orderID)
+          const sym = String(o?.symbol || '')
+          if (!id || !sym) continue
+          const side = String(o?.side || '')
+          const otype = String(o?.type || '')
+          const price = Number(o?.price)
+          const stopPrice = Number(o?.stopPrice)
+          const tif = String(o?.timeInForce || '')
+          const reduceOnly = Boolean(o?.reduceOnly ?? false)
+          const closePosition = Boolean(o?.closePosition ?? false)
+          const positionSideRaw = String(o?.positionSide || '')
+          const positionSide = positionSideRaw === 'LONG' ? 'LONG' : positionSideRaw === 'SHORT' ? 'SHORT' : null
+          const createdMs = Number((o as any)?.time)
+          const updatedMs = Number((o as any)?.updateTime)
+          const qty = Number(o?.origQty ?? o?.quantity ?? o?.qty)
+          openOrdersById.set(id, {
+            orderId: id,
+            symbol: sym,
+            side,
+            type: otype,
+            qty: Number.isFinite(qty) ? qty : null,
+            price: Number.isFinite(price) ? price : null,
+            stopPrice: Number.isFinite(stopPrice) ? stopPrice : null,
+            timeInForce: tif || null,
+            reduceOnly,
+            closePosition,
+            clientOrderId: String(o?.clientOrderId || ''),
+            positionSide,
+            createdAt: Number.isFinite(createdMs) && createdMs > 0 ? new Date(createdMs).toISOString() : null,
+            updatedAt: Number.isFinite(updatedMs) && updatedMs > 0 ? new Date(updatedMs).toISOString() : null,
+            status: 'NEW'
+          })
+        } catch {}
+      }
+    }
+    hadOrderUpdate = true
+    try { console.info('[USERDATA_WS_REHYDRATE_ORDERS_REST]', { count: openOrdersById.size }) } catch {}
+    return openOrdersById.size
+  } catch (e) {
+    try { console.error('[USERDATA_WS_REHYDRATE_ORDERS_ERR]', (e as any)?.message || e) } catch {}
+    return openOrdersById.size
+  }
+}
+
+/**
+ * Remove any in-memory open orders that are not present in a fresh REST list.
+ * Returns { removed, kept }.
+ */
+export async function forgetUnknownOrdersUsingRest(): Promise<{ removed: number; kept: number }> {
+  const api = getBinanceAPI() as any
+  let knownIds = new Set<number>()
+  try {
+    const list = await api.getAllOpenOrders()
+    if (Array.isArray(list)) {
+      for (const o of list) {
+        const id = Number((o as any)?.orderId ?? (o as any)?.orderID)
+        if (Number.isFinite(id) && id > 0) knownIds.add(id)
+      }
+    }
+  } catch (e) {
+    try { console.error('[FORGET_UNKNOWN_REST_ERR]', (e as any)?.message || e) } catch {}
+  }
+  let removed = 0
+  for (const id of Array.from(openOrdersById.keys())) {
+    if (!knownIds.has(id)) {
+      openOrdersById.delete(id)
+      removed++
+    }
+  }
+  hadOrderUpdate = true
+  try { console.info('[FORGET_UNKNOWN_ORDERS]', { removed, kept: openOrdersById.size }) } catch {}
+  return { removed, kept: openOrdersById.size }
 }
 
 // Explicit updater: refresh in-memory positions from a REST snapshot (used on FILLED events)

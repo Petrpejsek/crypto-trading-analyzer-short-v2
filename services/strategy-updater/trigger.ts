@@ -270,7 +270,7 @@ export async function processDueStrategyUpdates(): Promise<void> {
         
         // 5. Check confidence threshold
         if (response.confidence < 0.5) {
-          // Low confidence: keep cadence; reschedule next pass in 5 minutes
+          // Low confidence: keep cadence; reschedule next pass in 3 minutes
           rescheduleStrategyUpdate(entry.symbol)
           if (isAuditEnabled()) appendAudit({ id: `su_${Date.now()}_${entry.symbol}`, symbol: entry.symbol, phase: 'skipped_low_conf', confidence: response.confidence })
           console.info('[STRATEGY_UPDATER_LOW_CONFIDENCE]', { 
@@ -284,7 +284,7 @@ export async function processDueStrategyUpdates(): Promise<void> {
         const execResult = await executeStrategyUpdate(entry.symbol, response, entry)
         
         if (execResult.success) {
-          // Success: maintain 5-minute cadence while position is open
+          // Success: maintain 3-minute cadence while position is open
           rescheduleStrategyUpdate(entry.symbol)
           if (isAuditEnabled()) appendAudit({ id: `su_${Date.now()}_${entry.symbol}`, symbol: entry.symbol, phase: 'success', created: { sl: execResult.newSlOrderId, tp: execResult.newTpOrderId }, cancelled: execResult.cancelledOrderIds })
           console.info('[STRATEGY_UPDATER_SUCCESS]', { 
