@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "dev": "vite --port 4201",
+    "dev": "vite --port 4203",
     "dev:server": "tsx server/index.ts",
     "qa:m2": "tsx scripts/qa_m2.ts",
     "qa:m4": "tsx scripts/qa_m4.ts",
@@ -17,7 +17,7 @@
     "build:compact": "tsx scripts/build_compact.ts",
     "export:m1m2": "tsx scripts/export_m1_m2.ts",
     "build": "vite build",
-    "preview": "vite preview --port 4201",
+    "preview": "vite preview --port 4203",
     "typecheck": "tsc -noEmit",
     "test": "echo \"No tests yet. See tests/fetcher.spec.md for manual scenarios.\" && exit 0",
     "qa:m3": "tsx scripts/qa_m3.ts",
