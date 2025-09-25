@@ -1,0 +1,34 @@
+{
+  "enabled": false,
+  "max_setups": 3,
+  "preview_when_no_trade": true,
+  "preview_limit": 5,
+  "allowWhenNoTrade": true,
+  "preview": {
+    "limit": 5,
+    "computeMockSetup": true,
+    "account_equity_usd_preview": 10000,
+    "risk_per_trade_pct_preview": 0.3,
+    "entry_offset_atr": 0.2,
+    "sl_offset_atr": 1.2,
+    "tp1_rrr": 1.5,
+    "tp2_rrr": 2.5,
+    "min_atr_pct": 0.25,
+    "max_atr_pct": 8
+  },
+  "atr_pct_min": 0.3,
+  "atr_pct_max": 12,
+  "min_liquidity_usdt": 2000000,
+  "topK": 3,
+  "mode": "intraday",
+  "risk_pct_by_posture": { "OK": 0.7, "CAUTION": 0.5, "NO-TRADE": 0 },
+  "expires_in_min": 45,
+  "limits": {
+    "max_atr_pct_h1": 5.0,
+    "min_sl_atr_mult": 1.0,
+    "min_tp1_R": 0.8,
+    "max_setups": 3,
+    "max_setups_no_trade": 5
+  }
+}
+

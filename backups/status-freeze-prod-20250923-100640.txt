@@ -1,0 +1,9 @@
+ M docs/project-overview/04-order-engine-v3.md
+ M server/fetcher/binance.ts
+ M server/index.ts
+ M services/decider/entry_strategy_gpt.ts
+ M services/trading/binance_futures.ts
+ D services/trading/binance_futures_batch.ts
+ M src/ui/App.tsx
+ M src/ui/components/EntryControls.tsx
+?? backups/

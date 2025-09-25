@@ -1,0 +1,21 @@
+{
+  "enabled": true,
+  "intervalMinutes": 2,
+  "cooldownSec": 15,
+  "maxConcurrentDecisions": 4,
+  "maxRetries": 2,
+  "minConfidence": 0.6,
+  "limits": {
+    "minMultiplier": 0.5,
+    "maxMultiplier": 2.0,
+    "maxTopUpsPerTrade": 3
+  },
+  "risk": {
+    "maxSpreadBps": 25,
+    "maxSlippageBps": 30,
+    "maxPumpDeltaBps": 120
+  },
+  "openai": {
+    "model": "gpt-5"
+  }
+}

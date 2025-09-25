@@ -1,0 +1,26 @@
+{
+  "m3": {
+    "use_responses_api": true,
+    "model": "gpt-4o",
+    "max_output_tokens": 16384,
+    "timeoutMs": 12000,
+    "enforce_gpt5_only": false
+  },
+  "final_picker": {
+    "enabled": true,
+    "strict_no_fallback": true,
+    "allow_picks_in_no_trade": true,
+    "max_picks_no_trade": 1,
+    "confidence_floor_no_trade": 0.60,
+    "risk_pct_no_trade_default": 0.0,
+    "use_responses_api": true,
+    "model": "gpt-4o",
+    "max_output_tokens": 16384,
+    "rrr_min_tp1": 1.0,
+    "rrr_min_tp2": 2.0,
+    "entry_price_atr_mult_ok": 0.8,
+    "entry_price_atr_mult_notrade": 1.2,
+    "limit_reclaim_vwap_atr_mult": 1.0,
+    "max_leverage": 20
+  }
+}

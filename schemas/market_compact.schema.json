@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["timestamp", "feeds_ok", "breadth", "btc", "eth"],
+  "properties": {
+    "timestamp": { "type": "string" },
+    "feeds_ok": { "type": "boolean" },
+    "breadth": { "type": "object", "required": ["pct_above_EMA50_H1"], "properties": { "pct_above_EMA50_H1": { "type": "number" } }, "additionalProperties": false },
+    "avg_volume24h_topN": { "type": "number" },
+    "btc": {
+      "type": "object",
+      "required": ["H1", "H4"],
+      "properties": {
+        "H1": { "type": "object", "properties": { "vwap_rel": { "type": "number" }, "ema20": { "type": "number" }, "ema50": { "type": "number" }, "ema200": { "type": "number" }, "rsi": { "type": "number" }, "atr_pct": { "type": "number" } }, "additionalProperties": false },
+        "H4": { "type": "object", "properties": { "ema50_gt_200": { "type": "boolean" } }, "additionalProperties": false }
+      },
+      "additionalProperties": false
+    },
+    "eth": {
+      "type": "object",
+      "required": ["H1", "H4"],
+      "properties": {
+        "H1": { "type": "object", "properties": { "vwap_rel": { "type": "number" }, "ema20": { "type": "number" }, "ema50": { "type": "number" }, "ema200": { "type": "number" }, "rsi": { "type": "number" }, "atr_pct": { "type": "number" } }, "additionalProperties": false },
+        "H4": { "type": "object", "properties": { "ema50_gt_200": { "type": "boolean" } }, "additionalProperties": false }
+      },
+      "additionalProperties": false
+    },
+    "data_warnings": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}
+
+

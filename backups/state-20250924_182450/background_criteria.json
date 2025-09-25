@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "last_criteria": {
+    "universe": "gainers",
+    "topN": 5,
+    "fresh": true
+  },
+  "saved_at": "2025-09-22T12:13:14.572Z"
+}

@@ -1,0 +1,78 @@
+{
+  "$id": "https://schemas.local/top_up_executor.schema.json",
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["action", "symbol", "rationale", "confidence", "safety_checks"],
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["top_up", "skip", "abort"]
+    },
+    "symbol": {
+      "type": "string",
+      "minLength": 1
+    },
+    "top_up_ratio": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "top_up_size": {
+      "type": "number",
+      "minimum": 0
+    },
+    "limit_price": {
+      "type": ["number", "null"]
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 600
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "safety_checks": {
+      "type": "object",
+      "required": ["spread_ok", "slippage_ok", "pump_ok", "posture_ok", "leverage_ok"],
+      "properties": {
+        "spread_ok": { "type": "boolean" },
+        "slippage_ok": { "type": "boolean" },
+        "pump_ok": { "type": "boolean" },
+        "posture_ok": { "type": "boolean" },
+        "leverage_ok": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "watcher_reason_code": {
+      "type": ["string", "null"],
+      "maxLength": 120
+    },
+    "watcher_confidence": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "ttl_minutes_left": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 60
+    },
+    "meta": {
+      "type": ["object", "null"]
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": { "action": { "const": "top_up" } }
+      },
+      "then": {
+        "required": ["top_up_ratio", "top_up_size"]
+      }
+    }
+  ]
+}

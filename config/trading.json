@@ -1,0 +1,25 @@
+{
+  "EXIT_WORKING_TYPE": "MARK_PRICE",
+  "PREENTRY_EXITS_ENABLED": false,
+  "TP_PREENTRY_MIN_GAP_TICKS": 5,
+  "SL_PREENTRY_MIN_GAP_TICKS": 3,
+  "MIN_TP_TICKS": 2,
+  "MIN_SL_TICKS": 2,
+  "PENDING_WATCH_INTERVAL_MS": 500,
+  "PENDING_MAX_WAIT_MS": 120000,
+  "TP_MODE": "MARKET_PREENTRY",
+  "DISABLE_LIMIT_TP": false
+  ,"SAFE_MODE_LONG_ONLY": false
+  ,"RAW_PASSTHROUGH": true
+  ,"BINANCE_WEIGHT_LIMIT_1M": 6000
+  ,"V3_TP_IMMEDIATE_MARKET": false
+  ,"COOLDOWN": {
+    "enabled": true,
+    "consecutiveLosses": 2,
+    "minutes": 60,
+    "persist": true,
+    "incomeWindowMinutes": 10
+  }
+}
+
+

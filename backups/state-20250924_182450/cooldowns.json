@@ -1,0 +1,432 @@
+{
+  "updatedAt": "2025-09-24T13:45:53.471Z",
+  "items": {
+    "AVNTUSDT": {
+      "symbol": "AVNTUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758660433413,
+      "lastClosedAtMs": 1758656833413,
+      "lastOpenedAtMs": 1758652646161
+    },
+    "ZKCUSDT": {
+      "symbol": "ZKCUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758409286389,
+      "lastOpenedAtMs": 1758408121766
+    },
+    "AEVOUSDT": {
+      "symbol": "AEVOUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758480549535,
+      "lastClosedAtMs": 1758476949535,
+      "lastOpenedAtMs": 1758475608227
+    },
+    "BIOUSDT": {
+      "symbol": "BIOUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758413522407,
+      "lastClosedAtMs": 1758409922407,
+      "lastOpenedAtMs": 1758407463038
+    },
+    "TWTUSDT": {
+      "symbol": "TWTUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758447604618,
+      "lastClosedAtMs": 1758444004618,
+      "lastOpenedAtMs": 1758443946013
+    },
+    "WOOUSDT": {
+      "symbol": "WOOUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758414537985,
+      "lastClosedAtMs": 1758410937985,
+      "lastOpenedAtMs": 1758410285681
+    },
+    "OPENUSDT": {
+      "symbol": "OPENUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758440162467,
+      "lastClosedAtMs": 1758436562467,
+      "lastOpenedAtMs": 1758436386490
+    },
+    "SKLUSDT": {
+      "symbol": "SKLUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758409720437,
+      "lastOpenedAtMs": 1758408750204
+    },
+    "HOLOUSDT": {
+      "symbol": "HOLOUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758437231400,
+      "lastOpenedAtMs": 1758436842173
+    },
+    "LINEAUSDT": {
+      "symbol": "LINEAUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758712627324,
+      "lastOpenedAtMs": 1758712536071
+    },
+    "ASTERUSDT": {
+      "symbol": "ASTERUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758641820304,
+      "lastClosedAtMs": 1758660038383,
+      "lastOpenedAtMs": 1758659854278
+    },
+    "BARDUSDT": {
+      "symbol": "BARDUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758635074612,
+      "lastOpenedAtMs": 1758631596503
+    },
+    "BNBUSDT": {
+      "symbol": "BNBUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758463598440,
+      "lastOpenedAtMs": 1758458545009
+    },
+    "DYDXUSDT": {
+      "symbol": "DYDXUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758721553471,
+      "lastOpenedAtMs": 1758721070949
+    },
+    "PUMPUSDT": {
+      "symbol": "PUMPUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758443590462,
+      "lastOpenedAtMs": 1758443460060
+    },
+    "IPUSDT": {
+      "symbol": "IPUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758572512414,
+      "lastClosedAtMs": 1758578695650,
+      "lastOpenedAtMs": 1758577680517
+    },
+    "DEXEUSDT": {
+      "symbol": "DEXEUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758484083377,
+      "lastClosedAtMs": 1758480483377,
+      "lastOpenedAtMs": 1758480117451
+    },
+    "AWEUSDT": {
+      "symbol": "AWEUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758636328958,
+      "lastOpenedAtMs": 1758635743992
+    },
+    "XPLUSDT": {
+      "symbol": "XPLUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": null,
+      "lastOpenedAtMs": 1758574724648
+    },
+    "VANAUSDT": {
+      "symbol": "VANAUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758719582362,
+      "lastOpenedAtMs": 1758718852100
+    },
+    "HOOKUSDT": {
+      "symbol": "HOOKUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758468344439,
+      "lastClosedAtMs": 1758464744439,
+      "lastOpenedAtMs": 1758464214154
+    },
+    "THEUSDT": {
+      "symbol": "THEUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758455265509,
+      "lastOpenedAtMs": 1758454646939
+    },
+    "MERLUSDT": {
+      "symbol": "MERLUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758455499399,
+      "lastOpenedAtMs": 1758455336108
+    },
+    "AIUSDT": {
+      "symbol": "AIUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758458801400,
+      "lastOpenedAtMs": 1758457770973
+    },
+    "KMNOUSDT": {
+      "symbol": "KMNOUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758458864376,
+      "lastOpenedAtMs": 1758458562730
+    },
+    "WLFIUSDT": {
+      "symbol": "WLFIUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758485017357,
+      "lastOpenedAtMs": 1758485047020
+    },
+    "MEUSDT": {
+      "symbol": "MEUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758476302412,
+      "lastClosedAtMs": 1758480892345,
+      "lastOpenedAtMs": 1758480120689
+    },
+    "HUSDT": {
+      "symbol": "HUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758469928429,
+      "lastOpenedAtMs": 1758469554357
+    },
+    "EDUUSDT": {
+      "symbol": "EDUUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758480410374,
+      "lastOpenedAtMs": 1758480117926
+    },
+    "SAGAUSDT": {
+      "symbol": "SAGAUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758474064420,
+      "lastOpenedAtMs": 1758472695654
+    },
+    "PERPUSDT": {
+      "symbol": "PERPUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758499144264,
+      "lastOpenedAtMs": 1758499104172
+    },
+    "0GUSDT": {
+      "symbol": "0GUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758565068328,
+      "lastOpenedAtMs": 1758564753854
+    },
+    "RONINUSDT": {
+      "symbol": "RONINUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758499648280,
+      "lastOpenedAtMs": 1758499115321
+    },
+    "AUCTIONUSDT": {
+      "symbol": "AUCTIONUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758499176239,
+      "lastOpenedAtMs": 1758498285765
+    },
+    "COOKIEUSDT": {
+      "symbol": "COOKIEUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758499936281,
+      "lastOpenedAtMs": 1758499216474
+    },
+    "EIGENUSDT": {
+      "symbol": "EIGENUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758550843270,
+      "lastOpenedAtMs": 1758550760902
+    },
+    "BTCDOMUSDT": {
+      "symbol": "BTCDOMUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758578315284,
+      "lastClosedAtMs": 1758574715283,
+      "lastOpenedAtMs": 1758561727602
+    },
+    "PUMPBTCUSDT": {
+      "symbol": "PUMPBTCUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758559441462,
+      "lastOpenedAtMs": 1758559431252
+    },
+    "MUSDT": {
+      "symbol": "MUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758566803292,
+      "lastOpenedAtMs": 1758567052984
+    },
+    "HIPPOUSDT": {
+      "symbol": "HIPPOUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758580656446,
+      "lastOpenedAtMs": 1758567785724
+    },
+    "SUNUSDT": {
+      "symbol": "SUNUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758575247311,
+      "lastOpenedAtMs": 1758573827062
+    },
+    "AVAXUSDT": {
+      "symbol": "AVAXUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758652791588,
+      "lastClosedAtMs": 1758649191588,
+      "lastOpenedAtMs": 1758648697912
+    },
+    "NEARUSDT": {
+      "symbol": "NEARUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758614625341,
+      "lastOpenedAtMs": 1758614309224
+    },
+    "ZORAUSDT": {
+      "symbol": "ZORAUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758618675792,
+      "lastOpenedAtMs": 1758616193433
+    },
+    "ETHFIUSDT": {
+      "symbol": "ETHFIUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758665555232,
+      "lastClosedAtMs": 1758661955232,
+      "lastOpenedAtMs": 1758661865762
+    },
+    "LISTAUSDT": {
+      "symbol": "LISTAUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758665213724,
+      "lastOpenedAtMs": 1758664872497
+    },
+    "NMRUSDT": {
+      "symbol": "NMRUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758670056484,
+      "lastOpenedAtMs": 1758669926677
+    },
+    "AXLUSDT": {
+      "symbol": "AXLUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758669945065,
+      "lastOpenedAtMs": 1758669565657
+    },
+    "GMXUSDT": {
+      "symbol": "GMXUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758669850622,
+      "lastOpenedAtMs": 1758669577479
+    },
+    "ZECUSDT": {
+      "symbol": "ZECUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758701520459,
+      "lastOpenedAtMs": 1758700851217
+    },
+    "BERAUSDT": {
+      "symbol": "BERAUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": 1758664701802,
+      "lastClosedAtMs": 1758667576019,
+      "lastOpenedAtMs": 1758666001141
+    },
+    "SIGNUSDT": {
+      "symbol": "SIGNUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758710791386,
+      "lastOpenedAtMs": 1758710396675
+    },
+    "ZROUSDT": {
+      "symbol": "ZROUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758667595043,
+      "lastOpenedAtMs": 1758666366682
+    },
+    "OGUSDT": {
+      "symbol": "OGUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": null,
+      "lastOpenedAtMs": 1758669669040
+    },
+    "STGUSDT": {
+      "symbol": "STGUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758699269618,
+      "lastOpenedAtMs": 1758699231732
+    },
+    "GRASSUSDT": {
+      "symbol": "GRASSUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758703817577,
+      "lastOpenedAtMs": 1758700717871
+    },
+    "BABYUSDT": {
+      "symbol": "BABYUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": 1758712270362,
+      "lastClosedAtMs": 1758708670362,
+      "lastOpenedAtMs": 1758707612707
+    },
+    "KERNELUSDT": {
+      "symbol": "KERNELUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758707927299,
+      "lastOpenedAtMs": 1758707324845
+    },
+    "HYPERUSDT": {
+      "symbol": "HYPERUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758708071408,
+      "lastOpenedAtMs": 1758707612696
+    },
+    "IMXUSDT": {
+      "symbol": "IMXUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758713403760,
+      "lastOpenedAtMs": 1758719815250
+    },
+    "SFPUSDT": {
+      "symbol": "SFPUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758721114849,
+      "lastOpenedAtMs": 1758720936185
+    }
+  }
+}

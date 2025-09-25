@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://schemas.local/profit_taker.schema.json",
+  "title": "ProfitTakerDecision",
+  "version": 1,
+  "type": "object",
+  "required": ["action", "symbol", "take_percent", "rationale", "confidence", "cycle", "time_in_position_sec"],
+  "additionalProperties": false,
+  "properties": {
+    "action": { "type": "string", "enum": ["partial_take_profit", "skip"] },
+    "symbol": { "type": "string", "minLength": 1 },
+    "take_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+    "rationale": { "type": "string", "minLength": 1, "maxLength": 240 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "cycle": { "type": "integer", "minimum": 1 },
+    "time_in_position_sec": { "type": "integer", "minimum": 0 }
+  }
+}
+
+

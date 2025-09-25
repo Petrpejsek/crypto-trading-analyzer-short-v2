@@ -1,0 +1,115 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Entry Strategy Response",
+  "description": "Schema for GPT-5 entry strategy response",
+  "version": "2.1.0",
+  "type": "object",
+  "properties": {
+    "symbol": {
+      "type": "string",
+      "pattern": "^[A-Z0-9]+USDT$",
+      "description": "Trading symbol ending with USDT"
+    },
+    "risk_profile": {
+      "type": "string",
+      "enum": ["conservative", "aggressive"],
+      "description": "AI-selected risk profile for this symbol"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Confidence in selected risk_profile (0-1)"
+    },
+    "conservative_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Model-assessed score for conservative profile"
+    },
+    "aggressive_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Model-assessed score for aggressive profile"
+    },
+    "conservative": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "entry": { "type": "number", "description": "Entry price (number)" },
+            "sl": { "type": "number", "description": "Stop loss price (number)" },
+            "tp1": { "type": "number", "description": "Take profit 1 price (number)" },
+            "tp2": { "type": "number", "description": "Take profit 2 price (number)" },
+            "tp3": { "type": "number", "description": "Take profit 3 price (number)" },
+            "risk": {
+              "type": "string",
+              "enum": ["Nízké", "Střední", "Vysoké"],
+              "description": "Risk level"
+            },
+            "reasoning": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 4000,
+              "description": "Reasoning for conservative strategy"
+            }
+          },
+          "required": ["entry", "sl"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "error": { "type": "string", "minLength": 1 }
+          },
+          "required": ["error"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "aggressive": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "entry": { "type": "number", "description": "Entry price (number)" },
+            "sl": { "type": "number", "description": "Stop loss price (number)" },
+            "tp1": { "type": "number", "description": "Take profit 1 price (number)" },
+            "tp2": { "type": "number", "description": "Take profit 2 price (number)" },
+            "tp3": { "type": "number", "description": "Take profit 3 price (number)" },
+            "risk": {
+              "type": "string",
+              "enum": ["Nízké", "Střední", "Vysoké"],
+              "description": "Risk level"
+            },
+            "reasoning": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 4000,
+              "description": "Reasoning for aggressive strategy"
+            }
+          },
+          "required": ["entry", "sl"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "error": { "type": "string", "minLength": 1 }
+          },
+          "required": ["error"],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "symbol",
+    "conservative",
+    "aggressive"
+  ],
+  "additionalProperties": false
+}
+
+

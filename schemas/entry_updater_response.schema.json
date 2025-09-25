@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Entry Updater Response",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "spec_version": { "type": "string", "const": "1.0.0" },
+    "symbol": { "type": "string", "pattern": "^[A-Z0-9]+USDT$" },
+    "action": { "type": "string", "enum": ["no_op", "reposition", "cancel"] },
+    "new_plan": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "entry": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "type": { "type": "string", "enum": ["limit"] },
+                "price": { "type": "number", "exclusiveMinimum": 0 },
+                "buffer_bps": { "type": "number" },
+                "size_pct_of_tranche": { "type": "number", "minimum": 0, "maximum": 1 }
+              },
+              "required": ["type", "price"]
+            },
+            "sl": { "type": "number", "exclusiveMinimum": 0 },
+            "tp_levels": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "tag": { "type": "string" },
+                  "price": { "type": "number", "exclusiveMinimum": 0 },
+                  "allocation_pct": { "type": "number", "minimum": 0, "maximum": 1 }
+                },
+                "required": ["tag", "price", "allocation_pct"]
+              }
+            }
+          },
+          "required": ["entry", "sl", "tp_levels"]
+        },
+        { "type": "null" }
+      ]
+    },
+    "reason_code": {
+      "type": "string",
+      "enum": [
+        "NO_OP_ZONE",
+        "REPOSITION_SUPPORT",
+        "CANCEL_FLIP",
+        "CANCEL_DELTA_ATR",
+        "CANCEL_RM_FILTER"
+      ]
+    },
+    "reasoning": { "type": "string", "minLength": 4, "maxLength": 2000 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "required": ["spec_version", "symbol", "action", "new_plan", "reason_code", "reasoning", "confidence"]
+}
+
+

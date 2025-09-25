@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Entry Risk Decision",
+  "description": "Schema for risk manager decision over conservative/aggressive plans",
+  "version": "1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "symbol": { "type": "string", "pattern": "^[A-Z0-9]+USDT$" },
+    "risk_profile": { "type": "string", "enum": ["conservative", "aggressive"] },
+    "conservative_score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "aggressive_score": { "type": "number", "minimum": 0, "maximum": 1 },
+    "prob_success": { "type": "number", "minimum": 0, "maximum": 1 },
+    "decision": { "type": "string", "enum": ["enter", "skip"] },
+    "chosen_plan": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "style": { "type": "string", "enum": ["conservative", "aggressive"] },
+            "entry": { "type": "number" },
+            "sl": { "type": "number" },
+            "tp_levels": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "tag": { "type": "string" },
+                  "price": { "type": "number" },
+                  "allocation_pct": { "type": "number", "minimum": 0, "maximum": 1 }
+                },
+                "required": ["tag", "price", "allocation_pct"]
+              }
+            },
+            "reasoning": { "type": "string", "minLength": 0, "maxLength": 2000 }
+          },
+          "required": ["style", "entry", "sl", "tp_levels"]
+        },
+        { "type": "null" }
+      ]
+    },
+    "reasons": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": { "type": "string", "minLength": 4, "maxLength": 200 }
+    }
+  },
+  "required": [
+    "symbol",
+    "risk_profile",
+    "conservative_score",
+    "aggressive_score",
+    "prob_success",
+    "decision",
+    "chosen_plan",
+    "reasons"
+  ]
+}
+

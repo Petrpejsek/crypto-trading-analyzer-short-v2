@@ -1,0 +1,48 @@
+{
+  "enabled": true,
+  "intervalSeconds": 12,
+  "jitterSeconds": 3,
+  "ttlMinutes": 5,
+  "cooldownSec": 15,
+  "maxTopUpsPerTrade": 3,
+  "minPilotFillRatio": 0.1,
+  "minPilotSize": 0,
+  "wallBandBps": 15,
+  "maxSpreadBps": 35,
+  "maxSlippageBps": 40,
+
+  "rmFilterAction": "HOLD",
+  "cooldownMsOnHold": 8000,
+  "graceWindowMsAfterTouch": 12000,
+  "maxWatchDurationMs": 300000,
+
+  "consumeBidWallPct3s": 50,
+  "refreshBidWallPct10s": 20,
+  "dwellMs": 3000,
+
+  "mildBiasEnabled": true,
+  "reversalScoreThreshold": 1.0,
+  "weights": {
+    "springReclaim": 0.5,
+    "bidwallAbsorb": 0.35,
+    "orderflowBias": 0.25,
+    "structureBias": 0.2,
+    "vwapReclaim": 0.2
+  },
+
+  "obi5Min": 0.05,
+  "obi20Min": 0.10,
+  "obi20ContDownAbort": -0.20,
+  "micropriceConfirmMinMs": 1500,
+
+  "requireEma20Ge50OnBothTfs": false,
+  "requireEma20Ge50AnyTf": true,
+  "vwapReclaimBandAtr": 0.10,
+
+  "minTimeBetweenEntriesMs": 15000,
+  "maxRepositionPerMinute": 1,
+
+  "topUpWatcherV2Enabled": true
+}
+
+

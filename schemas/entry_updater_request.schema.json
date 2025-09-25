@@ -1,0 +1,143 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Entry Updater Request",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "spec_version": { "type": "string", "const": "1.0.0" },
+    "symbol": { "type": "string", "pattern": "^[A-Z0-9]+USDT$" },
+    "snapshot_ts": { "type": "string", "format": "date-time" },
+    "asset_data": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tickSize": { "type": "number", "exclusiveMinimum": 0 },
+        "stepSize": { "type": "number", "exclusiveMinimum": 0 },
+        "minNotional": { "type": "number", "minimum": 0 }
+      },
+      "required": ["tickSize", "stepSize", "minNotional"]
+    },
+    "market_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "markPrice": { "type": "number" },
+        "atr": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "m15": { "type": "number", "minimum": 0 } },
+          "required": ["m15"]
+        },
+        "ema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "m5": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "20": { "type": "number" }, "50": { "type": "number" } },
+              "required": ["20", "50"]
+            },
+            "m15": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "20": { "type": "number" }, "50": { "type": "number" } },
+              "required": ["20", "50"]
+            }
+          },
+          "required": ["m5", "m15"]
+        },
+        "vwap": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "m15": { "type": "number" } },
+          "required": ["m15"]
+        },
+        "rsi": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "m5": { "type": "number" }, "m15": { "type": "number" } },
+          "required": ["m5", "m15"]
+        },
+        "orderbook": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "nearestBidWall": { "type": "number" },
+            "nearestAskWall": { "type": "number" },
+            "obi5": { "type": "number" },
+            "obi20": { "type": "number" },
+            "micropriceBias": { "type": "string", "enum": ["bid", "ask", "neutral"] }
+          },
+          "required": ["nearestBidWall", "nearestAskWall"]
+        },
+        "spread_bps": { "type": "number", "minimum": 0 },
+        "estSlippageBps": { "type": "number", "minimum": 0 }
+      },
+      "required": ["markPrice", "atr", "ema", "vwap", "orderbook", "spread_bps", "estSlippageBps"]
+    },
+    "current_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "remaining_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "entry": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": { "type": "string", "enum": ["limit"] },
+            "price": { "type": "number", "exclusiveMinimum": 0 }
+          },
+          "required": ["type", "price"]
+        },
+        "sl": { "type": "number", "exclusiveMinimum": 0 },
+        "tp_levels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "tag": { "type": "string" },
+              "price": { "type": "number", "exclusiveMinimum": 0 },
+              "allocation_pct": { "type": "number", "minimum": 0, "maximum": 1 }
+            },
+            "required": ["tag", "price", "allocation_pct"]
+          }
+        },
+        "order_created_at": { "type": "string", "format": "date-time" },
+        "current_touch_count": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["remaining_ratio", "entry", "sl", "tp_levels", "order_created_at", "current_touch_count"]
+    },
+    "fills": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tp_hits_count": { "type": "integer", "minimum": 0 },
+        "last_tp_hit_tag": { "type": ["string", "null"] },
+        "realized_pct_of_initial": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "required": ["tp_hits_count", "last_tp_hit_tag", "realized_pct_of_initial"]
+    },
+    "exchange_filters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxSlippagePct": { "type": "number", "minimum": 0 }
+      },
+      "required": ["maxSlippagePct"]
+    }
+  },
+  "required": [
+    "spec_version",
+    "symbol",
+    "snapshot_ts",
+    "asset_data",
+    "market_snapshot",
+    "current_plan",
+    "fills",
+    "exchange_filters"
+  ]
+}
+
+

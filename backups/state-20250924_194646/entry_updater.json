@@ -1,0 +1,103 @@
+{
+  "ts": "2025-09-24T17:25:57.256Z",
+  "entries": [
+    {
+      "symbol": "VANAUSDT",
+      "orderId": 1811568774,
+      "clientOrderId": "e_l_mfy6wulm_bzudmt",
+      "entryPrice": 4.774,
+      "sl": null,
+      "tpLevels": [],
+      "checks": 0,
+      "lastCheck": null,
+      "triggerAt": "2025-09-24T16:29:55.798Z",
+      "since": "2025-09-24T16:24:55.798Z",
+      "touchedRecentlyUntil": null,
+      "status": "waiting"
+    },
+    {
+      "symbol": "IMXUSDT",
+      "orderId": 6677030676,
+      "clientOrderId": "e_l_mfy7hdvv_fq4jn0",
+      "entryPrice": 0.7356,
+      "sl": null,
+      "tpLevels": [],
+      "checks": 0,
+      "lastCheck": null,
+      "triggerAt": "2025-09-24T16:41:08.214Z",
+      "since": "2025-09-24T16:36:08.214Z",
+      "touchedRecentlyUntil": null,
+      "status": "waiting"
+    },
+    {
+      "symbol": "BBUSDT",
+      "orderId": 2839729763,
+      "clientOrderId": "e_l_mfy7hfmd_k5xwvz",
+      "entryPrice": 0.2425,
+      "sl": null,
+      "tpLevels": [],
+      "checks": 0,
+      "lastCheck": null,
+      "triggerAt": "2025-09-24T16:41:08.216Z",
+      "since": "2025-09-24T16:36:08.216Z",
+      "touchedRecentlyUntil": null,
+      "status": "waiting"
+    },
+    {
+      "symbol": "A2ZUSDT",
+      "orderId": 279034141,
+      "clientOrderId": "e_l_mfy7hgkh_povye5",
+      "entryPrice": 0.005918,
+      "sl": null,
+      "tpLevels": [],
+      "checks": 0,
+      "lastCheck": null,
+      "triggerAt": "2025-09-24T16:41:08.695Z",
+      "since": "2025-09-24T16:36:08.695Z",
+      "touchedRecentlyUntil": null,
+      "status": "waiting"
+    },
+    {
+      "symbol": "ASTERUSDT",
+      "orderId": 360904735,
+      "clientOrderId": "e_l_mfy7tcvd_whxzvz",
+      "entryPrice": 2.2898,
+      "sl": null,
+      "tpLevels": [],
+      "checks": 0,
+      "lastCheck": null,
+      "triggerAt": "2025-09-24T16:50:25.898Z",
+      "since": "2025-09-24T16:45:25.898Z",
+      "touchedRecentlyUntil": null,
+      "status": "waiting"
+    },
+    {
+      "symbol": "IMXUSDT",
+      "orderId": 6677250516,
+      "clientOrderId": "e_l_mfy99gvt_7e0zzd",
+      "entryPrice": 0.7369,
+      "sl": null,
+      "tpLevels": [],
+      "checks": 0,
+      "lastCheck": null,
+      "triggerAt": "2025-09-24T17:30:56.641Z",
+      "since": "2025-09-24T17:25:56.641Z",
+      "touchedRecentlyUntil": null,
+      "status": "waiting"
+    },
+    {
+      "symbol": "ATHUSDT",
+      "orderId": 365196514,
+      "clientOrderId": "e_l_mfy99idv_js0aon",
+      "entryPrice": 0.06264,
+      "sl": null,
+      "tpLevels": [],
+      "checks": 0,
+      "lastCheck": null,
+      "triggerAt": "2025-09-24T17:30:57.256Z",
+      "since": "2025-09-24T17:25:57.256Z",
+      "touchedRecentlyUntil": null,
+      "status": "waiting"
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"symbol":"BTCUSDT","posture":"OK","candidates":[{"style":"conservative","entry":60000,"sl":59000,"tp_levels":[{"tag":"tp1","price":60500,"allocation_pct":0.5},{"tag":"tp2","price":61000,"allocation_pct":0.5}],"reasoning":"test"}]}

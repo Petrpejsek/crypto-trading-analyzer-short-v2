@@ -1,0 +1,21 @@
+{
+  "enabled": true,
+  "last_params": {
+    "orders": [
+      {
+        "symbol": "VANAUSDT",
+        "side": "LONG",
+        "strategy": "conservative",
+        "tpLevel": "tp3",
+        "orderType": "limit",
+        "amount": 60,
+        "leverage": 30,
+        "risk_label": "",
+        "entry": 4.774,
+        "sl": 4.734,
+        "tp": 4.988
+      }
+    ]
+  },
+  "saved_at": "2025-09-24T16:20:10.801Z"
+}

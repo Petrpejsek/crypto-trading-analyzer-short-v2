@@ -1,0 +1,26 @@
+{
+  "updatedAt": "2025-09-24T17:37:01.757Z",
+  "items": {
+    "BBUSDT": {
+      "symbol": "BBUSDT",
+      "consecutiveLosses": 1,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758733410264,
+      "lastOpenedAtMs": 1758731769455
+    },
+    "A2ZUSDT": {
+      "symbol": "A2ZUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": null,
+      "lastOpenedAtMs": 1758733180276
+    },
+    "ATHUSDT": {
+      "symbol": "ATHUSDT",
+      "consecutiveLosses": 0,
+      "cooldownUntilMs": null,
+      "lastClosedAtMs": 1758735421757,
+      "lastOpenedAtMs": 1758734758290
+    }
+  }
+}

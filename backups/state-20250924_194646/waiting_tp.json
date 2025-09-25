@@ -1,0 +1,33 @@
+{
+  "ts": "2025-09-24T17:26:09.441Z",
+  "waiting": [
+    {
+      "symbol": "ASTERUSDT",
+      "tp": 2.43,
+      "qtyPlanned": "786.000",
+      "since": "2025-09-24T17:17:56.453Z",
+      "lastCheck": "2025-09-24T17:26:05.972Z",
+      "checks": 0,
+      "positionSize": 0,
+      "status": "waiting",
+      "positionSide": "LONG",
+      "workingType": "MARK_PRICE",
+      "lastError": null,
+      "lastErrorAt": null
+    },
+    {
+      "symbol": "IMXUSDT",
+      "tp": 0.7533,
+      "qtyPlanned": "2442.000",
+      "since": "2025-09-24T17:26:01.767Z",
+      "lastCheck": "2025-09-24T17:26:05.972Z",
+      "checks": 0,
+      "positionSize": 0,
+      "status": "waiting",
+      "positionSide": "LONG",
+      "workingType": "MARK_PRICE",
+      "lastError": null,
+      "lastErrorAt": null
+    }
+  ]
+}

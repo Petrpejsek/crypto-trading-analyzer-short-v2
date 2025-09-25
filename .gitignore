@@ -1,0 +1,63 @@
+node_modules
+# Build artifacts
+.dist/
+dist/
+.vite/
+.DS_Store
+
+# Env and secrets
+.env
+.env*
+*.local
+*.secret
+
+# Logs and PID files
+*.log
+*.out
+*.pid
+logs/
+logs*/
+nohup.out
+
+# Caches and tmp
+*.tmp
+*.cache
+.tmp/
+cache/
+.tmp-cache/
+tmp/
+tmp*/
+
+# Runtime and local state
+runtime/
+server.pid
+frontend.pid
+worker.pid
+backend.pid
+ui.pid
+
+# Test/coverage
+coverage/
+.out/
+out/
+
+# Vite/TypeScript
+*.tsbuildinfo
+
+# PM2 and ecosystem dumps
+.pm2/
+**/pm2.log
+**/pm2.pid
+
+# Temporal artifacts
+.temporal/
+
+# Local fixtures and exports
+fixtures/**/*.json
+out/**/*.json
+out/**/*.ndjson
+
+# OS/editor
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,34 @@
+{
+  "enabled": true,
+  "last_params": {
+    "orders": [
+      {
+        "symbol": "IMXUSDT",
+        "side": "LONG",
+        "strategy": "conservative",
+        "tpLevel": "tp3",
+        "orderType": "limit",
+        "amount": 60,
+        "leverage": 30,
+        "risk_label": "",
+        "entry": 0.7369,
+        "sl": 0.7323,
+        "tp": 0.7533
+      },
+      {
+        "symbol": "ATHUSDT",
+        "side": "LONG",
+        "strategy": "conservative",
+        "tpLevel": "tp3",
+        "orderType": "limit",
+        "amount": 60,
+        "leverage": 30,
+        "risk_label": "",
+        "entry": 0.06264,
+        "sl": 0.06204,
+        "tp": 0.06395
+      }
+    ]
+  },
+  "saved_at": "2025-09-24T17:26:02.642Z"
+}

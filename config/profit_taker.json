@@ -1,0 +1,24 @@
+{
+  "enabled": false,
+  "intervalMinutes": 5,
+  "allowFullExit": true,
+  "cooldownSec": 20,
+  "maxConcurrentDecisions": 3,
+  "openai": {
+    "model": "gpt-5",
+    "temperature": 0.2,
+    "responseFormat": "json_schema",
+    "schemaVersion": 1,
+    "max_completion_tokens": 4096
+  },
+  "execution": {
+    "useReduceOnly": true,
+    "respectExchangeFilters": true
+  },
+  "audit": {
+    "logDecisions": true,
+    "uiFeed": true
+  }
+}
+
+

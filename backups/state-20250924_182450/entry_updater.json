@@ -1,0 +1,19 @@
+{
+  "ts": "2025-09-24T16:20:06.714Z",
+  "entries": [
+    {
+      "symbol": "VANAUSDT",
+      "orderId": 1811568774,
+      "clientOrderId": "e_l_mfy6wulm_bzudmt",
+      "entryPrice": 4.774,
+      "sl": null,
+      "tpLevels": [],
+      "checks": 0,
+      "lastCheck": null,
+      "triggerAt": "2025-09-24T16:25:06.714Z",
+      "since": "2025-09-24T16:20:06.714Z",
+      "touchedRecentlyUntil": null,
+      "status": "waiting"
+    }
+  ]
+}
