@@ -97,7 +97,9 @@ export const HeaderBar: React.FC<Props> = ({ running, onRun, onExportSnapshot, o
   return (
     <div className="space-between mb-12 no-print" style={{ paddingTop: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between' }}>
-        <div style={{ fontWeight: 700, color: '#22c55e' }}>LONG</div>
+        <div style={{ fontWeight: 700, color: defaultSide === 'SHORT' ? '#dc2626' : '#22c55e' }}>
+          {defaultSide === 'SHORT' ? 'SHORT' : 'LONG'}
+        </div>
         {/* Globální defaulty vlevo */}
         <div className="row gap-8" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>

@@ -99,7 +99,14 @@ export const App: React.FC = () => {
   const [defaultPreset, setDefaultPreset] = useState<'conservative'|'aggressive'>('conservative')
 
   // Global defaults controlled in HeaderBar
-  const [defaultSide, setDefaultSide] = useState<'LONG'|'SHORT'>('LONG')
+  const [defaultSide, setDefaultSide] = useState<'LONG'|'SHORT'>(() => {
+    try {
+      const envSide = (import.meta as any)?.env?.VITE_TRADE_SIDE as 'LONG' | 'SHORT' | undefined
+      if (envSide === 'SHORT') return 'SHORT'
+      const saved = localStorage.getItem('ui_side') as 'LONG' | 'SHORT' | null
+      return saved === 'SHORT' ? 'SHORT' : 'SHORT'
+    } catch { return 'SHORT' }
+  })
   const [defaultTPLevel, setDefaultTPLevel] = useState<'tp1'|'tp2'|'tp3'>('tp2')
   const [defaultAmount, setDefaultAmount] = useState<number>(20)
   const [defaultLeverage, setDefaultLeverage] = useState<number>(15)
