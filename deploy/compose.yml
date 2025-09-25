@@ -1,0 +1,61 @@
+version: "3.9"
+services:
+  trader-backend:
+    image: trader-app:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: trader-backend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=8789
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_ORG_ID=${OPENAI_ORG_ID}
+      - OPENAI_PROJECT=${OPENAI_PROJECT}
+      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS}
+      - TASK_QUEUE=${TASK_QUEUE}
+      - TASK_QUEUE_OPENAI=${TASK_QUEUE_OPENAI}
+      - TASK_QUEUE_BINANCE=${TASK_QUEUE_BINANCE}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8789/api/trading/settings >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  trader-worker:
+    image: trader-app:latest
+    container_name: trader-worker
+    restart: unless-stopped
+    command: ["pm2-runtime", "ecosystem.config.js", "--only", "trader-worker"]
+    environment:
+      - NODE_ENV=production
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_ORG_ID=${OPENAI_ORG_ID}
+      - OPENAI_PROJECT=${OPENAI_PROJECT}
+      - TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS}
+      - TASK_QUEUE=${TASK_QUEUE}
+      - TASK_QUEUE_OPENAI=${TASK_QUEUE_OPENAI}
+      - TASK_QUEUE_BINANCE=${TASK_QUEUE_BINANCE}
+
+  caddy:
+    image: caddy:2
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      trader-backend:
+        condition: service_healthy
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+

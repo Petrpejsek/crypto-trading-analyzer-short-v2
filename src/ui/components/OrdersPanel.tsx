@@ -814,7 +814,28 @@ export const OrdersPanel: React.FC = () => {
           <div style={{ fontSize: 12, opacity: .8, marginTop: 6 }}>No open positions</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginTop: 6 }}>
+            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginTop: 6, tableLayout: 'fixed', whiteSpace: 'nowrap' }}>
+              <colgroup>
+                <col style={{ width: 50 }} />
+                <col style={{ width: 90 }} />
+                <col style={{ width: 70 }} />
+                <col style={{ width: 60 }} />
+                <col style={{ width: 100 }} />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 90 }} />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 60 }} />
+                <col style={{ width: 100 }} />
+                <col style={{ width: 100 }} />
+                <col style={{ width: 100 }} />
+                <col style={{ width: 70 }} />
+                <col style={{ width: 60 }} />
+                <col style={{ width: 110 }} />
+                <col style={{ width: 80 }} />
+                <col style={{ width: 90 }} />
+                <col style={{ width: 90 }} />
+                <col style={{ width: 70 }} />
+              </colgroup>
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left' }}>Symbol</th>
@@ -923,7 +944,28 @@ export const OrdersPanel: React.FC = () => {
           <div style={{ fontSize: 12, opacity: .8, marginTop: 6 }}>No waiting orders</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginTop: 6 }}>
+            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginTop: 6, tableLayout: 'fixed', whiteSpace: 'nowrap' }}>
+              <colgroup>
+                <col style={{ width: 70 }} />   {/* ID */}
+                <col style={{ width: 90 }} />   {/* Symbol */}
+                <col style={{ width: 60 }} />   {/* Side */}
+                <col style={{ width: 70 }} />   {/* Pos */}
+                <col style={{ width: 90 }} />   {/* Type */}
+                <col style={{ width: 120 }} />  {/* Entry Updater */}
+                <col style={{ width: 110 }} />  {/* Qty */}
+                <col style={{ width: 120 }} />  {/* Invested $ */}
+                <col style={{ width: 60 }} />   {/* Lev */}
+                <col style={{ width: 100 }} />  {/* Price */}
+                <col style={{ width: 100 }} />  {/* Stop */}
+                <col style={{ width: 100 }} />  {/* Mark */}
+                <col style={{ width: 70 }} />   {/* Δ% */}
+                <col style={{ width: 60 }} />   {/* TIF */}
+                <col style={{ width: 110 }} />  {/* Flags */}
+                <col style={{ width: 90 }} />   {/* Risk */}
+                <col style={{ width: 90 }} />   {/* Actions */}
+                <col style={{ width: 90 }} />   {/* Updated */}
+                <col style={{ width: 70 }} />   {/* Age */}
+              </colgroup>
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left' }}>ID</th>
@@ -1085,7 +1127,6 @@ export const OrdersPanel: React.FC = () => {
                         return <span style={{ fontSize: 10, color: '#60a5fa' }} title={baseTitle}>🔵 {remainingSec>0?fmt(remainingSec):'Due'}</span>
                       })()}
                     </td>
-                    <td>{(() => { const raw = String(lastRiskLabelBySymbol[o.symbol] || '') || '-'; const norm = raw.toLowerCase(); const pretty = norm.startsWith('ní')||norm==='low'?'Nízké': norm.startsWith('st')||norm==='medium'?'Střední': norm.startsWith('vy')||norm==='high'?'Vysoké': raw; return pretty; })()}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(o.qty, 4)}</td>
                     <td style={{ textAlign: 'right' }}>{(() => {
                       const isEntry = String(o.side).toUpperCase() === 'BUY' && !(o.reduceOnly || o.closePosition)

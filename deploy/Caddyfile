@@ -1,0 +1,19 @@
+enermijo.cz, www.enermijo.cz {
+  encode gzip
+
+  @api path /api/*
+  reverse_proxy @api trader-backend:8789 {
+    header_up Host {host}
+    header_up X-Forwarded-Proto {scheme}
+    header_up X-Real-IP {remote}
+  }
+
+  # Static frontend is served by backend at '/'
+  reverse_proxy trader-backend:8789
+
+  tls {
+    # Automatic Let's Encrypt via Caddy
+  }
+}
+
+

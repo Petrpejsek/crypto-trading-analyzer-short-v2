@@ -1,0 +1,31 @@
+node_modules
+npm-debug.log
+Dockerfile*
+.dockerignore
+
+# Vite/Build
+.vite
+out
+coverage
+dist
+
+# Local env
+.env
+.env*
+*.local
+*.secret
+
+# OS/IDE
+.DS_Store
+.vscode
+.idea
+
+# Runtime state
+runtime
+*.pid
+*.log
+logs*
+
+# Archives/Backups
+*.tar.gz
+backups
