@@ -1093,12 +1093,12 @@ export const OrdersPanel: React.FC = () => {
                         <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 4px', borderRadius: 4, background: '#3b82f6', color: '#fff' }}>🤖 AI</span>
                       ) : null}
                     </td>
-                    <td>{(() => {
+                    <td style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{(() => {
                       const ps = String(o.positionSide||'')
                       if (!ps) return '-'
                       const col = ps==='LONG'?'#16a34a': ps==='SHORT'?'#dc2626': undefined
                       const strat = lastStrategyBySymbol[o.symbol] || strategyFromOrdersBySymbol[o.symbol]
-                      const suf = strat === 'aggressive' ? ' A' : (strat === 'conservative' ? ' C' : '')
+                      const suf = strat === 'aggressive' ? '\u00A0A' : (strat === 'conservative' ? '\u00A0C' : '')
                       return <span style={{ color: col }}>{ps}{suf}</span>
                     })()}</td>
                     <td>{(() => {
@@ -1127,8 +1127,8 @@ export const OrdersPanel: React.FC = () => {
                         return <span style={{ fontSize: 10, color: '#60a5fa' }} title={baseTitle}>🔵 {remainingSec>0?fmt(remainingSec):'Due'}</span>
                       })()}
                     </td>
-                    <td style={{ textAlign: 'right' }}>{fmtNum(o.qty, 4)}</td>
-                    <td style={{ textAlign: 'right' }}>{(() => {
+                    <td style={{ textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fmtNum(o.qty, 4)}</td>
+                    <td style={{ textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(() => {
                       const isEntry = String(o.side).toUpperCase() === 'BUY' && !(o.reduceOnly || o.closePosition)
                       if (!isEntry) return '-'
                       // Use investedUsd from backend if available
