@@ -136,11 +136,19 @@ export const OrdersPanel: React.FC = () => {
       const cons = await fetchJson(`/api/orders_console?ts=${Date.now()}${force}`, { timeoutMs: 600000 })
       if (!cons.ok) {
         const code = cons.status === 401 && cons.json?.error === 'missing_binance_keys' ? 'missing_binance_keys' : (cons.json?.error || `HTTP ${cons.status}`)
-        setOrders([]); setWaiting([]); setPositions([])
+        // Don't clear existing positions on rate limit errors - keep showing last data
+        if (code !== 'rate_limited') {
+          setOrders([]); setWaiting([]); setPositions([])
+        }
+        // Try to preserve binance usage badge if server provided it even on error
+        try {
+          const bu = (cons.json?.binance_usage && typeof cons.json.binance_usage === 'object') ? cons.json.binance_usage : null
+          if (bu) setBinanceUsage(bu)
+        } catch {}
         setLastRefresh(new Date().toISOString())
         setLoading(false)
-        // Nahlásíme pouze missing keys, ostatní (WS not ready) potichu ignorujeme
-        if (code === 'missing_binance_keys') throw new Error(`orders_console:${code}`)
+        // Show rate limit errors, ignore others
+        if (code === 'missing_binance_keys' || code === 'rate_limited') throw new Error(`orders_console:${code}`)
         return
       }
       const json = cons.json || {}
@@ -442,14 +450,14 @@ export const OrdersPanel: React.FC = () => {
   const isStrategyUpdaterOrder = (o: OpenOrderUI): boolean => {
     const clientId = String(o?.clientOrderId || '')
     // Recognize ONLY Strategy Updater exits: SL updates and TP splits (tp1/tp2/tp3)
-    return /^(x_sl_upd_|x_tp1_|x_tp2_|x_tp3_)/.test(clientId)
+    return /^(sv2_x_sl_upd_|sv2_x_tp1_|sv2_x_tp2_|sv2_x_tp3_)/.test(clientId)
   }
 
   // Entry Updater: highlight ENTRY orders that were repositioned by Entry Updater (clientOrderId prefix "eu_")
   const isEntryUpdaterOrder = (o: OpenOrderUI): boolean => {
     try {
       const clientId = String(o?.clientOrderId || '')
-      if (!/^eu_/.test(clientId)) return false
+      if (!/^sv2_eu_/.test(clientId)) return false
       const sideBuy = String(o?.side || '').toUpperCase() === 'BUY'
       const isEntry = sideBuy && !(o?.reduceOnly || o?.closePosition)
       return isEntry
@@ -814,28 +822,7 @@ export const OrdersPanel: React.FC = () => {
           <div style={{ fontSize: 12, opacity: .8, marginTop: 6 }}>No open positions</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginTop: 6, tableLayout: 'fixed', whiteSpace: 'nowrap' }}>
-              <colgroup>
-                <col style={{ width: 50 }} />
-                <col style={{ width: 90 }} />
-                <col style={{ width: 70 }} />
-                <col style={{ width: 60 }} />
-                <col style={{ width: 100 }} />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 90 }} />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 60 }} />
-                <col style={{ width: 100 }} />
-                <col style={{ width: 100 }} />
-                <col style={{ width: 100 }} />
-                <col style={{ width: 70 }} />
-                <col style={{ width: 60 }} />
-                <col style={{ width: 110 }} />
-                <col style={{ width: 80 }} />
-                <col style={{ width: 90 }} />
-                <col style={{ width: 90 }} />
-                <col style={{ width: 70 }} />
-              </colgroup>
+            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginTop: 6 }}>
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left' }}>Symbol</th>
@@ -944,28 +931,7 @@ export const OrdersPanel: React.FC = () => {
           <div style={{ fontSize: 12, opacity: .8, marginTop: 6 }}>No waiting orders</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginTop: 6, tableLayout: 'fixed', whiteSpace: 'nowrap' }}>
-              <colgroup>
-                <col style={{ width: 70 }} />   {/* ID */}
-                <col style={{ width: 90 }} />   {/* Symbol */}
-                <col style={{ width: 60 }} />   {/* Side */}
-                <col style={{ width: 70 }} />   {/* Pos */}
-                <col style={{ width: 90 }} />   {/* Type */}
-                <col style={{ width: 120 }} />  {/* Entry Updater */}
-                <col style={{ width: 110 }} />  {/* Qty */}
-                <col style={{ width: 120 }} />  {/* Invested $ */}
-                <col style={{ width: 60 }} />   {/* Lev */}
-                <col style={{ width: 100 }} />  {/* Price */}
-                <col style={{ width: 100 }} />  {/* Stop */}
-                <col style={{ width: 100 }} />  {/* Mark */}
-                <col style={{ width: 70 }} />   {/* Δ% */}
-                <col style={{ width: 60 }} />   {/* TIF */}
-                <col style={{ width: 110 }} />  {/* Flags */}
-                <col style={{ width: 90 }} />   {/* Risk */}
-                <col style={{ width: 90 }} />   {/* Actions */}
-                <col style={{ width: 90 }} />   {/* Updated */}
-                <col style={{ width: 70 }} />   {/* Age */}
-              </colgroup>
+            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginTop: 6 }}>
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left' }}>ID</th>
@@ -1127,8 +1093,8 @@ export const OrdersPanel: React.FC = () => {
                         return <span style={{ fontSize: 10, color: '#60a5fa' }} title={baseTitle}>🔵 {remainingSec>0?fmt(remainingSec):'Due'}</span>
                       })()}
                     </td>
-                    <td style={{ textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fmtNum(o.qty, 4)}</td>
-                    <td style={{ textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis' }}>{(() => {
+                    <td style={{ textAlign: 'right' }}>{fmtNum(o.qty, 4)}</td>
+                    <td style={{ textAlign: 'right' }}>{(() => {
                       const isEntry = String(o.side).toUpperCase() === 'BUY' && !(o.reduceOnly || o.closePosition)
                       if (!isEntry) return '-'
                       // Use investedUsd from backend if available

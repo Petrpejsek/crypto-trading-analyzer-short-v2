@@ -56,7 +56,7 @@ export async function executeStrategyUpdate(
       const openOrders = await api.getOpenOrders(symbol)
       const entryStillOpen = (Array.isArray(openOrders) ? openOrders : []).some((order: any) => {
         const id = String(order?.clientOrderId || '')
-        const isInternalEntry = /^e_l_/.test(id)
+        const isInternalEntry = /^sv2_e_l_/.test(id)
         const isBuyLimit = String(order?.side || '').toUpperCase() === 'BUY' && String(order?.type || '').toUpperCase() === 'LIMIT'
         const isExitFlag = Boolean(order?.reduceOnly || order?.closePosition)
         return isInternalEntry && isBuyLimit && !isExitFlag

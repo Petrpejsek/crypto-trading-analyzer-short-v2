@@ -26,6 +26,7 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
   let ws: WebSocket | null = null
   let refreshTimer: NodeJS.Timeout | null = null
 
+  // Initial snapshot (one-shot with controlled retry) – not caching, authoritative from Binance
   async function rehydratePositionsOnce(): Promise<void> {
     try {
       const api = getBinanceAPI() as any
@@ -55,7 +56,14 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
         try { console.info('[USERDATA_WS_REHYDRATE_POS]', { count: positions.size }) } catch {}
       }
     } catch (e) {
-      try { console.error('[USERDATA_WS_REHYDRATE_POS_ERR]', (e as any)?.message || e) } catch {}
+      try {
+        const msg = String((e as any)?.message || e || '')
+        console.error('[USERDATA_WS_REHYDRATE_POS_ERR]', msg)
+        // Controlled retry on rate limit/ban
+        const m = msg.match(/banned\s+until\s+(\d{10,})/i)
+        const waitMs = m && m[1] ? Math.max(5_000, Number(m[1]) - Date.now()) : 60_000
+        setTimeout(() => { rehydratePositionsOnce().catch(()=>{}) }, waitMs)
+      } catch {}
     }
   }
 
@@ -104,7 +112,13 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
         try { console.info('[USERDATA_WS_REHYDRATE_ORDERS]', { count: openOrdersById.size }) } catch {}
       }
     } catch (e) {
-      try { console.error('[USERDATA_WS_REHYDRATE_ORDERS_ERR]', (e as any)?.message || e) } catch {}
+      try {
+        const msg = String((e as any)?.message || e || '')
+        console.error('[USERDATA_WS_REHYDRATE_ORDERS_ERR]', msg)
+        const m = msg.match(/banned\s+until\s+(\d{10,})/i)
+        const waitMs = m && m[1] ? Math.max(5_000, Number(m[1]) - Date.now()) : 60_000
+        setTimeout(() => { rehydrateOpenOrdersOnce().catch(()=>{}) }, waitMs)
+      } catch {}
     }
   }
 

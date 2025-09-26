@@ -6,8 +6,12 @@ export async function getStrategyUpdaterStatus(symbol?: string): Promise<{
   entries: StrategyUpdaterEntry[]
 }> {
   try {
-    // Check if strategy updater is enabled
-    const enabled = process.env.STRATEGY_UPDATER_ENABLED === '1' || process.env.STRATEGY_UPDATER_ENABLED === 'true'
+    // Check if strategy updater is enabled (same gate as trigger)
+    let enabled = true
+    try {
+      const { isStrategyUpdaterEnabled } = await import('./trigger')
+      enabled = isStrategyUpdaterEnabled()
+    } catch {}
     
     // Get all entries
     const allEntries = getStrategyUpdaterList()
@@ -36,7 +40,7 @@ export async function hasInternalEntryOrders(symbol: string, orders: any[]): Pro
     // Check for internal entry orders (e_l_ prefix) for this symbol
     const hasInternal = orders.some((order: any) => {
       const clientId = String(order?.clientOrderId || '')
-      const isInternal = /^e_l_/.test(clientId)
+      const isInternal = /^sv2_e_l_/.test(clientId)
       const isEntry = String(order?.side) === 'BUY' && 
                      String(order?.type) === 'LIMIT' && 
                      !(order?.reduceOnly || order?.closePosition)

@@ -29,8 +29,8 @@ export function resolveRange(preset: RangePreset): { startTime: number; endTime:
 
 function classifyProfile(clientOrderId: string | null): Profile {
 	if (!clientOrderId) return 'unknown'
-	if (/^e_l_/i.test(clientOrderId)) return 'conservative'
-	if (/^(e_stl_|e_stm_|e_m_)/i.test(clientOrderId)) return 'aggressive'
+	if (/^sv2_e_l_/i.test(clientOrderId)) return 'conservative'
+	if (/^(sv2_e_stl_|sv2_e_stm_|sv2_e_m_)/i.test(clientOrderId)) return 'aggressive'
 	return 'unknown'
 }
 

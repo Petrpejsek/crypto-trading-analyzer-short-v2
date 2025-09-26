@@ -109,12 +109,13 @@ export function scheduleStrategyUpdate(
   entryPrice: number,
   positionSize: number,
   currentSL: number | null,
-  currentTP: number | null
+  currentTP: number | null,
+  options?: { initialDelayMs?: number }
 ): void {
   try {
     const now = new Date()
-    // First-run policy: delay first run by 2 minutes (no immediate trigger on open)
-    const initialDelayMs = INITIAL_DELAY_MS
+    // First-run policy: default to 2 minutes unless caller requests otherwise
+    const initialDelayMs = Number(options?.initialDelayMs ?? INITIAL_DELAY_MS)
     const triggerAt = new Date(now.getTime() + initialDelayMs)
     
     strategyUpdaterBySymbol[symbol] = {

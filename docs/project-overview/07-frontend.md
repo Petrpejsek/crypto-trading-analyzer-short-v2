@@ -1,8 +1,8 @@
 ## Frontend (React + Vite)
 
 ### Dev/Build
-- Dev: `npm run dev` (Vite `:4000`) – proxy `/api`, `/__proxy` → `:8788`
-- Build: `npm run build` → `dist/` – server poté servíruje statiku s REST API na stejné doméně
+- Dev: `FRONTEND_PORT=4302 BACKEND_PORT=8888 ./dev.sh restart` (Vite `:4302`) – proxy `/api`, `/__proxy` → `:8888`
+- Build: `npm run build` → `dist/` – backend na `:8888` poté servíruje statiku s REST API na stejné doméně
 
 ### Hlavní komponenty
 - `src/ui/App.tsx` – orchestrace pipeline (snapshot → features → decision → hot screener → entry → place orders)

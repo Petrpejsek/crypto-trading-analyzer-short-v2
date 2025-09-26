@@ -1206,25 +1206,13 @@ export const App: React.FC = () => {
           if (rp === 'aggressive' || rp === 'conservative') return rp as 'conservative' | 'aggressive'
           return defaultPreset
         })()
-        const plan = prof === 'conservative' ? strategy.conservative : strategy.aggressive
-        // Zvol validní TP level podle dostupnosti hodnot v plánu (UI select je disabled)
-        const pickDefaultTpLevel = (): 'tp1'|'tp2'|'tp3' => {
-          const tp3 = Number((plan as any)?.tp3)
-          const tp2 = Number((plan as any)?.tp2)
-          const tp1 = Number((plan as any)?.tp1)
-          if (Number.isFinite(tp3) && tp3 > 0) return 'tp3'
-          if (Number.isFinite(tp2) && tp2 > 0) return 'tp2'
-          if (Number.isFinite(tp1) && tp1 > 0) return 'tp1'
-          return defaultTPLevel
-        }
-        const tpLevelSafe = pickDefaultTpLevel()
-
+        // TP level must strictly follow header preselection; no auto-picking or fallbacks
         return {
           symbol: strategy.symbol,
           include: true,
           side: defaultSide,
           strategy: prof,
-          tpLevel: tpLevelSafe,
+          tpLevel: defaultTPLevel,
           orderType: prof === 'conservative' ? 'limit' : 'stop_limit',
           amount: defaultAmount,
           leverage: defaultLeverage,
@@ -1263,6 +1251,31 @@ export const App: React.FC = () => {
         : control
     ))
   }
+
+  // Keep per-coin tpLevel in sync with header selection (pre-run preference)
+  useEffect(() => {
+    // Do not mutate while placing orders
+    if (placingOrders) return
+    setCoinControls(prev => prev.map(c => ({ ...c, tpLevel: defaultTPLevel })))
+  }, [defaultTPLevel, placingOrders])
+
+  // Sync invested amount with header selection prior to placing orders
+  useEffect(() => {
+    if (placingOrders) return
+    setCoinControls(prev => prev.map(c => ({ ...c, amount: defaultAmount })))
+  }, [defaultAmount, placingOrders])
+
+  // Sync leverage with header selection prior to placing orders
+  useEffect(() => {
+    if (placingOrders) return
+    setCoinControls(prev => prev.map(c => ({ ...c, leverage: defaultLeverage })))
+  }, [defaultLeverage, placingOrders])
+
+  // Sync side with header selection prior to placing orders
+  useEffect(() => {
+    if (placingOrders) return
+    setCoinControls(prev => prev.map(c => ({ ...c, side: defaultSide })))
+  }, [defaultSide, placingOrders])
 
   const prepareOrders = async () => {
     try {
@@ -1717,11 +1730,13 @@ export const App: React.FC = () => {
           )}
         </div>
       )}
-      <div className="card" style={{ marginTop: 8, padding: 12 }}>
-        <strong>Active Entries</strong>
-        <div style={{ height: 6 }} />
-        <ActiveEntriesPanel />
-      </div>
+      {false && (
+        <div className="card" style={{ marginTop: 8, padding: 12 }}>
+          <strong>Active Entries</strong>
+          <div style={{ height: 6 }} />
+          <ActiveEntriesPanel />
+        </div>
+      )}
       
       {showReport ? (
         <>

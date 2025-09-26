@@ -34,10 +34,14 @@ function detectMissingStrategyUpdaters(orders: any[], positions: any[]): void {
       try {
         const symbol = String(position?.symbol || '')
         const amt = Number(position?.positionAmt || position?.size || 0)
-        
-        if (symbol && Math.abs(amt) > 0 && !existingEntries.has(symbol)) {
-          // Attach Strategy Updater to ANY active position (no fallback logic)
+        const isOpen = Math.abs(amt) > 0
+        const isShort = amt < 0
+        // Pouze SHORT pozice jsou interní – naplánuj SU
+        if (symbol && isOpen && isShort && !existingEntries.has(symbol)) {
           startStrategyUpdaterForPosition(symbol, position, orders)
+        } else if (symbol && isOpen && !isShort && existingEntries.has(symbol)) {
+          // LONG = external: pokud by existoval záznam, ukliď jej
+          try { const { cleanupStrategyUpdaterForSymbol } = require('./registry'); cleanupStrategyUpdaterForSymbol(symbol) } catch {}
         }
       } catch {}
     }
@@ -54,27 +58,21 @@ function handlePotentialInternalFill(
   positions: any[]
 ): void {
   try {
-    // Check if this was an internal entry order that got filled
-    // Internal entry orders should now be gone from orders list, but position should exist
-    
-    const hasInternalEntry = orders.some((order: any) => {
-      const clientId = String(order?.clientOrderId || '')
-      const isInternal = /^e_l_/.test(clientId)
-      const isEntry = String(order?.side) === 'BUY' && String(order?.type) === 'LIMIT' && 
-                     !(order?.reduceOnly || order?.closePosition)
-      return isInternal && isEntry && String(order?.symbol) === symbol
-    })
-
-    // Find current position for this symbol
+    // Ignoruj prefixy, rozlišíme podle strany pozice
     const position = positions.find((pos: any) => {
       const sym = String(pos?.symbol || '')
       const amt = Number(pos?.positionAmt || pos?.size || 0)
       return sym === symbol && Math.abs(amt) > 0
     })
 
-    if (position && !hasInternalEntry) {
-      // Position exists but no internal entry order - likely just filled!
-      startStrategyUpdaterForPosition(symbol, position, orders)
+    if (!position) return
+
+    const amt = Number(position?.positionAmt || position?.size || 0)
+    const side: 'LONG' | 'SHORT' = amt > 0 ? 'LONG' : 'SHORT'
+    if (side === 'SHORT') startStrategyUpdaterForPosition(symbol, position, orders)
+    else {
+      try { const { cleanupStrategyUpdaterForSymbol } = require('./registry'); cleanupStrategyUpdaterForSymbol(symbol) } catch {}
+      try { console.info('[STRATEGY_UPDATER_EXTERNAL_LONG]', { symbol }) } catch {}
     }
 
   } catch (error) {
@@ -89,7 +87,7 @@ function handlePotentialInternalFill(
 // Removed REST polling backup - WebSocket detection is sufficient
 
 // Start strategy updater timer for a position
-function startStrategyUpdaterForPosition(symbol: string, position: any, orders: any[]): void {
+function startStrategyUpdaterForPosition(symbol: string, position: any, orders: any[], options?: { initialDelayMs?: number }): void {
   try {
     const positionAmt = Number(position?.positionAmt || position?.size || 0)
     const entryPrice = Number(position?.entryPrice || position?.averagePrice || 0)
@@ -127,8 +125,8 @@ function startStrategyUpdaterForPosition(symbol: string, position: any, orders: 
       } catch {}
     }
 
-    // Schedule the strategy update
-    scheduleStrategyUpdate(symbol, side, entryPrice, size, currentSL, currentTP)
+    // Schedule the strategy update (caller controls initial delay policy)
+    scheduleStrategyUpdate(symbol, side, entryPrice, size, currentSL, currentTP, options)
     
     console.info('[STRATEGY_UPDATER_TRIGGERED]', {
       symbol,

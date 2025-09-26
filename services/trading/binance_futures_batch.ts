@@ -299,7 +299,8 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
   const api = getBinanceAPI()
   const results: any[] = []
   const priceLogs: any[] = []
-  const makeId = (p: string) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  const PROJECT_CID_PREFIX = 'sv2'
+  const makeId = (p: string) => `${PROJECT_CID_PREFIX}_${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 
   const tpMode = ((tradingCfg as any)?.TP_MODE === 'LIMIT_ON_FILL') ? 'LIMIT_ON_FILL' as const : 'MARKET_PREENTRY' as const
   

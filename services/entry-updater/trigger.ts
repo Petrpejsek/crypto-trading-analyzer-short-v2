@@ -141,7 +141,7 @@ export async function processDueEntryUpdates(): Promise<void> {
           try { await api.cancelOrder(rec.symbol, rec.orderId) } catch {}
           const price = Number(out.new_plan.entry.price || 0)
           const qty = Number(order?.origQty || order?.origQuantity || order?.quantity || 0)
-          const cid = `eu_${Date.now()}_${rec.symbol.toLowerCase()}`
+          const cid = `sv2_eu_${Date.now()}_${rec.symbol.toLowerCase()}`
           const placed = await api.placeOrder({ symbol: rec.symbol, side: 'BUY', type: 'LIMIT', price, quantity: qty, timeInForce: 'GTC', newClientOrderId: cid })
           markTouchedRecently(rec.orderId)
           try { untrackEntryOrder(rec.orderId) } catch {}

@@ -167,7 +167,13 @@ async function sweepStaleOrdersOnce(): Promise<number> {
     const raw = await fetchAllOpenOrders()
     // Positions snapshot pro bezpečnou detekci osiřelých exitů
     let positionsForSweep: any[] = []
-    try { positionsForSweep = await fetchPositions() } catch {}
+    try { 
+      positionsForSweep = await fetchPositions() 
+    } catch {
+      // Skip sweeper during rate limits - don't use fallbacks
+      console.info('[SWEEPER_SKIP_RATE_LIMIT]')
+      return
+    }
     const posSizeBySym = new Map<string, number>()
     try {
       for (const p of (Array.isArray(positionsForSweep) ? positionsForSweep : [])) {
@@ -376,7 +382,16 @@ async function slProtectionMonitor(): Promise<void> {
     if (!hasRealBinanceKeysGlobal()) return
     console.info('[SL_MONITOR_PASS]')
     
-    const [positions, orders] = await Promise.all([fetchPositions(), fetchAllOpenOrders()])
+    let positions: any[] = []
+    let orders: any[] = []
+    try {
+      [positions, orders] = await Promise.all([fetchPositions(), fetchAllOpenOrders()])
+    } catch (e) {
+      console.error('[SL_MONITOR_API_ERR]', (e as any)?.message)
+      // Skip SL monitor during rate limits - don't use fallbacks
+      console.info('[SL_MONITOR_SKIP_RATE_LIMIT]')
+      return
+    }
     const posList = Array.isArray(positions) ? positions : []
     const ordersList = Array.isArray(orders) ? orders : []
     const api = getBinanceAPI() as any
@@ -1091,9 +1106,12 @@ try {
       // Trigger immediate waiting TP processing on fill without waiting for HTTP poll
       try {
         if (evt.type === 'filled' && evt.symbol) {
-          const api = getBinanceAPI() as any
-          const positions = await api.getPositions()
-          waitingTpProcessPassFromPositions(positions).catch(()=>{})
+          const { getPositionsInMemory, isUserDataReady } = await import('../services/exchange/binance/userDataWs')
+          if (!isUserDataReady('positions')) { /* WS not ready – skip without fallback */ }
+          else {
+            const positions = getPositionsInMemory()
+            waitingTpProcessPassFromPositions(positions).catch(()=>{})
+          }
         }
       } catch {}
       // Strategy updater: trigger pouze na WebSocket filled events (izolovaně od waiting TP systému)
@@ -1102,17 +1120,33 @@ try {
           // Malé zpoždění aby se WebSocket data mohla aktualizovat
           setTimeout(async () => {
             try {
-              const api = getBinanceAPI() as any
-              const [orders, positions] = await Promise.all([
-                api.getOpenOrders(),
-                api.getPositions()
-              ])
+              const { getOpenOrdersInMemory, getPositionsInMemory, isUserDataReady } = await import('../services/exchange/binance/userDataWs')
+              if (!isUserDataReady('orders') || !isUserDataReady('positions')) {
+                // WS snapshot není připraven – nic nespouštěj (bez fallbacku)
+                return
+              }
+              const orders = getOpenOrdersInMemory()
+              const positions = getPositionsInMemory()
               const { detectInternalPositionOpened } = await import('../services/strategy-updater/trigger')
               detectInternalPositionOpened(orders, positions, {
                 type: evt.type,
                 symbol: String(evt.symbol || ''),
                 orderId: Number(evt.orderId) || 0
               })
+              // Fresh fill: schedule first SU pass after 2 minutes (default)
+              try {
+                const symbol = String(evt.symbol || '')
+                if (symbol) {
+                  const { getStrategyUpdaterList, rescheduleStrategyUpdate } = await import('../services/strategy-updater/registry')
+                  const exists = (getStrategyUpdaterList() || []).some(e => e.symbol === symbol)
+                  if (!exists) {
+                    // If entry not yet present (race), the schedule call in trigger will create with default 2min
+                  } else {
+                    // If present due to immediate snapshot path, push it to default 2min to respect fresh fill policy
+                    rescheduleStrategyUpdate(symbol, 2 * 60 * 1000)
+                  }
+                }
+              } catch {}
               // Profit Taker disabled when Top-Up Executor is active
               try {
                 const { getTopUpExecutorStatus } = await import('../services/top-up-executor/trigger')
@@ -1306,9 +1340,37 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: true, pending_cancel_age_min: __pendingCancelAgeMin }))
       } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+        try {
+          // Attach current Binance usage snapshot even on error so UI can show badge
+          const limits = getLimitsSnapshot()
+          const WEIGHT_LIMIT = (() => {
+            const cfg = Number((tradingCfg as any)?.BINANCE_WEIGHT_LIMIT_1M)
+            if (Number.isFinite(cfg) && cfg > 0) return Math.floor(cfg)
+            const env = Number(process.env.BINANCE_WEIGHT_LIMIT_1M)
+            if (Number.isFinite(env) && env > 0) return Math.floor(env)
+            return 1200
+          })()
+          const wUsedNum = Number(limits?.maxUsedWeight1mLast60s ?? limits?.lastUsedWeight1m)
+          const pct = Number.isFinite(wUsedNum) && wUsedNum >= 0 ? Math.min(999, Math.round((wUsedNum / WEIGHT_LIMIT) * 100)) : null
+          const binance_usage = {
+            weight1m_used: Number.isFinite(wUsedNum) ? wUsedNum : null,
+            weight1m_limit: WEIGHT_LIMIT,
+            orderCount10s: limits?.lastOrderCount10s ?? null,
+            orderCount1m: limits?.lastOrderCount1m ?? null,
+            percent: pct,
+            callRate: limits?.callRate ?? null,
+            risk: limits?.risk ?? 'normal',
+            backoff_active: Boolean(limits?.backoff),
+            backoff_remaining_sec: limits?.backoff?.remainingSec ?? null
+          }
+          res.statusCode = 500
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown', binance_usage }))
+        } catch {
+          res.statusCode = 500
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+        }
       }
       return
     }
@@ -1354,9 +1416,47 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: true, result: r }))
       } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+        try {
+          const msg = String(e?.message || 'binance_error')
+          const isRateLimit = /code\":-?1003|too\s+many\s+requests|status:\s*418|banned\s+until/i.test(msg)
+          const limits = getLimitsSnapshot()
+          const WEIGHT_LIMIT = (() => {
+            const cfg = Number((tradingCfg as any)?.BINANCE_WEIGHT_LIMIT_1M)
+            if (Number.isFinite(cfg) && cfg > 0) return Math.floor(cfg)
+            const env = Number(process.env.BINANCE_WEIGHT_LIMIT_1M)
+            if (Number.isFinite(env) && env > 0) return Math.floor(env)
+            return 1200
+          })()
+          const wUsedNum = Number(limits?.maxUsedWeight1mLast60s ?? limits?.lastUsedWeight1m)
+          const pct = Number.isFinite(wUsedNum) && wUsedNum >= 0 ? Math.min(999, Math.round((wUsedNum / WEIGHT_LIMIT) * 100)) : null
+          const binance_usage = {
+            weight1m_used: Number.isFinite(wUsedNum) ? wUsedNum : null,
+            weight1m_limit: WEIGHT_LIMIT,
+            orderCount10s: limits?.lastOrderCount10s ?? null,
+            orderCount1m: limits?.lastOrderCount1m ?? null,
+            percent: pct,
+            callRate: limits?.callRate ?? null,
+            risk: limits?.risk ?? 'normal',
+            backoff_active: Boolean(limits?.backoff),
+            backoff_remaining_sec: limits?.backoff?.remainingSec ?? null
+          }
+          res.statusCode = isRateLimit ? 429 : 500
+          try {
+            if (isRateLimit) {
+              const untilMs = Number(limits?.backoff?.untilMs ?? __binanceBackoffUntilMs)
+              if (Number.isFinite(untilMs) && untilMs > Date.now()) {
+                const waitSec = Math.max(1, Math.ceil((untilMs - Date.now()) / 1000))
+                res.setHeader('Retry-After', String(waitSec))
+              }
+            }
+          } catch {}
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: isRateLimit ? 'rate_limited' : msg, binance_usage }))
+        } catch {
+          res.statusCode = 500
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+        }
       }
       return
     }
@@ -1415,13 +1515,9 @@ const server = http.createServer(async (req, res) => {
           isExternal: ((): boolean => {
             try {
               const idStr = String((o as any)?.C || (o as any)?.c || (o as any)?.clientOrderId || '')
-              // Internal if matches any internal prefixes: entries (e_l_/e_stl_/e_stm_/e_m_), SL (x_sl_), TP (x_tp_* variants)
-              const idIsInternal = idStr ? /^(e_l_|e_stl_|e_stm_|e_m_|x_sl_|x_tp_)/.test(idStr) : false
-              if (idIsInternal) return false
-              const n = Number(o?.orderId ?? 0)
-              const { isStrategyOrderId } = require('../services/strategy-updater/registry')
-              if (Number.isFinite(n) && isStrategyOrderId(n)) return false
-              return true
+              // Pravidlo: VŠECHNY naše interní ordery MUSÍ mít prefix 'sv2_'
+              // Cokoliv bez 'sv2_' je external.
+              return !idStr.startsWith('sv2_')
             } catch { return true }
           })(),
           createdAt: (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })(),
@@ -1597,18 +1693,11 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store')
       try {
         if (!hasRealBinanceKeys()) { res.statusCode = 403; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_binance_keys' })); return }
-        // PERMANENT FIX: Use REST API for positions (WebSocket unreliable)
-        let positionsRaw: any[] = []
-        let ordersRaw = getOpenOrdersInMemory()
-        try {
-          positionsRaw = await fetchPositions() // Always use REST API
-          console.info('[POSITIONS_REST_API]', { count: positionsRaw.length })
-        } catch (e) {
-          console.error('[POSITIONS_REST_API_ERR]', (e as any)?.message)
-          positionsRaw = [] // Fail safe
-        }
+        // WS-only positions to avoid REST rate limits
         const ordersReady = isUserDataReady('orders')
         const positionsReady = isUserDataReady('positions')
+        const positionsRaw: any[] = getPositionsInMemory()
+        let ordersRaw = getOpenOrdersInMemory()
         // Define nowIso early; used by multiple blocks below
         const nowIso = new Date().toISOString()
         // Strict mode: žádné REST seedování – pouze aktuální WS data
@@ -2107,7 +2196,7 @@ const server = http.createServer(async (req, res) => {
             const maxParallel = 3
             for (let i = 0; i < toCreate.length; i += maxParallel) {
               const batch = toCreate.slice(i, i + maxParallel)
-              await Promise.allSettled(batch.map(x => api.placeOrder({ symbol: x.symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(x.stopPrice), closePosition: true, workingType: 'MARK_PRICE', newClientOrderId: `x_sl_auto_${Math.random().toString(36).slice(2,7)}`, newOrderRespType: 'RESULT' } as any)))
+              await Promise.allSettled(batch.map(x => api.placeOrder({ symbol: x.symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(x.stopPrice), closePosition: true, workingType: 'MARK_PRICE', newClientOrderId: makeId('x_sl_auto'), newOrderRespType: 'RESULT' } as any)))
             }
           }
         } catch {}
@@ -2286,7 +2375,17 @@ const server = http.createServer(async (req, res) => {
             const isExternal = (() => {
               try {
                 const id = String(o.clientOrderId || '')
-                return id ? !/^(e_l_|e_stl_|e_stm_|e_m_|x_sl_|x_tp_)/.test(id) : true
+                const side = String(o.side || '').toUpperCase()
+                const reduceOnly = Boolean(o.reduceOnly || o.closePosition)
+                const posSide = String((o as any)?.positionSide || '').toUpperCase()
+                // Internal only if our project prefix 'sv2_' is present
+                const isOur = id.startsWith('sv2_')
+                if (!isOur) return true
+                const isExitInternal = /^(sv2_x_sl_|sv2_x_tp_)/.test(id)
+                const hasEntryPrefix = /^(sv2_e_l_|sv2_e_stl_|sv2_e_stm_|sv2_e_m_)/.test(id)
+                const isShortContext = posSide ? (posSide === 'SHORT') : true
+                const isShortEntry = hasEntryPrefix && isShortContext && side === 'SELL' && !reduceOnly
+                return !(isExitInternal || isShortEntry)
               } catch { return true }
             })()
             return { ...o, leverage, investedUsd, isExternal }
@@ -2379,9 +2478,9 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store')
       const t0 = performance.now()
       try {
-        // universeStrategy: volume (default) | gainers via query ?universe=gainers
+        // universeStrategy: volume (default) | gainers | mix via query ?universe=...
         const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
-        const universeStrategy = uniParam === 'gainers' ? 'gainers' : 'volume'
+        const universeStrategy = uniParam === 'gainers' ? 'gainers' : (uniParam === 'mix' ? 'mix' : 'volume')
         const fresh = String(url.searchParams.get('fresh') || '1') === '1'
         const topN = Number(url.searchParams.get('topN') || '')
         // Persist poslední UI snapshot kritéria pro background autopilot
@@ -2426,7 +2525,7 @@ const server = http.createServer(async (req, res) => {
       const pro = url.pathname === '/api/snapshot_pro'
       try {
         const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
-        const universeStrategy = uniParam === 'gainers' ? 'gainers' : 'volume'
+        const universeStrategy = uniParam === 'gainers' ? 'gainers' : (uniParam === 'mix' ? 'mix' : 'volume')
         const fresh = String(url.searchParams.get('fresh') || '1') === '1'
         const topN = Number(url.searchParams.get('topN') || '')
         // If a symbol is requested, force-include it in the universe build so it can't be dropped
@@ -2717,7 +2816,7 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store')
       try {
         const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
-        const universeStrategy = uniParam === 'gainers' ? 'gainers' : 'volume'
+        const universeStrategy = uniParam === 'gainers' ? 'gainers' : (uniParam === 'mix' ? 'mix' : 'volume')
         const topN = Number(url.searchParams.get('topN') || '')
         const fresh = String(url.searchParams.get('fresh') || '1') === '1'
         const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh })
@@ -2871,7 +2970,7 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store')
       try {
         const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
-        const universeStrategy = uniParam === 'gainers' ? 'gainers' : 'volume'
+        const universeStrategy = uniParam === 'gainers' ? 'gainers' : (uniParam === 'mix' ? 'mix' : 'volume')
         const topN = Number(url.searchParams.get('topN') || '')
         // Retry wrapper pro dočasné chyby (Abort/timeout)
         const retry = async <T>(fn: ()=>Promise<T>, attempts=2): Promise<T> => {
@@ -2987,14 +3086,61 @@ const server = http.createServer(async (req, res) => {
           })
         } catch {}
         const name = String(e?.name||'').toLowerCase()
-        const msg = String(e?.message||'').toLowerCase()
+        const msgRaw = String(e?.message||'')
+        const msg = msgRaw.toLowerCase()
         const abortLike = name.includes('abort') || msg.includes('abort') || msg.includes('timeout')
+        // Normalize known Binance RL signatures including plain HTTP 418 text
+        const isRateLimit = /code\":-?1003|too\s+many\s+requests|status:\s*418|banned\s+until|http\s*418\b/i.test(msgRaw)
         // For universe incomplete we return 200 with partial: true
-        const isUniverseIncomplete = /universe_incomplete|universe\s*incomplete/i.test(String(e?.message||'')) || String((e as any)?.stage||'') === 'universe_incomplete'
-        res.statusCode = isUniverseIncomplete ? 200 : (abortLike ? 503 : 500)
-        if (abortLike) res.setHeader('Retry-After', '1')
+        const isUniverseIncomplete = /universe_incomplete|universe\s*incomplete/i.test(msgRaw) || String((e as any)?.stage||'') === 'universe_incomplete'
+
+        // Attach Binance usage snapshot for rate limit diagnostics
+        let binance_usage: any = undefined
+        try {
+          const limits = getLimitsSnapshot()
+          const WEIGHT_LIMIT = (() => {
+            const cfg = Number((tradingCfg as any)?.BINANCE_WEIGHT_LIMIT_1M)
+            if (Number.isFinite(cfg) && cfg > 0) return Math.floor(cfg)
+            const env = Number(process.env.BINANCE_WEIGHT_LIMIT_1M)
+            if (Number.isFinite(env) && env > 0) return Math.floor(env)
+            return 1200
+          })()
+          const wUsedNum = Number(limits?.maxUsedWeight1mLast60s ?? limits?.lastUsedWeight1m)
+          const pct = Number.isFinite(wUsedNum) && wUsedNum >= 0 ? Math.min(999, Math.round((wUsedNum / WEIGHT_LIMIT) * 100)) : null
+          binance_usage = {
+            weight1m_used: Number.isFinite(wUsedNum) ? wUsedNum : null,
+            weight1m_limit: WEIGHT_LIMIT,
+            orderCount10s: limits?.lastOrderCount10s ?? null,
+            orderCount1m: limits?.lastOrderCount1m ?? null,
+            percent: pct,
+            callRate: limits?.callRate ?? null,
+            risk: limits?.risk ?? 'normal',
+            backoff_active: Boolean(limits?.backoff),
+            backoff_remaining_sec: limits?.backoff?.remainingSec ?? null
+          }
+        } catch {}
+
+        res.statusCode = isUniverseIncomplete ? 200 : (isRateLimit ? 429 : (abortLike ? 503 : 500))
+        if (isRateLimit) {
+          try {
+            const limits = getLimitsSnapshot()
+            const untilMs = Number(limits?.backoff?.untilMs ?? __binanceBackoffUntilMs)
+            if (Number.isFinite(untilMs) && untilMs > Date.now()) {
+              const waitSec = Math.max(1, Math.ceil((untilMs - Date.now()) / 1000))
+              res.setHeader('Retry-After', String(waitSec))
+            }
+          } catch {}
+        } else if (abortLike) {
+          res.setHeader('Retry-After', '1')
+        }
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify(isUniverseIncomplete ? { ok: true, partial: true, coins: [], policy: { max_hold_minutes: null, risk_per_trade_pct: null, max_leverage: null }, exchange: 'Binance', market_type: 'perp', regime: {}, timestamp: new Date().toISOString() } : { error: abortLike ? 'UNAVAILABLE_TEMPORARILY' : (e?.message || 'unknown') }))
+        if (isUniverseIncomplete) {
+          res.end(JSON.stringify({ ok: true, partial: true, coins: [], policy: { max_hold_minutes: null, risk_per_trade_pct: null, max_leverage: null }, exchange: 'Binance', market_type: 'perp', regime: {}, timestamp: new Date().toISOString(), binance_usage }))
+        } else if (isRateLimit) {
+          res.end(JSON.stringify({ ok: false, error: 'rate_limited', binance_usage }))
+        } else {
+          res.end(JSON.stringify({ error: abortLike ? 'UNAVAILABLE_TEMPORARILY' : (e?.message || 'unknown'), binance_usage }))
+        }
       }
       return
     }
@@ -3866,9 +4012,17 @@ const server = http.createServer(async (req, res) => {
           input.symbol = normalizeSymbol(input.symbol)
         } catch {}
 
+        // Normalize asset_data if client sent full intraday_any wrapper
+        try {
+          const ad = (input as any).asset_data
+          if (ad && typeof ad === 'object' && Array.isArray(ad.assets)) {
+            const first = ad.assets[0]
+            if (first && typeof first === 'object') (input as any).asset_data = first
+          }
+        } catch {}
         // Minimal asset_data validation: require price or OHLCV arrays
         const hasPrice = Number.isFinite(Number((input.asset_data as any)?.price))
-        const hasOhlcv = !!(input.asset_data && input.asset_data.ohlcv)
+        const hasOhlcv = !!(input.asset_data && (input.asset_data as any).ohlcv)
         if (!hasPrice && !hasOhlcv) {
           res.statusCode = 400
           res.setHeader('content-type', 'application/json')
@@ -5130,7 +5284,7 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify(cached))
           return
         }
-        const r = await undiciRequest('https://api.alternative.me/fng/?limit=1', { method: 'GET' })
+        const r = await undiciRequest('https://api.alternative.me/fng/?limit=1&format=json', { method: 'GET', headers: { 'accept': 'application/json' } })
         const body = await r.body.text()
         if (r.statusCode !== 200) throw new Error(`HTTP ${r.statusCode}`)
         let value: number | null = null
@@ -5143,13 +5297,23 @@ const server = http.createServer(async (req, res) => {
           classification = (d?.value_classification ? String(d.value_classification) : null)
           updatedAt = (d?.timestamp ? new Date(Number(d.timestamp) * 1000).toISOString() : null)
         } catch {}
-        if (!Number.isFinite(value as any)) throw new Error('bad_payload')
+        if (!Number.isFinite(value as any) || value == null) throw new Error('bad_payload')
         const out = { value: Number(value), classification, updated_at: updatedAt, fetched_at: new Date().toISOString() }
         ttlSet(key, out, 20 * 60 * 1000)
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify(out))
       } catch (e: any) {
+        // On error, return last cached value if present
+        try {
+          const cached = ttlGet<any>(makeKey('/api/fear_greed'))
+          if (cached) {
+            res.statusCode = 200
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify(cached))
+            return
+          }
+        } catch {}
         res.statusCode = 502
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: false, error: e?.message || 'fetch_failed' }))

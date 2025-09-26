@@ -1,9 +1,9 @@
 {
-  "name": "trader-new-new-new",
+  "name": "trader-short-v2",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "dev": "vite --port 4201",
+    "dev": "vite --port 4202",
     "dev:server": "tsx server/index.ts",
     "dev:temporal:worker": "tsx temporal/worker.ts",
     "dev:temporal": "npm-run-all --parallel dev:server dev:temporal:worker",
@@ -26,6 +26,8 @@
     "test": "tsx scripts/test_trading_hours.ts",
     "qa:m3": "tsx scripts/qa_m3.ts",
     "verify:pnl": "tsx scripts/verify_pnl_report.ts",
+    "qa:su": "tsx scripts/qa_su.ts",
+    "qa:waiting": "tsx scripts/qa_waiting_guard.ts",
     "qa:fp:success": "FP_TEST_MODE=success_notrade tsx scripts/qa/fp_smoke.ts --mode success_notrade",
     "qa:fp:no_picks": "FP_TEST_MODE=no_picks tsx scripts/qa/fp_smoke.ts --mode no_picks",
     "qa:fp:error": "FP_TEST_MODE=error tsx scripts/qa/fp_smoke.ts --mode error",

@@ -47,3 +47,5 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
 CMD ["pm2-runtime", "ecosystem.config.js", "--only", "trader-backend"]
 
 
+
+

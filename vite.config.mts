@@ -19,11 +19,11 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8789',
+        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8789',
         changeOrigin: true
       },
       '/__proxy': {
-        target: 'http://localhost:8789',
+        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8789',
         changeOrigin: true
       },
       '/binance': {
@@ -40,11 +40,11 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8789',
+        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8789',
         changeOrigin: true
       },
       '/__proxy': {
-        target: 'http://localhost:8789',
+        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8789',
         changeOrigin: true
       },
       '/binance': {

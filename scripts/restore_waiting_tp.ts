@@ -40,7 +40,7 @@ async function main() {
         // Check if symbol has internal entry order
         const hasInternalEntry = orders.some((o: any) => {
           const clientId = String(o?.clientOrderId || '')
-          const isInternal = /^e_l_/.test(clientId)
+          const isInternal = /^sv2_e_l_/.test(clientId)
           const isEntry = String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT' && 
                          !(o?.reduceOnly || o?.closePosition)
           return isInternal && isEntry && String(o?.symbol) === symbol

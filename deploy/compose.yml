@@ -1,11 +1,11 @@
 version: "3.9"
 services:
-  trader-backend:
-    image: trader-app:latest
+  shortv2-backend:
+    image: trader-short-v2:latest
     build:
       context: ..
       dockerfile: Dockerfile
-    container_name: trader-backend
+    container_name: shortv2-backend
     restart: unless-stopped
     environment:
       - NODE_ENV=production
@@ -24,9 +24,9 @@ services:
       retries: 5
       start_period: 20s
 
-  trader-worker:
-    image: trader-app:latest
-    container_name: trader-worker
+  shortv2-worker:
+    image: trader-short-v2:latest
+    container_name: shortv2-worker
     restart: unless-stopped
     command: ["pm2-runtime", "ecosystem.config.js", "--only", "trader-worker"]
     environment:
@@ -41,21 +41,23 @@ services:
 
   caddy:
     image: caddy:2
-    container_name: caddy
+    container_name: caddy-shortv2
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
+      - caddy_data_shortv2:/data
+      - caddy_config_shortv2:/config
     depends_on:
-      trader-backend:
+      shortv2-backend:
         condition: service_healthy
 
 volumes:
-  caddy_data:
-  caddy_config:
+  caddy_data_shortv2:
+  caddy_config_shortv2:
+
+
 
 

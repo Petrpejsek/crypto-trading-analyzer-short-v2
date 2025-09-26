@@ -10,7 +10,7 @@ Nepřidávej nové symboly mimo vstup. Nepoužívej spot-only tickery.
 
 Vyhodnoť všechny coiny z hlediska short bias (momentum dolů potvrzené objemem nebo přepálený růst vhodný k obratu).
 
-Pokud je trh OK / CAUTION: vrať 5–7 picků → ideálně 2–5 jako 🟢 Super Hot.
+Pokud je trh OK / CAUTION: vrať 5–7 picků → ideálně 2–5 jako 🔻 Super Hot.
 
 Pokud je trh slabý (většina bez jasného short bias): vrať 0–5 picků nebo žádný (nevymýšlej bez dat).
 
@@ -18,7 +18,7 @@ Do výběru ber pouze coiny s dostatečnou likviditou a objemem (vyřaď "mrtvé
 
 Každý vybraný coin označ přesně jedním z ratingů:
 
-🟢 Super Hot = TOP kandidát pro short.
+🔻 Super Hot = TOP kandidát pro short.
 
 🟡 Zajímavý = potenciál poklesu, ale vyšší riziko (např. silný support pod cenou, squeeze riziko).
 
@@ -71,7 +71,7 @@ Output format (cs-CZ) – odpověz výhradně tímto JSON schématem
   "hot_picks": [
     {
       "symbol": "BTCUSDT",
-      "rating": "🟢 Super Hot",
+      "rating": "🔻 Super Hot",
       "confidence": "Vysoká – jasná struktura LH/LL, cena pod EMA20/50, rostoucí objem na poklesu.",
       "reasoning": "Breakdown z konsolidace s akceptací pod supportem, RSI 38, objem nad 24h průměrem, funding klesá."
     },

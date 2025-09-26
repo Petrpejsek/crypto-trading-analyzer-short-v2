@@ -20,3 +20,5 @@ Poznámky
 - PM2 uvnitř kontejneru loguje na stdout/stderr; logy zobrazíš: docker logs -f trader-backend
 
 
+
+

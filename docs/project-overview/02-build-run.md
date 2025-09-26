@@ -19,13 +19,15 @@ Poznámka: Server automaticky načítá `.env.local` i `.env` i v produkci.
 npm ci
 ```
 
-### Dev režim
+### Dev režim (bezpečné porty pro tento projekt)
 ```bash
-# Backend
-PORT=8789 npm run dev:server  # http://localhost:8789
+# Doporučené oddělené porty (aby se NIKDY nemíchalo s "trader new new new")
+FRONTEND_PORT=4302 BACKEND_PORT=8888 ./dev.sh restart
 
-# Frontend
-npm run dev                   # http://localhost:4201 (Vite proxy /api → :8789)
+# Kontroly
+curl -sf http://127.0.0.1:4302/ >/dev/null
+curl -sf http://127.0.0.1:4302/api/health >/dev/null  # proxy → :8888
+curl -sf http://127.0.0.1:8888/api/health >/dev/null  # backend přímo
 ```
 
 ### Prod build a spuštění
@@ -40,49 +42,49 @@ npm run dev:server
 curl http://localhost:8789/api/health
 ```
 
-### Porty a proxy
-- Frontend dev: `:4201` (Vite) s proxy na `:8789` pro `/api` a `/__proxy`
-- Backend: `:8789` (HTTP server)
+### Porty a proxy (v tomto repu)
+- Frontend dev: `:4302` (Vite) s proxy na `:8888` pro `/api` a `/__proxy`
+- Backend: `:8888` (HTTP server)
 
 ### Restart dev prostředí (kill → clean → start → verify)
 Vždy spouštěj příkazy z kořene projektu.
 
 ```bash
 # 1) Přejdi do kořene projektu
-cd /path/to/trader-new-new-new
+cd /path/to/trader-short-v2
 
 # Doporučený způsob: jeden příkaz
 ./dev.sh restart
 
 # Alternativně manuálně (macOS-kompatibilní):
-# 2) Zastav běžící procesy na portech 4201 (Vite) a 8789 (backend)
-for p in 4201 8789; do
+# 2) Zastav běžící procesy na portech 4302 (Vite) a 8888 (backend)
+for p in 4302 8888; do
   pids=$(lsof -n -iTCP:$p -sTCP:LISTEN -t 2>/dev/null || true); [ -n "$pids" ] && kill -9 $pids || true
 done
 
 # (volitelně) doraz dev procesy podle patternu – nevadí, když nic nenajde
-pkill -f 'trader-new-new-new.*(vite|tsx|server/index.ts|npm run dev)' || true
+pkill -f 'trader-short-v2.*(vite|tsx|server/index.ts|npm run dev)' || true
 
 # 3) Vyčisti runtime PID/log soubory
 mkdir -p runtime
 rm -f runtime/*.pid runtime/*log runtime/*.out runtime/*.err
 
-# 4) Spusť backend (HTTP :8789), loguj a ulož PID
-PORT=8789 nohup npm run -s dev:server > runtime/backend_dev.log 2>&1 & echo $! > runtime/backend.pid
+# 4) Spusť backend (HTTP :8888), loguj a ulož PID
+PORT=8888 nohup npm run -s dev:server > runtime/backend_dev.log 2>&1 & echo $! > runtime/backend.pid
 
 # 5) Počkej na health backendu
-for i in {1..40}; do sleep 0.25; if curl -sf http://127.0.0.1:8789/api/health >/dev/null; then break; fi; done
+for i in {1..40}; do sleep 0.25; if curl -sf http://127.0.0.1:8888/api/health >/dev/null; then break; fi; done
 
-# 6) Spusť frontend (Vite :4201), loguj a ulož PID
-nohup npm run -s dev > runtime/frontend_dev.log 2>&1 & echo $! > runtime/frontend.pid
+# 6) Spusť frontend (Vite :4302), loguj a ulož PID
+nohup npm exec -s vite -- --port 4302 > runtime/frontend_dev.log 2>&1 & echo $! > runtime/frontend.pid
 
 # 7) Ověř dostupnost frontendu a proxy na backend
-curl -sf http://127.0.0.1:4201/ >/dev/null
-curl -sf http://127.0.0.1:4201/api/health >/dev/null
+curl -sf http://127.0.0.1:4302/ >/dev/null
+curl -sf http://127.0.0.1:4302/api/health >/dev/null
 
 # 8) Ověř, že běží právě jedna instance na každém portu
-test "$(lsof -n -iTCP:4201 -sTCP:LISTEN -t | wc -l | tr -d " ")" = "1"
-test "$(lsof -n -iTCP:8789 -sTCP:LISTEN -t | wc -l | tr -d " ")" = "1"
+test "$(lsof -n -iTCP:4302 -sTCP:LISTEN -t | wc -l | tr -d " ")" = "1"
+test "$(lsof -n -iTCP:8888 -sTCP:LISTEN -t | wc -l | tr -d " ")" = "1"
 ```
 
 ### Logy a PID soubory
@@ -90,8 +92,17 @@ test "$(lsof -n -iTCP:8789 -sTCP:LISTEN -t | wc -l | tr -d " ")" = "1"
 - Frontend log: `runtime/frontend_dev.log`, PID: `runtime/frontend.pid`
 
 Poznámky:
-- Vite má `strictPort: true` a poběží na `:4201`. Pokud je port obsazený, příkaz skončí chybou – uvolni port dle kroku 2.
-- Backend běží defaultně na `:8789` (lze měnit proměnnou `PORT`).
+- Vite má `strictPort: true` – pro tento projekt použij `:4302`.
+- Backend používej na `:8888` (lze dočasně měnit proměnnou `PORT`).
+
+### Oddělení od „trader new new new“ (kriticky důležité)
+- Tento projekt NESMÍ používat porty 4201/8789.
+- Vždy spouštěj přes `FRONTEND_PORT=4302 BACKEND_PORT=8888 ./dev.sh restart`.
+- Rychlá kontrola oddělení:
+```bash
+PID=$(lsof -n -iTCP:4302 -sTCP:LISTEN -t | head -n1); lsof -a -p "$PID" -d cwd
+PID=$(lsof -n -iTCP:8888 -sTCP:LISTEN -t | head -n1); lsof -a -p "$PID" -d cwd
+```
 
 ### Minimální konfigurace pro trading
 - `config/trading.json`:

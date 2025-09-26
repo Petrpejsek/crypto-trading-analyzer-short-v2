@@ -93,6 +93,36 @@ class BinanceFuturesAPI {
               closePosition: (params as any)?.closePosition === true
             })
           } catch {}
+          // Striktní validace i v RAW režimu: STOP/TAKE_PROFIT* musí mít číselný stopPrice > 0
+          try {
+            const needsStop = (t: any): boolean => /stop|take_profit/i.test(String(t || ''))
+            const validateSingle = (o: any) => {
+              if (!o) return
+              const t = String(o.type || '')
+              if (needsStop(t)) {
+                const sp = Number((o as any).stopPrice)
+                if (!(Number.isFinite(sp) && sp > 0)) {
+                  throw new Error('client_guard: invalid_stopPrice')
+                }
+              }
+            }
+            if (endpoint === '/fapi/v1/order') {
+              validateSingle(params)
+            } else if (endpoint === '/fapi/v1/batchOrders') {
+              const rawBatch = (params as any).batchOrders
+              let arr: any[] | null = null
+              try {
+                if (Array.isArray(rawBatch)) arr = rawBatch as any[]
+                else if (typeof rawBatch === 'string') arr = JSON.parse(rawBatch)
+              } catch {}
+              if (Array.isArray(arr)) {
+                for (const o of arr) validateSingle(o)
+              }
+            }
+          } catch (e) {
+            // Chybu propaguj – neodesílej malformed požadavek na Binance
+            throw e
+          }
           // žádná sanitizace, žádný whitelist
         } else {
         const safeMode = ((tradingCfg as any)?.SAFE_MODE_LONG_ONLY === true)
@@ -344,6 +374,15 @@ class BinanceFuturesAPI {
     const p: OrderParams = { ...params }
     const engineTag = (()=>{ try { return String((params as any).__engine || 'unknown') } catch { return 'unknown' } })()
     try {
+      // Guard stopPrice for STOP/TP types even v RAW režimu (RAW už validuje v request, ale duplicitní pojistka je OK)
+      try {
+        const needsStop = (t: any): boolean => /stop|take_profit/i.test(String(t || ''))
+        if (needsStop((p as any).type)) {
+          const sp = Number((p as any).stopPrice)
+          if (!(Number.isFinite(sp) && sp > 0)) throw new Error('client_guard: invalid_stopPrice')
+        }
+      } catch (e) { throw e }
+
       const raw = ((tradingCfg as any)?.RAW_PASSTHROUGH === true)
       if (!raw) {
         const t = String(p.type || '')
@@ -428,7 +467,7 @@ class BinanceFuturesAPI {
         const reduceOnly = (p as any)?.reduceOnly === true
         const closePosition = (p as any)?.closePosition === true
         const cid = String((res as any)?.clientOrderId || (p as any)?.newClientOrderId || '')
-        const isInternalEntry = /^e_l_/.test(cid)
+        const isInternalEntry = /^sv2_e_l_/.test(cid)
         if (sideBuy && isLimit && !reduceOnly && !closePosition && isInternalEntry) {
           const { trackEntryOrder, hasEntryTrack } = await import('../entry-updater/registry')
           const orderIdNum = Number((res as any)?.orderId || 0)
@@ -580,7 +619,8 @@ export async function fetchPositions(): Promise<any[]> {
 }
 
 // Utility function for generating unique client order IDs
-export const makeId = (p: string) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+const PROJECT_CID_PREFIX = 'sv2'
+export const makeId = (p: string) => `${PROJECT_CID_PREFIX}_${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 
 // Deterministic clientOrderId for idempotence across retries/repeats
 export function makeDeterministicClientId(prefix: string, params: Partial<OrderParams>): string {
@@ -599,7 +639,7 @@ export function makeDeterministicClientId(prefix: string, params: Partial<OrderP
     const basis = [symbol, side, type, price, stopPrice, quantity, timeInForce, workingType, positionSide, reduceOnly, closePosition].join('|')
     const hash = crypto.createHash('sha1').update(basis).digest('hex').slice(0, 10)
     const symShort = symbol.slice(0, 10)
-    let id = `${prefix}_${symShort}_${hash}`
+    let id = `${PROJECT_CID_PREFIX}_${prefix}_${symShort}_${hash}`
     if (id.length > 36) id = id.slice(0, 36)
     return id
   } catch {
@@ -671,9 +711,14 @@ export function getWaitingTpList(): WaitingTpEntry[] {
 
 export function waitingTpSchedule(symbol: string, tp: number, qtyPlanned: string | null, positionSide?: 'LONG'|'SHORT'|undefined, workingType?: 'MARK_PRICE' | 'CONTRACT_PRICE'): void {
   try {
+    const tpNum = Number(tp)
+    if (!(Number.isFinite(tpNum) && tpNum > 0)) {
+      console.error('[WAITING_TP_REJECT]', { symbol, reason: 'invalid_tp', tp })
+      return
+    }
     waitingTpBySymbol[symbol] = {
       symbol,
-      tp: Number(tp),
+      tp: tpNum,
       qtyPlanned,
       since: new Date().toISOString(),
       lastCheck: null,
@@ -762,6 +807,12 @@ export async function waitingTpProcessPassFromPositions(positionsRaw: any[]): Pr
     }
     const entries = Object.entries(waitingTpBySymbol)
     for (const [symbol, w] of entries) {
+      // Drop invalid records proactively
+      const tpNum = Number(w?.tp)
+      if (!(Number.isFinite(tpNum) && tpNum > 0)) {
+        try { delete waitingTpBySymbol[symbol]; persistWaitingState(); console.warn('[WAITING_TP_DROP_INVALID]', { symbol, tp: w?.tp }) } catch {}
+        continue
+      }
       const rec = sizeBySymbol[symbol] || { size: 0, side: null }
       const size = rec.size
       waitingTpOnCheck(symbol, size)
@@ -856,6 +907,12 @@ async function rehydrateWaitingFromDisk(): Promise<void> {
     const api = getBinanceAPI()
     for (const w of arr) {
       try {
+        // Drop invalid records (tp must be a positive number)
+        const tpOk = Number.isFinite(Number(w?.tp)) && Number(w?.tp) > 0
+        if (!tpOk) {
+          console.error('[WAITING_REHYDRATE_DROP]', { symbol: w.symbol, reason: 'invalid_tp', tp: w?.tp })
+          continue
+        }
         // Validate whether it's still relevant: keep if entry exists or position exists
         let keep = false
         let posSize = 0
@@ -1452,7 +1509,7 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
     symbol: string
     order: PlaceOrdersRequest['orders'][number]
     qty: string
-    positionSide: 'LONG' | undefined
+    positionSide: 'LONG' | 'SHORT' | undefined
     entryParams: OrderParams & { __engine?: string }
     rounded: { entry: string, sl: string, tp: string, qty: string }
   }
@@ -1468,10 +1525,12 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
           continue
         }
       } catch {}
-      if (order.side !== 'LONG') { console.warn(`[BATCH_SKIP] non-LONG ${order.symbol}`); continue }
-
-      let positionSide: 'LONG' | undefined
-      try { positionSide = (await api.getHedgeMode()) ? 'LONG' : undefined } catch {}
+      // Support both LONG and SHORT sides
+      let positionSide: 'LONG' | 'SHORT' | undefined
+      try {
+        if (await api.getHedgeMode()) positionSide = (order.side === 'SHORT') ? 'SHORT' : 'LONG'
+        else positionSide = undefined
+      } catch {}
 
       const entryPx = Number(order.entry); if (!entryPx || entryPx <= 0) throw new Error(`Invalid entry price for ${order.symbol}`)
       const notionalUsd = order.amount * order.leverage
@@ -1513,13 +1572,25 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       // ENTRY: respect aggressive strategy -> STOP/STOP_MARKET, conservative -> LIMIT
       const ot = String((order as any)?.orderType || '').toLowerCase()
       const isAggressive = String((order as any)?.strategy || '') === 'aggressive'
-      // Compute safe stop trigger above both entry and current mark to avoid -2021
+      // Compute safe stop trigger to avoid immediate trigger (-2021)
       let markPxNum: number | null = null
       try { const m = await api.getMarkPrice(order.symbol); markPxNum = Number(m) } catch {}
       const entryNum = Number(entryStr)
-      const baseForStop = Math.max(Number.isFinite(entryNum) ? entryNum : 0, Number.isFinite(markPxNum as any) ? (markPxNum as number) : 0)
-      const triggerBuffer = 0.001 // +0.1%
-      let stopTriggerNum = (baseForStop > 0 ? baseForStop : (Number.isFinite(entryNum) ? entryNum : 0)) * (1 + triggerBuffer)
+      const triggerBuffer = 0.001 // 0.1%
+      const markBase = Number.isFinite(markPxNum as any) ? (markPxNum as number) : 0
+      const entryBase = Number.isFinite(entryNum) ? entryNum : 0
+      const isShort = String(order.side).toUpperCase() === 'SHORT'
+      let stopTriggerNum = 0
+      if (!isShort) {
+        // LONG: trigger above both entry and current mark
+        const baseForStop = Math.max(entryBase, markBase)
+        stopTriggerNum = (baseForStop > 0 ? baseForStop : entryBase) * (1 + triggerBuffer)
+      } else {
+        // SHORT: trigger below both entry a current mark
+        const baseForStop = Math.min(entryBase || Infinity, markBase || Infinity)
+        const baseVal = Number.isFinite(baseForStop) ? baseForStop : (entryBase > 0 ? entryBase : markBase)
+        stopTriggerNum = baseVal * (1 - triggerBuffer)
+      }
       if (Number.isFinite(tickSize) && tickSize > 0) {
         stopTriggerNum = roundToTickSize(stopTriggerNum, tickSize)
       }
@@ -1530,7 +1601,7 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
           // Spread: limit price at desired entry, trigger above mark/entry by small buffer
           return {
             symbol: order.symbol,
-            side: 'BUY',
+            side: isShort ? 'SELL' : 'BUY',
             type: 'STOP',
             price: entryStr,
             stopPrice: stopTriggerStr,
@@ -1548,7 +1619,7 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
           // Aggressive STOP MARKET: stopPrice must be above current price for LONG
           return {
             symbol: order.symbol,
-            side: 'BUY',
+            side: isShort ? 'SELL' : 'BUY',
             type: 'STOP_MARKET',
             stopPrice: stopTriggerStr,
             quantity: qty,
@@ -1563,7 +1634,7 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
         if (ot === 'market') {
           return {
             symbol: order.symbol,
-            side: 'BUY',
+            side: isShort ? 'SELL' : 'BUY',
             type: 'MARKET',
             quantity: qty,
             closePosition: false,
@@ -1575,7 +1646,7 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
         }
         return {
           symbol: order.symbol,
-          side: 'BUY',
+          side: isShort ? 'SELL' : 'BUY',
           type: 'LIMIT',
           price: entryStr,
           quantity: qty,
@@ -1633,8 +1704,8 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       if (reduceOnly || closePosition) continue
       const side = String(o?.side || '').toUpperCase()
       const t = String(o?.type || '').toUpperCase()
-      // Treat only true entry-like orders for LONG side as conflicting
-      const isEntryType = (side === 'BUY') && (t === 'LIMIT' || t === 'STOP' || t === 'STOP_MARKET' || t === 'MARKET')
+      // Treat any true entry-like orders (BUY for LONG, SELL for SHORT) as conflicting
+      const isEntryType = (t === 'LIMIT' || t === 'STOP' || t === 'STOP_MARKET' || t === 'MARKET')
       if (isEntryType) symbolsWithConflictingOrders.add(sym)
     } catch {}
   }
@@ -1654,11 +1725,11 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       const symbol = String(o?.symbol || o?.entryParams?.symbol || '')
       const side = String(o?.side || o?.entryParams?.side || '').toUpperCase()
       const type = String(o?.type || o?.entryParams?.type || '').toUpperCase()
-      if (!symbol || side !== 'BUY') return null
+      if (!symbol || (side !== 'BUY' && side !== 'SELL')) return null
       const price = o?.price != null ? String(o.price) : (o?.entryParams?.price != null ? String(o.entryParams.price) : '')
       const stopPrice = o?.stopPrice != null ? String(o.stopPrice) : (o?.entryParams?.stopPrice != null ? String(o.entryParams.stopPrice) : '')
       const qty = o?.quantity != null ? String(o.quantity) : (o?.origQty != null ? String(o.origQty) : (o?.entryParams?.quantity != null ? String(o.entryParams.quantity) : ''))
-      return `${symbol}|${type}|${price}|${stopPrice}|${qty}`
+      return `${symbol}|${side}|${type}|${price}|${stopPrice}|${qty}`
     } catch { return null }
   }
   const existingEntryKeys = new Set<string>()
@@ -1756,14 +1827,15 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
     } catch {}
     const hasOpenEntry = (() => {
       try {
+        const expectedSide = String(p.order?.side || 'LONG').toUpperCase() === 'SHORT' ? 'SELL' : 'BUY'
         return (existing as any[]).some((o: any) => {
           const sameSymbol = String(o?.symbol || '') === p.symbol
-          const sideBuy = String(o?.side || '').toUpperCase() === 'BUY'
+          const sideMatch = String(o?.side || '').toUpperCase() === expectedSide
           const t = String(o?.type || '').toUpperCase()
-          const isEntryType = (t === 'LIMIT' || t === 'STOP')
+          const isEntryType = (t === 'LIMIT' || t === 'STOP' || t === 'STOP_MARKET')
           const reduceOnly = Boolean(o?.reduceOnly)
           const closePosition = Boolean(o?.closePosition)
-          return sameSymbol && sideBuy && isEntryType && !reduceOnly && !closePosition
+          return sameSymbol && sideMatch && isEntryType && !reduceOnly && !closePosition
         })
       } catch { return false }
     })()
@@ -1775,8 +1847,9 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
     const hasSameCpSL = (() => {
       try {
         const desired = Number(p.rounded.sl)
+        const exitSideWanted = String(p.order?.side || 'LONG').toUpperCase() === 'SHORT' ? 'BUY' : 'SELL'
         return (existing as any[]).some((o: any) => {
-          const sameSide = String(o?.side).toUpperCase() === 'SELL'
+          const sameSide = String(o?.side).toUpperCase() === exitSideWanted
           const t = String(o?.type || '').toUpperCase()
           const isStop = t.includes('STOP') && !t.includes('TAKE_PROFIT')
           const cp = Boolean(o?.closePosition)
@@ -1788,8 +1861,9 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
     const hasSameRoSL = (() => {
       try {
         const desired = Number(p.rounded.sl)
+        const exitSideWanted = String(p.order?.side || 'LONG').toUpperCase() === 'SHORT' ? 'BUY' : 'SELL'
         return (existing as any[]).some((o: any) => {
-          const sameSide = String(o?.side).toUpperCase() === 'SELL'
+          const sameSide = String(o?.side).toUpperCase() === exitSideWanted
           const t = String(o?.type || '').toUpperCase()
           const isStop = t.includes('STOP') && !t.includes('TAKE_PROFIT')
           const ro = Boolean(o?.reduceOnly)
@@ -1801,8 +1875,9 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
     const hasSameTP = (() => {
       try {
         const desired = Number(p.rounded.tp)
+        const exitSideWanted = String(p.order?.side || 'LONG').toUpperCase() === 'SHORT' ? 'BUY' : 'SELL'
         return (existing as any[]).some((o: any) => {
-          const sameSide = String(o?.side).toUpperCase() === 'SELL'
+          const sameSide = String(o?.side).toUpperCase() === exitSideWanted
           const t = String(o?.type || '').toUpperCase()
           const isTp = t.includes('TAKE_PROFIT')
           const cp = Boolean(o?.closePosition)
@@ -1864,16 +1939,21 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       } catch {}
       try {
         const mark = await api.getMarkPrice(p.symbol)
-        // Pro LONG: STOP_MARKET SELL by se spustil při mark <= stop -> zakázat pokud už je mark <= SL
-        if (Number.isFinite(Number(mark)) && Number(mark) <= Number(p.rounded.sl)) {
-          allowCpSl = false
-          console.warn('[SKIP_SL_IMMEDIATE_TRIGGER]', { symbol: p.symbol, sl: p.rounded.sl, mark })
+        const isShortLocal = String(p.order?.side || 'LONG').toUpperCase() === 'SHORT'
+        // LONG: disallow if mark <= SL; SHORT: disallow if mark >= SL
+        if (Number.isFinite(Number(mark))) {
+          const markNum = Number(mark)
+          const slNum = Number(p.rounded.sl)
+          if ((!isShortLocal && markNum <= slNum) || (isShortLocal && markNum >= slNum)) {
+            allowCpSl = false
+            console.warn('[SKIP_SL_IMMEDIATE_TRIGGER]', { symbol: p.symbol, sl: p.rounded.sl, mark })
+          }
         }
       } catch {}
       if (allowCpSl) {
         const slParams: OrderParams & { __engine?: string } = {
           symbol: p.symbol,
-          side: 'SELL',
+          side: (String(p.order?.side || 'LONG').toUpperCase() === 'SHORT') ? 'BUY' : 'SELL',
           type: 'STOP_MARKET',
           stopPrice: p.rounded.sl,
           closePosition: true,
@@ -1923,7 +2003,7 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       if (posQtyStr && !hasSameRoSL) {
         const roSlParams: OrderParams & { __engine?: string } = {
           symbol: p.symbol,
-          side: 'SELL',
+          side: (String(p.order?.side || 'LONG').toUpperCase() === 'SHORT') ? 'BUY' : 'SELL',
           type: 'STOP_MARKET',
           stopPrice: p.rounded.sl,
           quantity: posQtyStr,
@@ -1952,14 +2032,19 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
         let allowTp = true
         try {
           const mark = await api.getMarkPrice(p.symbol)
-          // Pro LONG: TAKE_PROFIT_MARKET SELL se spustí při mark >= TP -> zakázat pokud už je mark >= TP
-          if (Number.isFinite(Number(mark)) && Number(mark) >= Number(p.rounded.tp)) {
-            allowTp = false
-            console.warn('[SKIP_TP_IMMEDIATE_TRIGGER]', { symbol: p.symbol, tp: p.rounded.tp, mark })
+          const isShortLocal = String(p.order?.side || 'LONG').toUpperCase() === 'SHORT'
+          // LONG: disallow if mark >= TP; SHORT: disallow if mark <= TP
+          if (Number.isFinite(Number(mark))) {
+            const markNum = Number(mark)
+            const tpNum = Number(p.rounded.tp)
+            if ((!isShortLocal && markNum >= tpNum) || (isShortLocal && markNum <= tpNum)) {
+              allowTp = false
+              console.warn('[SKIP_TP_IMMEDIATE_TRIGGER]', { symbol: p.symbol, tp: p.rounded.tp, mark })
+            }
           }
         } catch {}
         if (allowTp) {
-          const baseTp: any = { symbol: p.symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: p.rounded.tp, closePosition: true, workingType }
+          const baseTp: any = { symbol: p.symbol, side: (String(p.order?.side || 'LONG').toUpperCase() === 'SHORT') ? 'BUY' : 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: p.rounded.tp, closePosition: true, workingType }
           const tpParams: OrderParams & { __engine?: string } = p.positionSide
             ? { ...baseTp, positionSide: p.positionSide, newClientOrderId: makeDeterministicClientId('x_tp_tm', { ...baseTp, positionSide: p.positionSide }), newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' } as any
             : { ...baseTp, newClientOrderId: makeDeterministicClientId('x_tp_tm', baseTp), newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' } as any

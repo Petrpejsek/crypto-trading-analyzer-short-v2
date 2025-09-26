@@ -120,8 +120,13 @@ export async function runStrategyUpdate(input: StrategyUpdateInput): Promise<{
       project: (process as any)?.env?.OPENAI_PROJECT,
       timeout: 600000  // 10 minut timeout pro GPT-5
     } as any)
-
-    const model = 'gpt-5'
+    
+    // Strategy Updater policy: POUZE gpt-4o (žádné fallbacky, žádné jiné modely)
+    const requestedModel = String(process.env.STRATEGY_UPDATER_MODEL || 'gpt-4o').trim()
+    if (!['gpt-4o'].includes(requestedModel)) {
+      return result(false, 'invalid_model', Date.now() - t0, null, { model: requestedModel, allowed: ['gpt-4o'] })
+    }
+    const model = requestedModel
     // temperature intentionally omitted for gpt-5; default will be used by API
     // No timeout needed - let API handle its own timeouts
 
@@ -257,7 +262,8 @@ export async function runStrategyUpdate(input: StrategyUpdateInput): Promise<{
     })
 
     return result(true, undefined, Date.now() - t0, response, {
-      request_id: (resp as any)?.id ?? null
+      request_id: (resp as any)?.id ?? null,
+      model
     })
 
   } catch (error: any) {
@@ -272,7 +278,8 @@ export async function runStrategyUpdate(input: StrategyUpdateInput): Promise<{
     })
 
     return result(false, code, Date.now() - t0, null, {
-      error: error?.message || 'unknown error'
+      error: error?.message || 'unknown error',
+      model: (process.env.STRATEGY_UPDATER_MODEL || 'gpt-4o')
     })
   }
 }

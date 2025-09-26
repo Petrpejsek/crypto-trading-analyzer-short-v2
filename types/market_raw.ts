@@ -20,6 +20,7 @@ export type ExchangeFilters = Record<string, {
   stepSize: number
   minQty: number
   minNotional: number
+  onboardDate?: number | null
 }>
 
 export type UniverseItem = {

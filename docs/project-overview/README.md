@@ -21,11 +21,14 @@ BINANCE_API_KEY=...
 BINANCE_SECRET_KEY=...
 DECIDER_MODE=mock # nebo gpt pro OpenAI režim
 ```
-2) Instalace a spuštění:
+2) Instalace a spuštění (bezpečné porty pro tento projekt):
 ```bash
 npm ci
-npm run dev:server   # backend na http://localhost:8788
-npm run dev          # frontend (Vite) na http://localhost:4000
+FRONTEND_PORT=4302 BACKEND_PORT=8888 ./dev.sh restart
+# Kontroly
+curl -sf http://127.0.0.1:4302/ >/dev/null
+curl -sf http://127.0.0.1:4302/api/health >/dev/null
+curl -sf http://127.0.0.1:8888/api/health >/dev/null
 ```
 
 ### Produkční nasazení

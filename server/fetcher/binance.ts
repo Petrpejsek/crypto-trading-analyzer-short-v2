@@ -84,7 +84,7 @@ async function getExchangeInfo(): Promise<ExchangeFilters> {
     const minQty = toNumber(lotSize?.minQty)
     const minNot = toNumber((minNotional?.notional ?? minNotional?.minNotional) as any)
     if (!tickSize || !stepSize || !minQty || !minNot) continue
-    filters[s.symbol] = { tickSize, stepSize, minQty, minNotional: minNot }
+    ;(filters as any)[s.symbol] = { tickSize, stepSize, minQty, minNotional: minNot, onboardDate: (data as any)?.symbols?.find((x:any)=>x?.symbol===s.symbol)?.onboardDate ?? null }
   }
   return filters
 }
@@ -216,6 +216,30 @@ export function calcDepthWithinPctUSD(
   }
   if (!Number.isFinite(bidUsd) || !Number.isFinite(askUsd)) return undefined
   return { bids: bidUsd, asks: askUsd }
+}
+
+// Relative volume on M15: last 15m volume divided by average of previous N bars
+function calcRvolM15(m15: Kline[] | undefined, lookback: number = 20): number | null {
+  try {
+    if (!Array.isArray(m15) || m15.length < Math.max(2, lookback)) return null
+    const vols = m15.map(k => k.volume)
+    const last = vols[vols.length - 1]
+    const base = vols.slice(Math.max(0, vols.length - 1 - lookback), vols.length - 1)
+    const avg = base.reduce((s, v) => s + v, 0) / (base.length || 1)
+    if (!(Number.isFinite(last) && Number.isFinite(avg) && avg > 0)) return null
+    return last / avg
+  } catch { return null }
+}
+
+// Returns in percent for H1 series
+function calcRetPctFromH1(h1: Kline[] | undefined, barsBack: number): number | null {
+  try {
+    if (!Array.isArray(h1) || h1.length <= barsBack) return null
+    const last = h1[h1.length - 1].close
+    const prev = h1[h1.length - 1 - barsBack].close
+    if (!(Number.isFinite(last) && Number.isFinite(prev) && prev > 0)) return null
+    return ((last / prev) - 1) * 100
+  } catch { return null }
 }
 
 // Order Book Imbalance over top N levels; returns value in [-1, +1]
@@ -549,13 +573,22 @@ async function mapLimit<T, R>(arr: T[], limit: number, fn: (x: T) => Promise<R>)
 
 // REST-only builder – no WS cache access
 
-export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume'|'gainers'; desiredTopN?: number; includeSymbols?: string[]; fresh?: boolean; allowPartial?: boolean }): Promise<MarketRawSnapshot> {
+export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume'|'gainers'|'mix'; desiredTopN?: number; includeSymbols?: string[]; fresh?: boolean; allowPartial?: boolean }): Promise<MarketRawSnapshot> {
   const t0 = Date.now()
   const globalAc = new AbortController()
   const globalTimeout = setTimeout(() => globalAc.abort(), (config as any).globalDeadlineMs ?? 8000)
   const uniKlines: Record<string, { H1?: Kline[]; M15?: Kline[]; H4?: Kline[] }> = {}
   const exchangeFilters = await getExchangeInfo()
   const filteredSymbols = Object.keys(exchangeFilters)
+    .filter(sym => {
+      try {
+        const onboard = (exchangeFilters as any)[sym]?.onboardDate
+        if (!Number.isFinite(onboard)) return true
+        const ageDays = (Date.now() - Number(onboard)) / 86400000
+        const minDays = Number((config as any)?.universe?.minListingAgeDays ?? 0)
+        return ageDays >= minDays
+      } catch { return true }
+    })
   // Fixed target: always BTC+ETH + exactly N-2 alts (when possible)
   const desired = Number.isFinite(opts?.desiredTopN as any) && (opts!.desiredTopN as any) > 0 ? (opts!.desiredTopN as number) : config.universe.topN
   const altTarget = Math.max(0, desired - 2)
@@ -563,22 +596,158 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
   const hasIncludeSymbols = Array.isArray(opts?.includeSymbols) && opts!.includeSymbols!.length > 0
   const effectiveAltTarget = hasIncludeSymbols ? Math.max(altTarget, altTarget + opts!.includeSymbols!.length) : altTarget
   // Pull a large candidate list (the endpoint returns all anyway)
-  const strategy = (opts?.universeStrategy || (config as any)?.universe?.strategy || 'volume') as 'volume'|'gainers'
+  const strategy = (opts?.universeStrategy || (config as any)?.universe?.strategy || 'volume') as 'volume'|'gainers'|'mix'
   const fresh = Boolean(opts?.fresh)
-  const baseList = strategy === 'gainers' ? await getTopGainersUsdtSymbols(Math.max(200, desired * 10), fresh) : await getTopNUsdtSymbols(Math.max(200, desired * 10), fresh)
-  const extendedCandidates = baseList
-  const allAltCandidates = extendedCandidates.filter(s => s !== 'BTCUSDT' && s !== 'ETHUSDT' && filteredSymbols.includes(s))
-  // Normalize includeSymbols and force them to the front of the alt list (if supported on futures USDT)
-  const includeNorm = Array.from(new Set(((opts?.includeSymbols || []) as string[])
-    .map(s => String(s || '').toUpperCase().replace('/', ''))
-    .map(s => s.endsWith('USDT') ? s : `${s}USDT`)
-    // Do NOT drop unknown symbols from include list – Strategy Updater may target any valid futures symbol
-    // BTC/ETH are handled separately above
-    .filter(s => s !== 'BTCUSDT' && s !== 'ETHUSDT')))
-  // Merge include first, then candidate list without duplicates
-  const mergedPref = includeNorm.concat(allAltCandidates.filter(s => !includeNorm.includes(s)))
-  // Build universe symbol list
-  const altSymbols: string[] = mergedPref.slice(0, effectiveAltTarget)
+  let altSymbols: string[] = []
+
+  if (strategy === 'mix') {
+    // Build a diversified universe: 30 Volume Core, 15 Decliners, 5 Overextended Gainers
+    const baseVol = await getTopNUsdtSymbols(Math.max(300, desired * 10), fresh)
+    const poolAll = baseVol.filter(s => s !== 'BTCUSDT' && s !== 'ETHUSDT' && filteredSymbols.includes(s))
+    const poolCap = Math.max(100, Math.min(poolAll.length, 120))
+    const pool = poolAll.slice(0, poolCap)
+
+    // Prefetch H1/M15 klines for pool to compute metrics
+    const poolKlines: Record<string, { H1?: Kline[]; M15?: Kline[] }> = {}
+    const altIntervals: Array<{ key: 'H1'|'M15'; interval: string; limit: number }> = [
+      { key: 'H1', interval: '1h', limit: Number((config as any)?.altH1Limit ?? 80) },
+      { key: 'M15', interval: '15m', limit: Number((config as any)?.altM15Limit ?? 96) }
+    ]
+    const preTasks: Array<() => Promise<void>> = []
+    for (const sym of pool) {
+      for (const c of altIntervals) {
+        preTasks.push(async () => {
+          const k = await getKlines(sym, c.interval, c.limit)
+          poolKlines[sym] = poolKlines[sym] || {}
+          ;(poolKlines[sym] as any)[c.key] = k
+        })
+      }
+    }
+    await runWithConcurrency(preTasks, Math.min(16, (config as any).concurrency || 8))
+
+    // Orderbook metrics for pool (spread bps and 1% depth liquidity)
+    const spreadMap: Record<string, number | undefined> = {}
+    const liq1pctMap: Record<string, number | undefined> = {}
+    const obTasks: Array<() => Promise<void>> = []
+    for (const s of pool) {
+      obTasks.push(async () => {
+        const [bt, ob] = await Promise.all([getBookTicker(s), getOrderBook(s, (config as any)?.orderbook?.limit || 50)])
+        const spread = calcSpreadBps(bt.bid, bt.ask)
+        const mid = (bt.bid && bt.ask) ? ((bt.bid + bt.ask) / 2) : (tickerMap[s]?.lastPrice || 0)
+        const d1 = ob && mid ? calcDepthWithinPctUSD(ob.bids, ob.asks, mid, 0.01) : undefined
+        spreadMap[s] = Number.isFinite(spread as any) ? (spread as number) : undefined
+        liq1pctMap[s] = d1 ? (d1.bids + d1.asks) : undefined
+      })
+    }
+    await runWithConcurrency(obTasks, Math.min(8, (config as any).concurrency || 8))
+
+    // Helper: compute metrics for symbol
+    const metrics = (sym: string) => {
+      const H1 = (poolKlines[sym]?.H1 || []) as Kline[]
+      const M15 = (poolKlines[sym]?.M15 || []) as Kline[]
+      const closeH1 = H1.map(k => k.close)
+      const closeM15 = M15.map(k => k.close)
+      const ema20m15 = ema(closeM15, 20)
+      const ema50m15 = ema(closeM15, 50)
+      const rsi14m15 = rsi(closeM15, 14)
+      const price = Number(tickerMap[sym]?.lastPrice ?? (M15.length ? M15[M15.length - 1].close : NaN))
+      const ema50Last = Array.isArray(ema50m15) && ema50m15.length ? ema50m15[ema50m15.length - 1] : null
+      const ema20Last = Array.isArray(ema20m15) && ema20m15.length ? ema20m15[ema20m15.length - 1] : null
+      return {
+        vol24h: Number(tickerMap[sym]?.volume24h_usd ?? 0),
+        ret60: calcRetPctFromH1(H1, 1),
+        ret180: calcRetPctFromH1(H1, 3),
+        rvol15: calcRvolM15(M15, 20),
+        rsi15: Array.isArray(rsi14m15) && rsi14m15.length ? rsi14m15[rsi14m15.length - 1] : null,
+        priceEma50: (Number.isFinite(price) && Number.isFinite(ema50Last as any) && (ema50Last as any) > 0) ? (price / (ema50Last as number)) : null,
+        emaStackLeq0: (Number.isFinite(ema20Last as any) && Number.isFinite(ema50Last as any)) ? ((ema20Last as number) <= (ema50Last as number)) : null,
+        spreadBps: spreadMap[sym],
+        liq1pctUsd: liq1pctMap[sym],
+        ageDays: (() => { try { const onboard = (exchangeFilters as any)[sym]?.onboardDate; return Number.isFinite(onboard) ? ((Date.now() - Number(onboard)) / 86400000) : null } catch { return null } })()
+      }
+    }
+
+    // 30× Volume Core
+    const volCandidates = pool
+      .filter(s => (tickerMap[s]?.volume24h_usd ?? 0) >= 15000000)
+      .filter(s => (metrics(s).spreadBps ?? Infinity) <= 15)
+      .filter(s => (metrics(s).liq1pctUsd ?? 0) >= 150000)
+      .filter(s => (metrics(s).ageDays ?? 0) >= 14)
+      .sort((a, b) => (Number(tickerMap[b]?.volume24h_usd ?? 0) - Number(tickerMap[a]?.volume24h_usd ?? 0)))
+      .slice(0, 30)
+
+    // 15× Decliners
+    const declCandidates = pool
+      .filter(s => !volCandidates.includes(s))
+      .filter(s => {
+        const m = metrics(s)
+        const retOk = (Number(m.ret60 ?? 0) <= -2) || (Number(m.ret180 ?? 0) <= -4)
+        const rvolOk = Number(m.rvol15 ?? 0) >= 1.3
+        const emaOk = m.emaStackLeq0 === true
+        return retOk && rvolOk && emaOk
+      })
+      .sort((a, b) => {
+        const ma = metrics(a), mb = metrics(b)
+        const ra = Math.min(Number(ma.ret60 ?? Infinity), Number(ma.ret180 ?? Infinity))
+        const rb = Math.min(Number(mb.ret60 ?? Infinity), Number(mb.ret180 ?? Infinity))
+        if (ra !== rb) return ra - rb // more negative first
+        return Number(mb.rvol15 ?? 0) - Number(ma.rvol15 ?? 0)
+      })
+      .slice(0, 15)
+
+    // 5× Overextended Gainers (reversion watch)
+    const overextCandidates = pool
+      .filter(s => !volCandidates.includes(s) && !declCandidates.includes(s))
+      .filter(s => {
+        const m = metrics(s)
+        const condMain = (Number(m.rsi15 ?? 0) >= 72) || (Number(m.priceEma50 ?? 0) >= 1.07)
+        const spreadOk = Number(m.spreadBps ?? Infinity) <= 12
+        const rvolOk = Number(m.rvol15 ?? 0) >= 1.5
+        return condMain && spreadOk && rvolOk
+      })
+      .sort((a, b) => {
+        const ma = metrics(a), mb = metrics(b)
+        const sa = Math.max(Number(ma.priceEma50 ?? 0), Number(ma.rsi15 ?? 0) / 100)
+        const sb = Math.max(Number(mb.priceEma50 ?? 0), Number(mb.rsi15 ?? 0) / 100)
+        return sb - sa
+      })
+      .slice(0, 5)
+
+    // Compose final list with category order preserved
+    let mixList = ([] as string[]).concat(volCandidates, declCandidates, overextCandidates)
+
+    // Respect includeSymbols (force to front)
+    const includeNorm = Array.from(new Set(((opts?.includeSymbols || []) as string[])
+      .map(s => String(s || '').toUpperCase().replace('/', ''))
+      .map(s => s.endsWith('USDT') ? s : `${s}USDT`)
+      .filter(s => s !== 'BTCUSDT' && s !== 'ETHUSDT')))
+    const mergedPref = includeNorm.concat(mixList.filter(s => !includeNorm.includes(s)))
+    altSymbols = mergedPref.slice(0, effectiveAltTarget)
+
+    // Enforce exact target if not allowPartial
+    if (altSymbols.length !== altTarget && !hasIncludeSymbols && !(opts as any)?.allowPartial) {
+      const err: any = new Error('MIX_UNIVERSE_INCOMPLETE')
+      err.stage = 'mix_universe_incomplete'
+      err.expected = altTarget
+      err.actual = altSymbols.length
+      throw err
+    }
+  } else {
+    const baseList = strategy === 'gainers' ? await getTopGainersUsdtSymbols(Math.max(200, desired * 10), fresh) : await getTopNUsdtSymbols(Math.max(200, desired * 10), fresh)
+    const extendedCandidates = baseList
+    const allAltCandidates = extendedCandidates.filter(s => s !== 'BTCUSDT' && s !== 'ETHUSDT' && filteredSymbols.includes(s))
+    // Normalize includeSymbols and force them to the front of the alt list (if supported on futures USDT)
+    const includeNorm = Array.from(new Set(((opts?.includeSymbols || []) as string[])
+      .map(s => String(s || '').toUpperCase().replace('/', ''))
+      .map(s => s.endsWith('USDT') ? s : `${s}USDT`)
+      // Do NOT drop unknown symbols from include list – Strategy Updater may target any valid futures symbol
+      // BTC/ETH are handled separately above
+      .filter(s => s !== 'BTCUSDT' && s !== 'ETHUSDT')))
+    // Merge include first, then candidate list without duplicates
+    const mergedPref = includeNorm.concat(allAltCandidates.filter(s => !includeNorm.includes(s)))
+    // Build universe symbol list
+    altSymbols = mergedPref.slice(0, effectiveAltTarget)
+  }
   const universeSymbols = altSymbols.slice()
 
   // Fetch klines via REST for BTC/ETH and alts
@@ -894,7 +1063,11 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
         const liq05b = (u as any)?.liquidity_usd_0_5pct?.bids ?? 0
         const liq05a = (u as any)?.liquidity_usd_0_5pct?.asks ?? 0
         const liq05 = (liq05b + liq05a)
-        const ok = Number.isFinite(spread as any) && (spread as number) <= maxSpread && liq05 >= minLiq
+        // Keep explicitly included symbols even if they fail liq/spread filter
+        const isExplicitInclude = Array.isArray(opts?.includeSymbols) && (opts!.includeSymbols as string[]).some(s => {
+          try { const ns = String(s||'').toUpperCase().replace('/',''); const norm = ns.endsWith('USDT') ? ns : `${ns}USDT`; return norm === u.symbol } catch { return false }
+        })
+        const ok = (Number.isFinite(spread as any) && (spread as number) <= maxSpread && liq05 >= minLiq) || isExplicitInclude
         if (ok) kept.push(u)
         else warnings.push(`drop:alt:liq_spread:${u.symbol}:liq05=${liq05}:spread=${(spread as any) ?? 'na'}`)
       }

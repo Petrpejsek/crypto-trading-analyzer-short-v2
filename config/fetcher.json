@@ -31,7 +31,8 @@
   },
   "universe": {
     "topN": 50,
-    "strategy": "gainers" 
+    "strategy": "mix",
+    "minListingAgeDays": 7
   },
   "preferWSAltH1": true,
   "backfillH1Limit": 48,

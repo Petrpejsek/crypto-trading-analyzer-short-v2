@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Consistent, reliable dev orchestration for Trader
-# - Strict ports (no fallbacks): frontend :4201, backend :8789
+# Consistent, reliable dev orchestration for Trader SHORT V2
+# - Strict ports (no fallbacks): frontend :4302, backend :8888 (BANNED: 4201/8789)
 # - Health checks required; fail fast on errors
 # - Cleans runtime logs/PIDs
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-FRONTEND_PORT=4201
-BACKEND_PORT=8789
+FRONTEND_PORT="${FRONTEND_PORT:-4302}"
+BACKEND_PORT="${BACKEND_PORT:-8888}"
 RUNTIME_DIR="$SCRIPT_DIR/runtime"
 ENV_FILE="$SCRIPT_DIR/.env.local"
 TEMPORAL_ADDRESS=""
@@ -21,6 +21,16 @@ warn() { echo "[WARN] $*" >&2; }
 err()  { echo "[ERROR] $*" >&2; exit 1; }
 
 need_cmd() { command -v "$1" >/dev/null 2>&1 || err "Missing required command: $1"; }
+
+# Hard guard: never use ports of the other project
+guard_ports() {
+  if [ "$FRONTEND_PORT" = "4201" ] || [ "$BACKEND_PORT" = "8789" ]; then
+    err "BANNED_PORTS: 4201/8789 are reserved for another project. Use FRONTEND_PORT=4302 BACKEND_PORT=8888."
+  fi
+  if [ "$FRONTEND_PORT" = "$BACKEND_PORT" ]; then
+    err "Invalid config: FRONTEND_PORT and BACKEND_PORT must differ."
+  fi
+}
 
 stop_ports() {
   info "Stopping listeners on :$FRONTEND_PORT and :$BACKEND_PORT"
@@ -141,7 +151,8 @@ wait_worker() {
 start_frontend() {
   info "Starting frontend (Vite) on :$FRONTEND_PORT"
   mkdir -p "$RUNTIME_DIR"
-  nohup npm run -s dev > "$RUNTIME_DIR/frontend_dev.log" 2>&1 & echo $! > "$RUNTIME_DIR/frontend.pid"
+  VITE_PROXY_TARGET="http://127.0.0.1:${BACKEND_PORT}" \
+  nohup npm exec -s vite -- --port "$FRONTEND_PORT" > "$RUNTIME_DIR/frontend_dev.log" 2>&1 & echo $! > "$RUNTIME_DIR/frontend.pid"
 }
 
 wait_frontend() {
@@ -206,6 +217,7 @@ need_cmd lsof; need_cmd curl; need_cmd npm; need_cmd node; need_cmd nohup; need_
 cmd="${1:-}"
 case "${cmd}" in
   start)
+    guard_ports
     stop_ports; stop_patterns; stop_worker; clean_runtime
     preflight_env; preflight_temporal
     start_backend; wait_backend
@@ -218,6 +230,7 @@ case "${cmd}" in
     stop_ports; stop_patterns; stop_worker; clean_runtime
     ;;
   restart|"")
+    guard_ports
     stop_ports; stop_patterns; stop_worker; clean_runtime
     preflight_env; preflight_temporal
     start_backend; wait_backend
