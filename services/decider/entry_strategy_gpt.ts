@@ -66,7 +66,8 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
       organization: (process as any)?.env?.OPENAI_ORG_ID,
       project: (process as any)?.env?.OPENAI_PROJECT
     } as any)
-    const model = 'gpt-4o'
+    // Model lze konfigurovat přes ENTRY_STRATEGY_MODEL; default: gpt-4o-mini (stabilní JSON mode)
+    const model = String(process.env.ENTRY_STRATEGY_MODEL || 'gpt-4o-mini')
 
     console.info('[ENTRY_STRATEGY_PAYLOAD_BYTES]', JSON.stringify(input).length)
 
@@ -87,7 +88,7 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
       required: ['entry','sl']
     }) as const
 
-    const callAssistant = async (kind: AssistantKind): Promise<{ ok: true, data: any, requestId?: string } | { ok: false, code: 'no_api_key'|'invalid_json'|'schema'|'empty_output'|'timeout'|'http'|'unknown', requestId?: string } > => {
+    const callAssistant = async (kind: AssistantKind): Promise<{ ok: true, data: any, requestId?: string } | { ok: false, code: 'no_api_key'|'invalid_json'|'schema'|'empty_output'|'timeout'|'http'|'http_400'|'http_401'|'http_403'|'http_404'|'http_409'|'http_422'|'http_429'|'http_500'|'unknown', requestId?: string } > => {
       try {
         const systemPrompt = kind === 'conservative' ? SYSTEM_PROMPT_CONS : SYSTEM_PROMPT_AGGR
         const body: any = {
@@ -276,7 +277,16 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
         return { ok: true, data: parsed, requestId }
       } catch (e: any) {
         const name = String(e?.name || '').toLowerCase()
-        const code = name.includes('abort') ? 'timeout' : (e?.status ? 'http' : 'unknown')
+        const status = Number(e?.status || e?.response?.status)
+        const code = name.includes('abort')
+          ? 'timeout'
+          : (Number.isFinite(status) && status > 0 ? (`http_${status}` as any) : (e?.status ? 'http' : 'unknown'))
+        try {
+          console.error(`[ENTRY_STRATEGY_${kind.toUpperCase()}_HTTP_ERR]`, {
+            status: status || null,
+            message: e?.response?.data?.error?.message || e?.message || null
+          })
+        } catch {}
         return { ok: false, code }
       }
     }
