@@ -2514,9 +2514,8 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store')
       const t0 = performance.now()
       try {
-        // universeStrategy: volume (default) | gainers | mix via query ?universe=...
-        const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
-        const universeStrategy = uniParam === 'gainers' ? 'gainers' : (uniParam === 'mix' ? 'mix' : 'volume')
+        // SHORT only: ignore ?universe=; always use 'volume' universe and rely on new 25+25 short preselect
+        const universeStrategy = 'volume'
         const fresh = String(url.searchParams.get('fresh') || '1') === '1'
         const topN = Number(url.searchParams.get('topN') || '')
         // Persist poslední UI snapshot kritéria pro background autopilot
@@ -2560,8 +2559,7 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store')
       const pro = url.pathname === '/api/snapshot_pro'
       try {
-        const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
-        const universeStrategy = uniParam === 'gainers' ? 'gainers' : (uniParam === 'mix' ? 'mix' : 'volume')
+        const universeStrategy = 'volume'
         const fresh = String(url.searchParams.get('fresh') || '1') === '1'
         const topN = Number(url.searchParams.get('topN') || '')
         // If a symbol is requested, force-include it in the universe build so it can't be dropped
@@ -2851,8 +2849,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/intraday') {
       res.setHeader('Cache-Control', 'no-store')
       try {
-        const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
-        const universeStrategy = uniParam === 'gainers' ? 'gainers' : (uniParam === 'mix' ? 'mix' : 'volume')
+        const universeStrategy = 'volume'
         const topN = Number(url.searchParams.get('topN') || '')
         const fresh = String(url.searchParams.get('fresh') || '1') === '1'
         const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh })
@@ -3005,8 +3002,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/metrics') {
       res.setHeader('Cache-Control', 'no-store')
       try {
-        const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
-        const universeStrategy = uniParam === 'gainers' ? 'gainers' : (uniParam === 'mix' ? 'mix' : 'volume')
+        const universeStrategy = 'volume'
         const topN = Number(url.searchParams.get('topN') || '')
         // Retry wrapper pro dočasné chyby (Abort/timeout)
         const retry = async <T>(fn: ()=>Promise<T>, attempts=2): Promise<T> => {

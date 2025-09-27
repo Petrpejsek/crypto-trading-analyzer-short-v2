@@ -476,7 +476,7 @@ export const App: React.FC = () => {
 
       // removed: local fetchWithRetry (using module-level helper)
 
-      const snapUrl = `/api/snapshot${universeStrategy === 'gainers' ? '?universe=gainers&topN=50' : '?topN=50'}`
+      const snapUrl = `/api/snapshot?topN=50`
       const snap = await fetchJsonWithTimeout<MarketRawSnapshot>(snapUrl, { timeoutMs: 300000 }) // 5 minut pro snapshot
       if (!snap.ok) {
         if (snap.json) { setErrorPayload(snap.json); throw new Error((snap.json as any)?.error || `HTTP ${snap.status}`) }
@@ -718,7 +718,7 @@ export const App: React.FC = () => {
     setCopiedSymbol(null)
     setLoadingSymbol(sym)
     try {
-      const q = universeStrategy === 'gainers' ? '?universe=gainers' : ''
+      const q = ''
       const sep = q ? '&' : '?'
       console.log('[COPY_COIN] Fetching:', `/api/intraday_any?symbol=${encodeURIComponent(sym)}`)
       const res = await fetchWithRetry(`/api/intraday_any?symbol=${encodeURIComponent(sym)}`)
@@ -757,7 +757,7 @@ export const App: React.FC = () => {
     // Clear previous UI error state before fresh fetch
     setError(null)
     try {
-      const q = `${universeStrategy === 'gainers' ? 'universe=gainers&' : ''}topN=50`
+      const q = `topN=50`
       const res = await fetchWithRetry(`/api/metrics?${q}`)
       if (!res.ok) {
         setError(`Server error: HTTP ${res.status}`)
@@ -1784,10 +1784,11 @@ export const App: React.FC = () => {
                 aria-pressed={universeStrategy === 'volume'}
               >Volume</button>
               <button
-                className={`btn toggle${universeStrategy === 'gainers' ? ' active' : ''}`}
-                onClick={() => setUniverseStrategy('gainers')}
-                aria-pressed={universeStrategy === 'gainers'}
-              >Gainers 24h</button>
+              className={`btn toggle disabled`}
+              onClick={() => {}}
+              aria-pressed={false}
+              disabled
+            >Gainers 24h (disabled)</button>
             </div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <button className="btn" style={{ border: '2px solid #333' }} onClick={copyRawAll} aria-label="Copy RAW dataset (all alts)" title={rawCopied ? 'Zkopírováno' : 'Copy RAW dataset'} disabled={rawLoading}>
