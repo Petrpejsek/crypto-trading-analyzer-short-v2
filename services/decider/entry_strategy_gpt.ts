@@ -33,6 +33,7 @@ export type EntryStrategyResponse = {
 export type EntryStrategyInput = {
   symbol: string
   asset_data: Record<string, any>
+  side?: 'LONG' | 'SHORT'
 }
 
 const ajv = new Ajv({ allErrors: true, removeAdditional: false, strict: false })
@@ -365,6 +366,26 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
         schema_version: SCHEMA_VERSION
       })
     }
+
+    // SHORT sanity (order and RRR): if side is SHORT, enforce tp3 < tp2 < tp1 < entry < sl and compute RRR for conservative plan
+    try {
+      const side = String((input as any)?.side || 'SHORT').toUpperCase()
+      if (side === 'SHORT') {
+        const plan: any = (output as any)?.conservative || null
+        if (plan && typeof plan === 'object' && Number.isFinite(plan.entry) && Number.isFinite(plan.sl)) {
+          const tp1 = Number(plan.tp1), tp2 = Number(plan.tp2), tp3 = Number(plan.tp3)
+          const entry = Number(plan.entry), sl = Number(plan.sl)
+          const orderOk = (Number.isFinite(tp3) && Number.isFinite(tp2) && Number.isFinite(tp1)) ? (tp3 < tp2 && tp2 < tp1 && tp1 < entry && entry < sl) : (entry < sl)
+          if (!orderOk) {
+            return result(false, 'schema', Date.now() - t0, null, { prompt_hash_conservative: PROMPT_CONS_HASH, prompt_hash_aggressive: PROMPT_AGGR_HASH, schema_version: SCHEMA_VERSION })
+          }
+          const rrr = (Number.isFinite(tp2) ? (entry - tp2) : (Number.isFinite(tp1) ? (entry - tp1) : 0)) / Math.max(1e-9, (sl - entry))
+          if (!(Number.isFinite(rrr) && rrr > 0)) {
+            return result(false, 'schema', Date.now() - t0, null, { prompt_hash_conservative: PROMPT_CONS_HASH, prompt_hash_aggressive: PROMPT_AGGR_HASH, schema_version: SCHEMA_VERSION })
+          }
+        }
+      }
+    } catch {}
 
     const latencyMs = Date.now() - t0
     return result(true, undefined, latencyMs, output, {

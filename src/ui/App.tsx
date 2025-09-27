@@ -1072,7 +1072,7 @@ export const App: React.FC = () => {
             const controller = new AbortController()
             // Prodloužit timeout: 180s kvůli špičkám zatížení a velikosti payloadů
             const timeout = window.setTimeout(() => controller.abort(), 180000)
-            const entryBody = JSON.stringify({ symbol: current, asset_data: asset })
+            const entryBody = JSON.stringify({ symbol: current, asset_data: asset, side: 'SHORT' })
             const strategyRes = await fetch('/api/entry_strategy', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
