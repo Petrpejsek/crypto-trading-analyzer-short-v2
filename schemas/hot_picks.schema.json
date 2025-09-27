@@ -19,7 +19,7 @@
           },
           "rating": {
             "type": "string",
-            "enum": ["🟢 Super Hot", "🟡 Zajímavý"],
+            "enum": ["🔻 Super Hot", "🟡 Zajímavý"],
             "description": "Hot rating with emoji"
           },
           "confidence": {

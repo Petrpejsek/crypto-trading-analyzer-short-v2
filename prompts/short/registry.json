@@ -1,74 +1,80 @@
 [
   {
+    "name": "SNAPSHOT_20250927T1701",
+    "path": "prompts/short/SNAPSHOT_20250927T1701.md",
+    "version": "20250927T1840",
+    "checksum_sha256": "0c7ad24e4f049762d370d4012ecab1456b17522d4953d7a5f5fe324e145129e0"
+  },
+  {
     "name": "entry_risk_manager",
     "path": "prompts/short/entry_risk_manager.md",
-    "version": "20250927T1701",
-    "checksum_sha256": "11c2db7c08b8ce593c09858ea2c7dd3afd0c07f62b1309b5088b6b5f94621a82"
+    "version": "20250927T1840",
+    "checksum_sha256": "abb3fba1db05ad3d6a3de7ce604445f97f57ddc79984212723068dc815834188"
   },
   {
     "name": "entry_strategy",
     "path": "prompts/short/entry_strategy.md",
-    "version": "20250927T1701",
+    "version": "20250927T1840",
     "checksum_sha256": "d07b7fa80d493938f1e5a75a4b50506ac55a3673d0b58373cb2045d4d2634ba4"
   },
   {
     "name": "entry_strategy_aggressive",
     "path": "prompts/short/entry_strategy_aggressive.md",
-    "version": "20250927T1701",
+    "version": "20250927T1840",
     "checksum_sha256": "a8b378223e74c0e3b58fc8fa8d0beaa4ec0946f593b221d46194b185d5d40d10"
   },
   {
     "name": "entry_strategy_conservative",
     "path": "prompts/short/entry_strategy_conservative.md",
-    "version": "20250927T1701",
+    "version": "20250927T1840",
     "checksum_sha256": "46133db8a2b1e74a420da12ad4d5f986c413a5fb932161bcb89ef92fc1e229c2"
   },
   {
     "name": "entry_updater",
     "path": "prompts/short/entry_updater.md",
-    "version": "20250927T1701",
+    "version": "20250927T1840",
     "checksum_sha256": "8a22d240a02cd9c039390adbffc069a2fb68e67c3b9d5359f27e1d955c1fffce"
   },
   {
     "name": "final_picker",
     "path": "prompts/short/final_picker.md",
-    "version": "20250927T1701",
+    "version": "20250927T1840",
     "checksum_sha256": "0176b42831991a2e0c9e9c74a19177e8a13e3486bc4755a76070c67d901188ef"
   },
   {
     "name": "hot_screener",
     "path": "prompts/short/hot_screener.md",
-    "version": "20250927T1701",
-    "checksum_sha256": "4d7f199bb261904ca85171a983b9222e06cf0bbf336062dd31bdc1e39ac10451"
+    "version": "20250927T1840",
+    "checksum_sha256": "fbd2a7aecd7a6535c14cdf5811b81156b4bbadca6f4f360f34aa4e656c3b36db"
   },
   {
     "name": "hot_screener_short",
     "path": "prompts/short/hot_screener_short.md",
-    "version": "20250927T1701",
+    "version": "20250927T1840",
     "checksum_sha256": "d4906bd91009b222732548d2c7bba72bc43a587b70b1e9df2ee5478877d6518c"
   },
   {
     "name": "market_decider",
     "path": "prompts/short/market_decider.md",
-    "version": "20250927T1701",
+    "version": "20250927T1840",
     "checksum_sha256": "cd2fed41bcef56bee4ce1076d2a549a1ff780bbcf99242925fd03e8e358a2be4"
   },
   {
     "name": "profit_taker",
     "path": "prompts/short/profit_taker.md",
-    "version": "20250927T1701",
+    "version": "20250927T1840",
     "checksum_sha256": "a6d991bd986b9b6b6cf8b95a23f929c699056a5e26317fa57462b8aacdb00bf1"
   },
   {
     "name": "strategy_updater",
     "path": "prompts/short/strategy_updater.md",
-    "version": "20250927T1701",
+    "version": "20250927T1840",
     "checksum_sha256": "74f8e015ed252f0250faf7cf9f3f86eccfe411962be39d379ab78d63a6021936"
   },
   {
     "name": "top_up_executor",
     "path": "prompts/short/top_up_executor.md",
-    "version": "20250927T1701",
+    "version": "20250927T1840",
     "checksum_sha256": "66d122f10ca0ae425d89771d456bf31f4f420bfac54058d8704f00222a491ffa"
   }
 ]

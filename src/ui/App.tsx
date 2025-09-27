@@ -956,7 +956,14 @@ export const App: React.FC = () => {
           const sym = normalize(String(o?.symbol || ''))
           const reduceOnly = Boolean(o?.reduceOnly)
           const closePosition = Boolean(o?.closePosition)
-          if (sym && !(reduceOnly || closePosition)) blocked.add(sym)
+          const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+          const side = String((o as any)?.side || '')
+          const type = String((o as any)?.type || '')
+          const isBuy = side.toUpperCase() === 'BUY'
+          const isEntryType = ['LIMIT','STOP','STOP_MARKET','STOP_LIMIT'].includes(type.toUpperCase())
+          const isInternalEntry = /^(e_l_|e_stl_|e_stm_|e_m_)/.test(clientId)
+          // Block ONLY internal entry orders that are active (not reduceOnly/closePosition)
+          if (sym && isBuy && isEntryType && isInternalEntry && !(reduceOnly || closePosition)) blocked.add(sym)
         }
         const pList = Array.isArray(j?.positions) ? j.positions : []
         for (const p of pList) {
@@ -1007,7 +1014,13 @@ export const App: React.FC = () => {
           const sym = normalizeLocal(String(o?.symbol || ''))
           const reduceOnly = Boolean(o?.reduceOnly)
           const closePosition = Boolean(o?.closePosition)
-          if (sym && !(reduceOnly || closePosition)) blocked.add(sym)
+          const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+          const side = String((o as any)?.side || '')
+          const type = String((o as any)?.type || '')
+          const isBuy = side.toUpperCase() === 'BUY'
+          const isEntryType = ['LIMIT','STOP','STOP_MARKET','STOP_LIMIT'].includes(type.toUpperCase())
+          const isInternalEntry = /^(e_l_|e_stl_|e_stm_|e_m_)/.test(clientId)
+          if (sym && isBuy && isEntryType && isInternalEntry && !(reduceOnly || closePosition)) blocked.add(sym)
         }
         const pList = Array.isArray(j?.positions) ? j.positions : []
         for (const p of pList) {
