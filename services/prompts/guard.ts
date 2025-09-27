@@ -2,7 +2,7 @@ import path from 'node:path'
 
 export const PROMPTS_SIDE: 'SHORT' = (() => {
   const side = String(process.env.TRADE_SIDE || '').toUpperCase()
-  if (side && side !== 'SHORT') {
+  if (side !== 'SHORT') {
     throw new Error('prompt side mismatch: TRADE_SIDE must be SHORT for this service')
   }
   return 'SHORT'
