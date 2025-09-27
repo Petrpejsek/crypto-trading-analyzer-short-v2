@@ -9,6 +9,7 @@ import decisionSchemaJson from '../../schemas/market_decision.schema.json'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { resolvePromptPathShort } from '../prompts/guard'
 import { readResponsesJson } from './lib/read_responses_json'
 import { cleanSchema } from './lib/clean_schema'
 
@@ -16,7 +17,7 @@ const ajv = new Ajv({ allErrors: true, removeAdditional: true, strict: false })
 addFormats(ajv)
 const validateDecision = ajv.compile(decisionSchemaJson as any)
 const cfg = JSON.parse(fs.readFileSync(path.resolve('config/decider.json'), 'utf8'))
-const SYSTEM = fs.readFileSync(path.resolve('prompts/market_decider.md'), 'utf8')
+const SYSTEM = fs.readFileSync(resolvePromptPathShort('market_decider.md'), 'utf8')
 const PROMPT_HASH = crypto.createHash('sha256').update(SYSTEM).digest('hex')
 const SCHEMA_VERSION = String((decisionSchemaJson as any).version || '1')
 const decisionSchema = cleanSchema(decisionSchemaJson as any)

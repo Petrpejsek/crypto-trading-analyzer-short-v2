@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import dotenv from 'dotenv'
 import { buildMarketRawSnapshot } from './fetcher/binance'
+import { PROMPTS_SIDE } from '../services/prompts/guard'
 import { performance } from 'node:perf_hooks'
 import http from 'node:http'
 import { decideMarketStrict } from '../services/decider/market_decider_gpt'
@@ -33,6 +34,14 @@ try {
   tryLoad(path.resolve(process.cwd(), '.env.local'))
   tryLoad(path.resolve(process.cwd(), '.env'))
 } catch {}
+
+// Boot banner: PROMPTS side and verification
+try {
+  console.error(`PROMPTS_SIDE=${PROMPTS_SIDE} (verified=OK)`) // SHORT only
+} catch (e) {
+  console.error('PROMPTS_SIDE verification failed', e)
+  process.exit(1)
+}
 
 // Ensure Strategy Updater loop aligns with toggle
 async function ensureStrategyUpdaterLoop(enabled: boolean): Promise<{ started?: boolean; terminated?: boolean; id?: string }> {

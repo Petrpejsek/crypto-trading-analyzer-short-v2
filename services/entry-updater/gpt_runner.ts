@@ -9,7 +9,7 @@ const ajv = new Ajv({ strict: false })
 addFormats(ajv)
 
 function readPrompt(): string {
-  const file = path.resolve('prompts/entry_updater.md')
+  const file = path.resolve('prompts/short/entry_updater.md')
   return fs.readFileSync(file, 'utf8')
 }
 

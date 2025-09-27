@@ -6,6 +6,7 @@ import { readResponsesJson } from './lib/read_responses_json'
 import { cleanSchema } from './lib/clean_schema'
 import fs from 'node:fs'
 import path from 'node:path'
+import { resolvePromptPathShort } from '../prompts/guard'
 import crypto from 'node:crypto'
 import { buildFinalPickerCandidates } from './build_final_picker_candidates'
 
@@ -58,7 +59,7 @@ export async function runFinalPicker(input: FinalPickInput): Promise<{ ok: boole
     const fpCfg = cfg?.final_picker || {}
     const model = fpCfg?.model || 'gpt-5'
     // No timeout needed - let API handle its own timeouts
-    const system = fs.readFileSync(path.resolve('prompts/final_picker.md'), 'utf8')
+    const system = fs.readFileSync(resolvePromptPathShort('final_picker.md'), 'utf8')
     const promptHash = crypto.createHash('sha256').update(system).digest('hex')
     const schemaVersion = String((schemaJson as any).version || '1')
     const schema = cleanSchema(schemaJson as any)

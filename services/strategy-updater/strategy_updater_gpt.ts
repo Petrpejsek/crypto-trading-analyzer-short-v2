@@ -92,7 +92,7 @@ addFormats(ajv)
 const validateResponse = ajv.compile(responseSchema)
 
 function readStrategyUpdaterPrompt(): string {
-  const file = path.resolve('prompts/strategy_updater.md')
+  const file = path.resolve('prompts/short/strategy_updater.md')
   return fs.readFileSync(file, 'utf8')
 }
 

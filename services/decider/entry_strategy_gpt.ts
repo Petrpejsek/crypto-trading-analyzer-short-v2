@@ -4,6 +4,7 @@ import addFormats from 'ajv-formats'
 import entryStrategySchemaJson from '../../schemas/entry_strategy.schema.json'
 import fs from 'node:fs'
 import path from 'node:path'
+import { resolvePromptPathShort } from '../prompts/guard'
 import crypto from 'node:crypto'
 import { cleanSchema } from './lib/clean_schema'
 
@@ -39,10 +40,10 @@ addFormats(ajv)
 const validate = ajv.compile(entryStrategySchemaJson as any)
 
 const SYSTEM_PROMPT_CONS = (() => {
-  try { return fs.readFileSync(path.resolve('prompts/entry_strategy_conservative.md'), 'utf8') } catch { return '' }
+  try { return fs.readFileSync(resolvePromptPathShort('entry_strategy_conservative.md'), 'utf8') } catch { return '' }
 })()
 const SYSTEM_PROMPT_AGGR = (() => {
-  try { return fs.readFileSync(path.resolve('prompts/entry_strategy_aggressive.md'), 'utf8') } catch { return '' }
+  try { return fs.readFileSync(resolvePromptPathShort('entry_strategy_aggressive.md'), 'utf8') } catch { return '' }
 })()
 const PROMPT_CONS_HASH = crypto.createHash('sha256').update(SYSTEM_PROMPT_CONS).digest('hex')
 const PROMPT_AGGR_HASH = crypto.createHash('sha256').update(SYSTEM_PROMPT_AGGR).digest('hex')

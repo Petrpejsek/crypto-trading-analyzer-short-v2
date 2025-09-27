@@ -1,6 +1,7 @@
 import OpenAI from 'openai'
 import fs from 'node:fs'
 import path from 'node:path'
+import { resolvePromptPathShort } from '../prompts/guard'
 import Ajv from 'ajv'
 import addFormats from 'ajv-formats'
 
@@ -33,7 +34,7 @@ const schema = JSON.parse(fs.readFileSync(path.resolve('schemas/profit_taker.sch
 const validate = ajv.compile(schema as any)
 
 const cfg = JSON.parse(fs.readFileSync(path.resolve('config/profit_taker.json'), 'utf8'))
-const SYSTEM_PROMPT = fs.readFileSync(path.resolve('prompts/profit_taker.md'), 'utf8')
+const SYSTEM_PROMPT = fs.readFileSync(resolvePromptPathShort('profit_taker.md'), 'utf8')
 
 function sleep(ms: number): Promise<void> { return new Promise(res => setTimeout(res, ms)) }
 

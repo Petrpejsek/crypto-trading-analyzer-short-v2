@@ -4,6 +4,7 @@ import addFormats from 'ajv-formats'
 import hotPicksSchemaJson from '../../schemas/hot_picks.schema.json'
 import fs from 'node:fs'
 import path from 'node:path'
+import { resolvePromptPathShort } from '../prompts/guard'
 import crypto from 'node:crypto'
 import { cleanSchema } from './lib/clean_schema'
 
@@ -27,7 +28,7 @@ const ajv = new Ajv({ allErrors: true, removeAdditional: true, strict: false })
 addFormats(ajv)
 const validate = ajv.compile(hotPicksSchemaJson as any)
 
-const SYSTEM_PROMPT = fs.readFileSync(path.resolve('prompts/hot_screener.md'), 'utf8')
+const SYSTEM_PROMPT = fs.readFileSync(resolvePromptPathShort('hot_screener.md'), 'utf8')
 const PROMPT_HASH = crypto.createHash('sha256').update(SYSTEM_PROMPT).digest('hex')
 const SCHEMA_VERSION = String((hotPicksSchemaJson as any).version || '1.0.0')
 const schema = cleanSchema(hotPicksSchemaJson as any)

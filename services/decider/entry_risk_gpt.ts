@@ -3,6 +3,7 @@ import Ajv from 'ajv'
 import addFormats from 'ajv-formats'
 import fs from 'node:fs'
 import path from 'node:path'
+import { resolvePromptPathShort } from '../prompts/guard'
 import crypto from 'node:crypto'
 import riskSchemaJson from '../../schemas/entry_risk.schema.json'
 import { cleanSchema } from './lib/clean_schema'
@@ -11,7 +12,7 @@ const ajv = new Ajv({ allErrors: true, removeAdditional: false, strict: false })
 addFormats(ajv)
 const validate = ajv.compile(riskSchemaJson as any)
 
-const SYSTEM_PROMPT = fs.readFileSync(path.resolve('prompts/entry_risk_manager.md'), 'utf8')
+const SYSTEM_PROMPT = fs.readFileSync(resolvePromptPathShort('entry_risk_manager.md'), 'utf8')
 const PROMPT_HASH = crypto.createHash('sha256').update(SYSTEM_PROMPT).digest('hex')
 const SCHEMA_VERSION = String((riskSchemaJson as any).version || '1.0.0')
 
