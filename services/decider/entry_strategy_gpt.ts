@@ -96,6 +96,7 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
         const body: any = {
           model,
           messages: [
+            { role: 'system', content: 'Reply with JSON only. Output must be a single JSON object with numeric fields where applicable. No prose.' },
             { role: 'system', content: systemPrompt },
             { role: 'user', content: JSON.stringify(input) }
           ],
