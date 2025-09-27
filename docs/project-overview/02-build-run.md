@@ -104,6 +104,43 @@ PID=$(lsof -n -iTCP:4302 -sTCP:LISTEN -t | head -n1); lsof -a -p "$PID" -d cwd
 PID=$(lsof -n -iTCP:8888 -sTCP:LISTEN -t | head -n1); lsof -a -p "$PID" -d cwd
 ```
 
+### Ports & Environment Guard (aby se to už nikdy nespletlo)
+
+1) Hard pravidla v kódu
+- Backend má guard: `TRADE_SIDE` musí být `SHORT`. Při nesouladu proces skončí.
+- V produkci musí běžet na `PORT=3081`; v dev používáme `:8888`. Produkční guard chybný port ukončí.
+
+2) Dev režim – jediný správný způsob spuštění
+```bash
+FRONTEND_PORT=4302 BACKEND_PORT=8888 ./dev.sh restart
+```
+
+3) Verifikace, že UI mluví na správný backend
+```bash
+# Frontend → proxy health
+curl -sf http://127.0.0.1:4302/api/health
+
+# Backend health přímo (dev)
+curl -sf http://127.0.0.1:8888/api/health
+
+# V produkci (PM2 short backend)
+curl -sf http://127.0.0.1:3081/api/health
+```
+
+4) Rychlý sanity check „jsem na short backendu?“
+```bash
+curl -s http://127.0.0.1:3081/api/orders_console \
+ | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const j=JSON.parse(s);const sample=(j.open_orders||[]).slice(0,3);console.log({port:3081, shortOnly: true, sample: sample.map(o=>({symbol:o.symbol, side:o.side, positionSide:o.positionSide, isExternal:o.isExternal}))})})"
+```
+
+5) PM2 jména pro SHORT instanci (produkce)
+- `trader-short-backend` (PORT 3081)
+- `trader-short-worker`
+
+6) Nejčastější pasti a fixy
+- UI ukazuje data z jiného projektu: přepni proxy/URL na `:3081` (prod) nebo `:8888` (dev)
+- PM2 běží starý proces: `pm2 restart trader-short-backend --update-env`
+
 ### Minimální konfigurace pro trading
 - `config/trading.json`:
   - `RAW_PASSTHROUGH: true` – engine posílá přesně UI hodnoty (žádné rounding uvnitř engine)

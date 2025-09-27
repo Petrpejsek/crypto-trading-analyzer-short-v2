@@ -103,7 +103,11 @@ preflight_temporal() {
 start_backend() {
   info "Starting backend on :$BACKEND_PORT"
   mkdir -p "$RUNTIME_DIR"
-  PORT="$BACKEND_PORT" nohup npm run -s dev:server > "$RUNTIME_DIR/backend_dev.log" 2>&1 & echo $! > "$RUNTIME_DIR/backend.pid"
+  # Enforce dev identity for this project: SHORT side and dev env (override any .env.local)
+  NODE_ENV="development" \
+  TRADE_SIDE="SHORT" \
+  PORT="$BACKEND_PORT" \
+  nohup npm run -s dev:server > "$RUNTIME_DIR/backend_dev.log" 2>&1 & echo $! > "$RUNTIME_DIR/backend.pid"
 }
 
 wait_backend() {
@@ -123,6 +127,8 @@ wait_backend() {
 start_worker() {
   info "Starting Temporal worker (TASK_QUEUE=$TASK_QUEUE)"
   mkdir -p "$RUNTIME_DIR"
+  NODE_ENV="development" \
+  TRADE_SIDE="SHORT" \
   TEMPORAL_ADDRESS="$TEMPORAL_ADDRESS" \
   TASK_QUEUE="$TASK_QUEUE" \
   TASK_QUEUE_OPENAI="$TASK_QUEUE_OPENAI" \

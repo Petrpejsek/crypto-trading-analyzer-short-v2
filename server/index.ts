@@ -1551,6 +1551,14 @@ const server = http.createServer(async (req, res) => {
           isExternal: ((): boolean => {
             try {
               const idStr = String((o as any)?.C || (o as any)?.c || (o as any)?.clientOrderId || '')
+              const posSide = String((o as any)?.positionSide || '').toUpperCase()
+              const side = String((o as any)?.side || '').toUpperCase()
+              const reduceOnly = Boolean((o as any)?.reduceOnly)
+              const closePosition = Boolean((o as any)?.closePosition)
+              // SHORT nikdy external
+              if (posSide === 'SHORT') return false
+              // Short entry kontext (SELL bez exit flagů a SHORT posSide, pokud by nebyl vyplněn) – chovej se jako interní
+              if (!posSide && side === 'SELL' && !(reduceOnly || closePosition)) return false
               // Pravidlo: VŠECHNY naše interní ordery MUSÍ mít prefix 'sv2_'
               // Cokoliv bez 'sv2_' je external.
               return !idStr.startsWith('sv2_')
@@ -1827,10 +1835,12 @@ const server = http.createServer(async (req, res) => {
                 const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
                 // Internal entry prefixes cover LIMIT/STOP/MARKET variants
                 const internalEntry = /^(e_l_|e_stl_|e_stm_|e_m_)/.test(clientId)
-                const sideBuy = String(o?.side || '').toUpperCase() === 'BUY'
+                const sideUp = String(o?.side || '').toUpperCase()
+                const typeUp = String(o?.type || '').toUpperCase()
+                const isEntryType = (typeUp === 'LIMIT' || typeUp === 'STOP' || typeUp === 'STOP_MARKET' || typeUp === 'MARKET')
                 const reduceOnly = Boolean(o?.reduceOnly)
                 const closePosition = Boolean(o?.closePosition)
-                const isEntry = internalEntry && sideBuy && !(reduceOnly || closePosition)
+                const isEntry = internalEntry && isEntryType && (sideUp === 'BUY' || sideUp === 'SELL') && !(reduceOnly || closePosition)
                 if (isEntry) entrySymbols.push(String(o?.symbol || ''))
               } catch {}
             }
@@ -1909,7 +1919,9 @@ const server = http.createServer(async (req, res) => {
                 const reduceOnly = Boolean((o as any)?.reduceOnly)
                 const closePosition = Boolean((o as any)?.closePosition)
                 const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-                const isInternalEntry = /^(e_l_|e_stl_|e_stm_)/.test(clientId) && side === 'BUY' && (type === 'LIMIT' || type === 'STOP' || type === 'STOP_MARKET') && !reduceOnly && !closePosition
+                const internalEntry = /^(e_l_|e_stl_|e_stm_|e_m_)/.test(clientId)
+                const isEntryType = (type === 'LIMIT' || type === 'STOP' || type === 'STOP_MARKET' || type === 'MARKET')
+                const isInternalEntry = internalEntry && (side === 'BUY' || side === 'SELL') && isEntryType && !reduceOnly && !closePosition
                 if (!isInternalEntry) continue
                 const sym = String((o as any)?.symbol || '')
                 if (!sym) continue
@@ -1967,12 +1979,7 @@ const server = http.createServer(async (req, res) => {
               }
             }
 
-            // Clean waiting TP registry for affected symbols
-            try {
-              for (const sym of Array.from(qualifiedSymbols)) {
-                try { cleanupWaitingTpForSymbol(sym) } catch {}
-              }
-            } catch {}
+            // DO NOT touch waiting TP registry here. Cleanup happens only on explicit entry failure.
 
             try { console.error('[SWEEPER_DELTA7]', { symbols: Array.from(qualifiedSymbols), cancelled: toCancel.length }) } catch {}
           }
@@ -2065,12 +2072,7 @@ const server = http.createServer(async (req, res) => {
                 }))
                 void settled
               }
-              // Clean waiting TP registry for affected symbols
-              try {
-                for (const sym of Array.from(affectedSymbols)) {
-                  try { cleanupWaitingTpForSymbol(sym) } catch {}
-                }
-              } catch {}
+              // DO NOT purge waiting TP registry here; keep waiting TP to be promoted once position opens.
               try { console.error('[NO_ENTRY_CLEANUP]', { symbols: Array.from(affectedSymbols), cancelled: toCancel.length, grace_ms: graceMs }) } catch {}
             }
           }
@@ -2364,6 +2366,14 @@ const server = http.createServer(async (req, res) => {
           isExternal: ((): boolean => {
             try {
               const idStr = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+              const posSide = String((o as any)?.positionSide || '').toUpperCase()
+              const side = String((o as any)?.side || '').toUpperCase()
+              const reduceOnly = Boolean((o as any)?.reduceOnly)
+              const closePosition = Boolean((o as any)?.closePosition)
+              // SHORT nikdy external
+              if (posSide === 'SHORT') return false
+              // Short entry kontext (SELL bez exit flagů a SHORT posSide neznámý) – chovej se jako interní
+              if (!posSide && side === 'SELL' && !(reduceOnly || closePosition)) return false
               // Consider known internal prefixes only; avoid dynamic requires in hot path
               return idStr ? !/^(e_l_|e_stl_|e_stm_|e_m_|x_sl_|x_tp_)/.test(idStr) : true
             } catch { return true }
@@ -2414,6 +2424,8 @@ const server = http.createServer(async (req, res) => {
                 const side = String(o.side || '').toUpperCase()
                 const reduceOnly = Boolean(o.reduceOnly || o.closePosition)
                 const posSide = String((o as any)?.positionSide || '').toUpperCase()
+                // Hard rule: SHORT orders are never external
+                if (posSide === 'SHORT') return false
                 // Internal only if our project prefix 'sv2_' is present
                 const isOur = id.startsWith('sv2_')
                 if (!isOur) return true

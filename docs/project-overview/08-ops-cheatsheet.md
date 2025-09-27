@@ -2,9 +2,15 @@
 
 ### Rychlé ověření běhu
 ```bash
-curl http://localhost:8788/api/health
-curl "http://localhost:8788/api/snapshot?universe=gainers&topN=50"
-curl http://localhost:8788/api/limits
+# DEV (short v tomto repu): backend :8888
+curl -sf http://127.0.0.1:8888/api/health
+
+# PROD (PM2 short backend): :3081
+curl -sf http://127.0.0.1:3081/api/health
+
+# Snapshot/limits – použij správný port dle režimu
+curl -sf "http://127.0.0.1:3081/api/snapshot?universe=gainers&topN=50"
+curl -sf http://127.0.0.1:3081/api/limits
 ```
 
 ### Diagnostika rate limitu/ban
@@ -26,8 +32,18 @@ curl -X POST localhost:8788/api/test/market_fill \
 1) Naplňte `.env` (BINANCE/OPENAI klíče)
 2) `npm ci`
 3) `npm run build`
-4) `npm run dev:server`
-5) Otevřete `http://localhost:8788` nebo proxujte přes reverzní proxy na `/` a `/api`
+4) Spusťte přes PM2 short ekosystém (zajistí TRADE_SIDE=SHORT, PORT=3081)
+```bash
+pm2 start ecosystem.short.config.cjs --update-env
+pm2 status
+```
+5) Ověřte health na `:3081` nebo proxujte přes reverzní proxy na `/` a `/api`
+
+### Quick-check: správný backend/port
+```bash
+curl -sf http://127.0.0.1:3081/api/orders_console \
+ | node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const j=JSON.parse(s);const shorts=(j.open_orders||[]).filter(o=>String(o.positionSide).toUpperCase()==='SHORT');console.log({port:3081,shorts:shorts.length});})"
+```
 
 
 

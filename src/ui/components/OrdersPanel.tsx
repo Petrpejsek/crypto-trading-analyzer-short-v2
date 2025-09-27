@@ -981,7 +981,17 @@ export const OrdersPanel: React.FC = () => {
                     <td style={{ textAlign: 'right' }}>{fmtNum(Number(w.tp) * 1.03, 6)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(Number(w.tp), 6)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(marks[w.symbol] as any, 6)}</td>
-                    <td style={{ textAlign: 'right' }}>-</td>
+                    <td style={{ textAlign: 'right' }}>{(() => {
+                      // Show Δ% to PLANNED ENTRY even when no entry order is open yet
+                      const plannedEntry = Number((lastEntryBySymbol as any)[w.symbol])
+                      const m = Number(marks[w.symbol])
+                      if (Number.isFinite(plannedEntry) && plannedEntry > 0 && Number.isFinite(m) && m > 0) {
+                        const pct = Math.abs((plannedEntry - m) / m) * 100
+                        const color = colorForDelta(pct)
+                        return <span style={{ color }}>{fmtPct(pct, 2)}</span>
+                      }
+                      return '-'
+                    })()}</td>
                     <td>{'GTC'}</td>
                     <td>{'reduceOnly'}</td>
                     <td>-</td>
