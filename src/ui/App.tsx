@@ -166,7 +166,7 @@ export const App: React.FC = () => {
   const [loadingSymbol, setLoadingSymbol] = useState<string | null>(null);
   const [rawCoins, setRawCoins] = useState<any[] | null>(null);
   const [rawCoinsTs, setRawCoinsTs] = useState<number | null>(null);
-  const [universeStrategy, setUniverseStrategy] = useState<'volume' | 'gainers'>(() => 'gainers');
+  const [universeStrategy, setUniverseStrategy] = useState<'volume' | 'gainers'>(() => 'volume');
   const prevStrategyRef = useRef(universeStrategy)
   useEffect(() => {
     if (prevStrategyRef.current !== universeStrategy) {

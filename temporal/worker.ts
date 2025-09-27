@@ -5,6 +5,13 @@ import activities from './activities';
 
 async function run(): Promise<void> {
   const env = loadEnv();
+  try {
+    console.log(`[temporal] ENV_CHECK`, {
+      TEMPORAL_NAMESPACE: String(process.env.TEMPORAL_NAMESPACE || ''),
+      TRADE_SIDE: String(process.env.TRADE_SIDE || ''),
+      queues: { trader: env.traderQueue, openai: env.openaiQueue, binance: env.binanceQueue }
+    })
+  } catch {}
 
   // Orchestrator worker (high-level workflows)
   const traderWorker = await Worker.create({

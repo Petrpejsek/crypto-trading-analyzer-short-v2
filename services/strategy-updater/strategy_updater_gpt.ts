@@ -289,7 +289,7 @@ export async function fetchMarketDataForSymbol(symbol: string): Promise<any> {
   try {
     // Use buildMarketRawSnapshot with proper backend configuration
     const snapshot = await buildMarketRawSnapshot({ 
-      universeStrategy: 'gainers', 
+      universeStrategy: 'volume', 
       desiredTopN: 50,
       includeSymbols: [symbol], 
       fresh: true, 

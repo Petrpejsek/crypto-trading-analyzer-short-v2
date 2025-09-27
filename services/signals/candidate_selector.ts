@@ -139,58 +139,69 @@ export function selectCandidates(
     const r = (idx < 0 ? sorted.length - 1 : idx) / Math.max(1, sorted.length - 1)
     return r
   }
-  // Precompute arrays for ranking
-  const retsM15 = filtered.map(c => c.ret_m15_pct ?? 0)
-  const retsH1 = filtered.map(c => c.ret_h1_pct ?? 0)
-  const rvolH1 = filtered.map(c => c.rvol_h1 ?? 0)
-  const atrP = filtered.map(c => c.atr_pct_H1 ?? 0)
-  const vwapRel = filtered.map(c => c.vwap_rel_M15 ?? 0)
-  const oiChg = filtered.map(c => c.oi_change_pct_h1 ?? 0)
-  const bursts = filtered.map(c => c.burst_m15_pct ?? 0)
-  const w = (candCfg as any).weights
-  const wx = (candCfg as any).score_extra || {}
-  function scoreOf(c: any): number {
-    let s =
-      (w.ret_m15_pct ?? 0.25) * rank(retsM15, c.ret_m15_pct) +
-      (w.rvol_h1 ?? 0.20) * rank(rvolH1, c.rvol_h1) +
-      (w.ret_h1_pct ?? 0.15) * rank(retsH1, c.ret_h1_pct) +
-      (w.atr_pct_h1 ?? 0.15) * rank(atrP, c.atr_pct_H1) +
-      (w.vwap_rel_m15 ?? 0.15) * rank(vwapRel, c.vwap_rel_M15) +
-      (w.oi_change_pct_h1 ?? 0.10) * rank(oiChg, c.oi_change_pct_h1) +
-      (((candCfg as any)?.score?.w_burst_m15 ?? 0.08)) * rank(bursts, c.burst_m15_pct) +
-      (wx.w_body_ratio_m15 ?? 0.08) * (Number.isFinite(c.body_ratio_m15) ? Number(c.body_ratio_m15) : 0) +
-      (wx.w_consec_above_vwap_m15 ?? 0.05) * (Number.isFinite(c.consec_above_vwap_m15) ? Math.min(1, Number(c.consec_above_vwap_m15)/5) : 0) +
-      (wx.w_rvol_liq_product ?? 0.06) * (Number.isFinite(c.rvol_liq_product) ? Math.tanh(Number(c.rvol_liq_product)/10) : 0)
-    // OI divergence squeeze bonus
-    const thrDiv = Number((candCfg as any)?.score_extra?.thr_oi_div ?? 5)
-    if (Number.isFinite(c.oi_change_pct_h1) && Number.isFinite(c.ret_m15_pct)) {
-      const squeeze = (c.ret_h1_pct ?? 0) < 0 && (c.oi_change_pct_h1 ?? 0) > thrDiv && (c.ret_m15_pct ?? 0) > 0
-      const good = squeeze ? (wx.w_oi_divergence ?? 0.05) : 0
-      s += good
-      if (!squeeze && (c.oi_price_div_h1 ?? 0) > 0) s -= 0.01
-    }
-    if (c.oi_change_pct_h1 == null) s -= ((candCfg as any)?.score?.penalty_missing_oi_delta ?? 0)
-    if (c.oi_delta_unreliable === true) {
-      const base = ((candCfg as any)?.score?.penalty_oi_unreliable ?? 0)
-      const byAge = (candCfg as any)?.score?.penalty_oi_unreliable_by_age
-      let extra = 0
-      if (byAge?.enabled && Number.isFinite(c.oi_prev_age_min)) {
-        const gap = Math.max(0, 60 - Math.min(60, Number(c.oi_prev_age_min)))
-        extra = (gap / 60) * Number(byAge.max_additional ?? 0)
-      }
-      s -= (base + extra)
-    }
-    if (c.burst_m15_pct == null) s -= ((((candCfg as any)?.score?.w_burst_m15 ?? 0.08) > 0) ? 0.01 : 0)
-    if (c.vwap_m15 == null && c.vwap_rel_M15 == null) s -= ((candCfg as any)?.score?.penalty_missing_vwap ?? 0)
-    const emaBonus = (c.ema_stack ?? 0) > 0 ? (w.ema_stack_bonus ?? 0.5) : (c.ema_stack ?? 0) < 0 ? -(w.ema_stack_bonus ?? 0.5) : 0
-    const newBonus = (c.is_new ? (w.new_coin_bonus ?? 0.5) : 0)
-    // Cooldown penalizace
-    const cdMax = Number((candCfg as any)?.score_extra?.penalty_cooldown_max ?? 0.04)
-    if (Number.isFinite(c.cooldown_factor)) s -= cdMax * Math.max(0, Math.min(1, Number(c.cooldown_factor)))
-    const out = s + emaBonus + newBonus
-    // clamp S into [0,1] for stability
-    return Number(Math.max(0, Math.min(1, out)).toFixed(4))
+  // SHORT preselect logic: two branches (overextended and downtrend), 25+25
+  const LIQ_MIN = 100000
+  const SPREAD_MAX_BPS = 10
+  const MIN_AGE_HOURS = 24 * 7
+  const isPerp = (c: any) => (String((c as any)?.market_type || 'perp').toLowerCase() === 'perp')
+  const commonOk = (c: any): boolean => {
+    const liqOk = Number(c.volume24h_usd || 0) >= LIQ_MIN
+    const spreadOk = !Number.isFinite((c as any).spread_bps) || Number((c as any).spread_bps) <= SPREAD_MAX_BPS
+    const ageOk = !Number.isFinite((c as any).age_hours) || Number((c as any).age_hours) >= MIN_AGE_HOURS
+    return liqOk && spreadOk && ageOk && isPerp(c)
   }
+  // Overextended/up: large 24h gain, RSI high, price >> EMA, funding positive and increasing (approx by funding_z>0)
+  const overextended = filtered.filter(c => {
+    if (!commonOk(c)) return false
+    const ret24 = Number((c as any).ret_24h_pct || c.ret_h1_pct || 0)
+    const rsiH1 = Number((c as any).RSI_H1 || 0)
+    const rsiM15 = Number((c as any).RSI_M15 || 0)
+    const px = Number(c.price || 0)
+    const ema20 = Number((c as any).ema20_H1 || NaN)
+    const ema50 = Number((c as any).ema50_H1 || NaN)
+    const ema200 = Number((c as any).ema200_H1 || NaN)
+    const atrPct = Number(c.atr_pct_H1 || 0)
+    const funding = Number(c.funding || 0)
+    const fz = Number((c as any).funding_z || 0)
+    const dist20 = Number.isFinite(ema20) && px ? Math.abs((px - ema20) / px) : 0
+    const dist50 = Number.isFinite(ema50) && px ? Math.abs((px - ema50) / px) : 0
+    const dist200 = Number.isFinite(ema200) && px ? Math.abs((px - ema200) / px) : 0
+    const distOk = atrPct && ((dist20 > 0.015 * atrPct) || (dist50 > 0.015 * atrPct) || (dist200 > 0.015 * atrPct))
+    const rsiOk = (rsiH1 > 70) || (rsiM15 > 75)
+    const fundOk = (funding > 0) && (fz > 0)
+    return (ret24 > 0) && rsiOk && distOk && fundOk
+  }).sort((a,b)=> (Number((b as any).ret_24h_pct || b.ret_h1_pct || 0) - Number((a as any).ret_24h_pct || a.ret_h1_pct || 0)) || (Number((b as any).RSI_H1||0) - Number((a as any).RSI_H1||0)))
+  // Downtrend continuation: large losers, RSI low, below EMA20/50 (and 20<50<200 if known), funding negative and OI decreasing
+  const downtrend = filtered.filter(c => {
+    if (!commonOk(c)) return false
+    const ret24 = Number((c as any).ret_24h_pct || c.ret_h1_pct || 0)
+    const rsiH1 = Number((c as any).RSI_H1 || 50)
+    const rsiM15 = Number((c as any).RSI_M15 || 50)
+    const px = Number(c.price || 0)
+    const ema20 = Number((c as any).ema20_H1 || NaN)
+    const ema50 = Number((c as any).ema50_H1 || NaN)
+    const ema200 = Number((c as any).ema200_H1 || NaN)
+    const below20 = Number.isFinite(ema20) && px < (ema20 as number)
+    const below50 = Number.isFinite(ema50) && px < (ema50 as number)
+    const orderedDown = Number.isFinite(ema20) && Number.isFinite(ema50) && Number.isFinite(ema200) ? (ema20 < ema50 && ema50 < ema200) : false
+    const funding = Number(c.funding || 0)
+    const oiChg = Number((c as any).oi_change_pct_h1 || 0)
+    const rsiOk = (rsiH1 < 40) && (rsiM15 < 35)
+    const trendOk = below20 && below50 && (orderedDown || true)
+    const flowOk = (funding < 0) && (oiChg <= 0)
+    return (ret24 < 0) && rsiOk && trendOk && flowOk
+  }).sort((a,b)=> (Number((a as any).ret_24h_pct || a.ret_h1_pct || 0) - Number((b as any).ret_24h_pct || b.ret_h1_pct || 0)) || (Number((a as any).RSI_H1||50) - Number((b as any).RSI_H1||50)))
+
+  const topA = overextended.slice(0, 25)
+  const topB = downtrend.slice(0, 25)
+  const pool = [...topA, ...topB]
+  // Keep original tie-breakers to stabilize ordering slightly
+  const ranked = pool
+    .sort((a, b) => a.symbol.localeCompare(b.symbol))
+    .slice(0, Math.max(1, Math.min((limit as any) ?? 50, 50)))
+  // Persist lastTopK for sticky (best-effort)
+  try { localStorage.setItem('lastTopK', JSON.stringify({ ts: Date.now(), items: ranked.map((r,i)=>({ symbol: r.symbol, S: r.score ?? 0, rank: i+1 })) })) } catch {}
+  return ranked
   // Persist gate stats (optional, behind try/catch; feature-flag removed)
   try { localStorage.setItem('cand_gate_stats', JSON.stringify({ ts: Date.now(), universe: coins.length, counts: gateCounts })) } catch {}
 

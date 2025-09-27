@@ -6,7 +6,8 @@ module.exports = {
       args: 'server/index.ts',
       env: {
         NODE_ENV: 'production',
-        TRADE_SIDE: 'SHORT'
+        TRADE_SIDE: 'SHORT',
+        PORT: '3081'
       }
     },
     {
@@ -15,7 +16,8 @@ module.exports = {
       args: 'temporal/worker.ts',
       env: {
         NODE_ENV: 'production',
-        TRADE_SIDE: 'SHORT'
+        TRADE_SIDE: 'SHORT',
+        PORT: '3081'
       }
     }
   ]

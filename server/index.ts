@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import dotenv from 'dotenv'
 import { buildMarketRawSnapshot } from './fetcher/binance'
+import assert from 'node:assert'
 import { PROMPTS_SIDE } from '../services/prompts/guard'
 import { loadShortRegistry, verifyShortRegistry } from '../services/prompts/registry'
 import { performance } from 'node:perf_hooks'
@@ -100,6 +101,19 @@ try {
 } catch {}
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8789
+// Fail-fast side/port policy: SHORT must use 3081 in production, 8789 allowed only for dev quick runs
+try {
+  const side = String(process.env.TRADE_SIDE || '').toUpperCase()
+  const nodeEnv = String(process.env.NODE_ENV || '')
+  assert(side === 'SHORT', 'TRADE_SIDE must be SHORT for this instance')
+  const isProd = nodeEnv === 'production'
+  if (isProd && PORT !== 3081) {
+    throw new Error(`Invalid PORT for SHORT in production: ${PORT} (expected 3081)`) 
+  }
+} catch (e) {
+  console.error('[CONFIG_GUARD_FAIL]', (e as any)?.message || e)
+  process.exit(1)
+}
 // WS market collector disabled – REST-only mode for klines
 
 // Ephemeral in-memory store of last place_orders request/response for diagnostics

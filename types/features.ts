@@ -34,10 +34,13 @@ export type CoinRow = {
   ema_order_H1: EmaOrder | null
   ema_order_M15: EmaOrder | null
   RSI_M15: number | null
+  RSI_H1?: number | null
   vwap_rel_M15: number | null
   funding: number | null
   OI_chg_1h: number | null
   OI_chg_4h: number | null
+  // 24h return (computed from H1 series)
+  ret_24h_pct?: number | null
   // derived shortcuts for preview (optional)
   price_h1?: number
   vwap_h1?: number
@@ -51,6 +54,7 @@ export type CoinRow = {
   oi_change_pct_h1?: number | null
   oi_prev_age_min?: number | null
   is_new?: boolean | null
+  age_hours?: number | null
   h1_range_pos_pct?: number | null
   hh_h1?: number | null
   ll_h1?: number | null
@@ -67,6 +71,8 @@ export type CoinRow = {
   // Liquidity sanity
   avg_trade_usdt?: number | null
   rvol_liq_product?: number | null
+  spread_bps?: number | null
+  market_type?: 'perp' | 'spot'
   // Cooldown
   cooldown_factor?: number | null
 }

@@ -1,6 +1,6 @@
 import type { FeaturesSnapshot, CoinRow } from '../../types/features'
 import type { MarketRawSnapshot, Kline } from '../../types/market_raw'
-import { ema as emaShared } from '../lib/indicators'
+import { ema as emaShared, rsi as rsiShared } from '../lib/indicators'
 import candCfg from '../../config/candidates.json'
 
 function last(arr: number[]): number | null { return arr.length ? arr[arr.length - 1] : null }
@@ -46,7 +46,21 @@ export function computeM2Lite(snapshot: MarketRawSnapshot): FeaturesSnapshot {
     const rvol_m15 = (volM15.length>=21) ? (volM15[volM15.length-1] / (mean(volM15.slice(-21,-1)) || 1)) : null
     const atr_pct_H1 = atrPctH1(h1)
     const ema8 = ema(closeH1,8), ema21 = ema(closeH1,21), ema50 = ema(closeH1,50)
+    const ema20 = ema(closeH1,20), ema50h1 = ema(closeH1,50), ema200 = ema(closeH1,200)
     const ema_stack = (ema8!=null && ema21!=null && ema50!=null) ? ((ema8>ema21 && ema21>ema50) ? 1 : (ema8<ema21 && ema21<ema50) ? -1 : 0) : null
+    const ema_order_H1 = ((): any => {
+      if (ema20==null || ema50h1==null || ema200==null) return null
+      if (ema20>ema50h1 && ema50h1>ema200) return '20>50>200'
+      if (ema20>ema200 && ema200>ema50h1) return '20>200>50'
+      if (ema50h1>ema20 && ema20>ema200) return '50>20>200'
+      if (ema50h1>ema200 && ema200>ema20) return '50>200>20'
+      if (ema200>ema20 && ema20>ema50h1) return '200>20>50'
+      if (ema200>ema50h1 && ema50h1>ema20) return '200>50>20'
+      return null
+    })()
+    // RSI H1/M15 (period 14)
+    const rsi_H1 = rsiShared(closeH1, 14)
+    const rsi_M15 = rsiShared(closeM15, 14)
     const vwap_m15_a = (() => {
       if (!m15.length) return null
       let pv=0, vv=0; for (const k of m15) { pv += ((k.high+k.low+k.close)/3)*k.volume; vv+=k.volume }
@@ -168,12 +182,21 @@ export function computeM2Lite(snapshot: MarketRawSnapshot): FeaturesSnapshot {
       return Math.max(0, (nowMs - Date.parse(first)) / 3_600_000)
     })()
     const is_new = age_hours!=null ? (age_hours < 72) : null
-    return { symbol: u.symbol, price, atr_pct_H1, volume24h_usd, ema_order_H1: null, ema_order_M15: null, RSI_M15: null, vwap_rel_M15, funding, OI_chg_1h: oi_change_pct_h1, OI_chg_4h: null,
+    // 24h return (H1 based)
+    const ret_24h_pct = (closeH1.length>=25 && Number.isFinite(closeH1[closeH1.length-25] as any) && Number.isFinite(price as any))
+      ? (((price as number)/(closeH1[closeH1.length-25] as number) - 1) * 100)
+      : null
+    // Spread and market type
+    const spread_bps = (u as any).spread_bps ?? null
+    const market_type = (u as any).market_type ?? null
+    return { symbol: u.symbol, price, atr_pct_H1, volume24h_usd, ema_order_H1: (ema_order_H1 as any), ema_order_M15: null, RSI_M15: rsi_M15, RSI_H1: rsi_H1, vwap_rel_M15, funding, OI_chg_1h: oi_change_pct_h1, OI_chg_4h: null,
       // M2-Lite fields
-      ret_m15_pct, ret_h1_pct, rvol_m15, rvol_h1, ema_stack, funding_z, oi_change_pct_h1, is_new,
+      ret_m15_pct, ret_h1_pct, rvol_m15, rvol_h1, ema_stack, funding_z, oi_change_pct_h1, is_new, age_hours,
       h1_range_pos_pct, hh_h1, ll_h1, vwap_m15, oi_delta_unreliable, oi_prev_age_min, burst_m15_pct,
       body_ratio_m15, upper_wick_ratio_m15, lower_wick_ratio_m15, consec_above_vwap_m15, oi_price_div_h1,
-      avg_trade_usdt, rvol_liq_product, cooldown_factor }
+      avg_trade_usdt, rvol_liq_product, cooldown_factor, ret_24h_pct, spread_bps, market_type,
+      // expose EMAs for H1 distance checks
+      ema20_H1: ema20 ?? null, ema50_H1: ema50h1 ?? null, ema200_H1: ema200 ?? null }
   })
   try { localStorage.setItem('oi_prev_map', JSON.stringify(oiNext)) } catch {}
   // funding_z across universe (z-score of funding)
