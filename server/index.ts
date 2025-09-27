@@ -4,6 +4,7 @@ import path from 'node:path'
 import dotenv from 'dotenv'
 import { buildMarketRawSnapshot } from './fetcher/binance'
 import { PROMPTS_SIDE } from '../services/prompts/guard'
+import { loadShortRegistry, verifyShortRegistry } from '../services/prompts/registry'
 import { performance } from 'node:perf_hooks'
 import http from 'node:http'
 import { decideMarketStrict } from '../services/decider/market_decider_gpt'
@@ -37,9 +38,21 @@ try {
 
 // Boot banner: PROMPTS side and verification
 try {
-  console.error(`PROMPTS_SIDE=${PROMPTS_SIDE} (verified=OK)`) // SHORT only
+  const { items, version, snapshot } = loadShortRegistry()
+  const v = verifyShortRegistry(items)
+  const ok = v.ok
+  console.error(`PROMPTS_SIDE=${PROMPTS_SIDE} (N=${items.length}, snapshot=${snapshot || 'NA'}, verified=${ok ? 'OK' : 'FAIL'})`)
+  try { console.error(`TRADE_SIDE=${String(process.env.TRADE_SIDE || '').toUpperCase()}`) } catch {}
+  try {
+    for (const it of items) {
+      console.info('[PROMPT]', { name: it.name, version: it.version, checksum: it.checksum_sha256.slice(0, 16) })
+    }
+  } catch {}
+  if (!ok) {
+    console.error('[PROMPTS_REGISTRY_MISMATCH]', v.invalid.slice(0, 5))
+  }
 } catch (e) {
-  console.error('PROMPTS_SIDE verification failed', e)
+  console.error('PROMPTS registry load/verify failed', e)
   process.exit(1)
 }
 
