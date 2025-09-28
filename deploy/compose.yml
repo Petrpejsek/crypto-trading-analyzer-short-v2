@@ -9,7 +9,7 @@ services:
     restart: unless-stopped
     environment:
       - NODE_ENV=production
-      - PORT=8789
+      - PORT=8888
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_ORG_ID=${OPENAI_ORG_ID}
       - OPENAI_PROJECT=${OPENAI_PROJECT}
@@ -18,7 +18,7 @@ services:
       - TASK_QUEUE_OPENAI=${TASK_QUEUE_OPENAI}
       - TASK_QUEUE_BINANCE=${TASK_QUEUE_BINANCE}
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8789/api/trading/settings >/dev/null"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8888/api/trading/settings >/dev/null"]
       interval: 15s
       timeout: 5s
       retries: 5

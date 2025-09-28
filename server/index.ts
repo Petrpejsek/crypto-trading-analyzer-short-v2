@@ -100,8 +100,8 @@ try {
   }
 } catch {}
 
-const PORT = process.env.PORT ? Number(process.env.PORT) : 8789
-// Fail-fast side/port policy: SHORT must use 3081 in production, 8789 allowed only for dev quick runs
+const PORT = process.env.PORT ? Number(process.env.PORT) : 8888
+// Fail-fast side/port policy: SHORT must use 8888 in dev, 3081 in production
 try {
   const side = String(process.env.TRADE_SIDE || '').toUpperCase()
   const nodeEnv = String(process.env.NODE_ENV || '')
@@ -349,8 +349,8 @@ async function sweepStaleOrdersOnce(): Promise<number> {
             if (isTpType && isInternalTp) return true
             // B) TP with exit flags
             if (isTpType && (reduceOnly || closePosition)) return true
-            // C) SL with exit flags or internal id; only after small grace window to avoid races
-            if (isSlType && side === 'SELL' && (reduceOnly || closePosition || isInternalSl)) {
+            // C) SL with exit flags or internal id; BUY i SELL (SHORT má BUY SL). Jen po grace window.
+            if (isSlType && (reduceOnly || closePosition || isInternalSl)) {
               const created = Number((o as any)?.time)
               const ageOk = Number.isFinite(created) ? ((now - created) > ORPHAN_SL_GRACE_MS) : true
               return ageOk
@@ -368,13 +368,30 @@ async function sweepStaleOrdersOnce(): Promise<number> {
       .filter(o => o.symbol && o.orderId && Number.isFinite(o.createdAtMs as any))
       .filter(o => (ageEnabled) && (now - (o.createdAtMs as number)) > ageMs)
 
-    // Combine age-based ALL-orders, delta-based entries and orphan exits. Deduplicate by orderId.
+    // If SL is globally disabled, cancel ALL STOP orders (both with/without position)
+    const slDisableCandidates: Array<{ symbol: string; orderId: number }> = (() => {
+      try {
+        if (!((tradingCfg as any)?.DISABLE_SL === true)) return []
+        return (Array.isArray(raw) ? raw : [])
+          .filter((o: any) => {
+            try {
+              const t = String(o?.type || '').toUpperCase()
+              return t.includes('STOP') && !t.includes('TAKE_PROFIT')
+            } catch { return false }
+          })
+          .map((o: any) => ({ symbol: String(o?.symbol || ''), orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0 }))
+          .filter(c => c.symbol && c.orderId)
+      } catch { return [] }
+    })()
+
+    // Combine age-based ALL-orders, delta-based entries, orphan exits and global SL disable list. Deduplicate by orderId.
     const combined: Array<{ symbol: string; orderId: number; reason?: string }> = []
     const seen = new Set<number>()
     for (const c of ageAllCandidates) { if (!seen.has(c.orderId)) { combined.push({ symbol: c.symbol, orderId: c.orderId, reason: 'age_based' }); seen.add(c.orderId) } }
     for (const c of entryCandidates) { if (!seen.has(c.orderId)) { combined.push({ symbol: c.symbol, orderId: c.orderId, reason: 'stale_entry' }); seen.add(c.orderId) } }
     for (const c of entryDeltaCandidates) { if (!seen.has(c.orderId)) { combined.push({ symbol: c.symbol, orderId: c.orderId, reason: 'delta_ge_7pct' }); seen.add(c.orderId) } }
     for (const c of orphanExitCandidates) { if (!seen.has(c.orderId)) { combined.push({ symbol: c.symbol, orderId: c.orderId, reason: 'orphan_exit_cleanup' }); seen.add(c.orderId) } }
+    for (const c of slDisableCandidates) { if (!seen.has(c.orderId)) { combined.push({ symbol: c.symbol, orderId: c.orderId, reason: 'disable_sl_global' }); seen.add(c.orderId) } }
 
     if (combined.length === 0) return 0
 
@@ -413,8 +430,15 @@ function startOrderSweeper(): void {
 
 // KRITICKÁ OCHRANA: Continuous SL monitoring
 let __slMonitorTimer: NodeJS.Timeout | null = null
+// ANTI-DUPLICATE: Track pending emergency SL operations per symbol
+const __pendingEmergencySL = new Set<string>()
 async function slProtectionMonitor(): Promise<void> {
   try {
+    // Skip emergency SL if globally blocked
+    if (((tradingCfg as any)?.BLOCK_EMERGENCY_SL === true)) {
+      console.info('[SL_MONITOR_SKIP_EMERGENCY_BLOCKED]')
+      return
+    }
     if (!hasRealBinanceKeysGlobal()) return
     console.info('[SL_MONITOR_PASS]')
     
@@ -463,6 +487,17 @@ async function slProtectionMonitor(): Promise<void> {
         )
         
         if (slOrders.length === 0) {
+          if (((tradingCfg as any)?.DISABLE_SL === true)) {
+            // SL disabled globally – do not create emergency SL
+            continue
+          }
+          
+          // ANTI-DUPLICATE: Skip if emergency SL already pending for this symbol
+          if (__pendingEmergencySL.has(symbol)) {
+            console.info('[SKIP_DUPLICATE_EMERGENCY_SL]', { symbol })
+            continue
+          }
+          
           console.error('[CRITICAL_NO_SL_FOR_POSITION]', { 
             symbol, 
             positionSize: size, 
@@ -470,6 +505,7 @@ async function slProtectionMonitor(): Promise<void> {
             unrealizedPnl: pos?.unRealizedProfit 
           })
           // Emergency SL: create STOP_MARKET immediately based on entry price +/- emergencyPct
+          __pendingEmergencySL.add(symbol)
           try {
             const entryPriceNum = Number((pos as any)?.entryPrice)
             if (!Number.isFinite(entryPriceNum) || entryPriceNum <= 0) { throw new Error('bad_entry_price') }
@@ -500,6 +536,9 @@ async function slProtectionMonitor(): Promise<void> {
             try { console.warn('[EMERGENCY_SL_CREATED]', { symbol, orderId: r?.orderId ?? null, stopPrice: emergencyPx, side: exitSide }) } catch {}
           } catch (emErr: any) {
             try { console.error('[EMERGENCY_SL_FAILED]', { symbol, error: emErr?.message || emErr }) } catch {}
+          } finally {
+            // ANTI-DUPLICATE: Remove from pending set regardless of success/failure
+            __pendingEmergencySL.delete(symbol)
           }
         }
       } catch (e: any) {
@@ -513,7 +552,14 @@ async function slProtectionMonitor(): Promise<void> {
 
 function startSlProtectionMonitor(): void {
   if (__slMonitorTimer) return
-  __slMonitorTimer = setInterval(() => { slProtectionMonitor().catch(()=>{}) }, 30_000) // every 30s
+  // If emergency SL is blocked, do not start the SL monitor at all
+  try {
+    if (((tradingCfg as any)?.BLOCK_EMERGENCY_SL === true)) {
+      console.warn('[SL_MONITOR_EMERGENCY_BLOCKED_GLOBAL]')
+      return
+    }
+  } catch {}
+  __slMonitorTimer = setInterval(() => { slProtectionMonitor().catch(()=>{}) }, 60_000) // every 60s (reduced from 30s to prevent race conditions)
 }
 
 // BACKGROUND AUTOPILOT - běží identicky jako UI pipeline podle posledních UI kritérií
@@ -568,6 +614,152 @@ async function backgroundTradingCycle(): Promise<void> {
     const criteria = __lastSnapshotCriteria
     if (!criteria) {
       console.info('[BACKGROUND_PIPELINE_SKIP]', { reason: 'no_criteria' })
+      return
+    }
+
+    // Emergency: create TP MARKET immediately for a symbol (closePosition)
+    if (url.pathname === '/api/exits/tp_market' && req.method === 'POST') {
+      try {
+        const body = await new Promise<string>((resolve) => {
+          let data = ''
+          req.on('data', chunk => data += chunk)
+          req.on('end', () => resolve(data))
+        })
+        const payload = (() => { try { return JSON.parse(body || '{}') } catch { return {} } })()
+        const symbol = String(payload?.symbol || '')
+        const tp = Number(payload?.tp)
+        if (!symbol || !Number.isFinite(tp)) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'symbol,tp required' }))
+          return
+        }
+        const api = getBinanceAPI()
+        const isHedge = await api.getHedgeMode().catch(()=>false)
+        const workingType = String(process.env.EXIT_WORKING_TYPE || 'MARK_PRICE')
+        const params: any = isHedge
+          ? { symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET', stopPrice: String(tp), closePosition: true, workingType, positionSide: 'SHORT', newClientOrderId: makeId('x_tp_tm'), newOrderRespType: 'RESULT' }
+          : { symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET', stopPrice: String(tp), closePosition: true, workingType, newClientOrderId: makeId('x_tp_tm'), newOrderRespType: 'RESULT' }
+        const r = await api.placeOrder(params)
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, orderId: r?.orderId || null }))
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: String(error?.message || error) }))
+      }
+      return
+    }
+
+    // Strategy Updater dry-run: return assistant proposal (newSL, tp_levels) without placing orders
+    if (url.pathname === '/api/su/dry_run' && req.method === 'GET') {
+      try {
+        const symbol = String(url.searchParams.get('symbol') || '')
+        if (!symbol) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'symbol required' }))
+          return
+        }
+
+        // Use only in-memory WS snapshots
+        const positions = getPositionsInMemory()
+        const orders = getOpenOrdersInMemory()
+        const position = positions.find((pos: any) => String(pos?.symbol) === symbol)
+        if (!position || Math.abs(Number(position?.positionAmt || 0)) <= 0) {
+          res.statusCode = 404
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'position not found' }))
+          return
+        }
+
+        const amt = Number(position?.positionAmt || 0)
+        const side: 'LONG' | 'SHORT' = amt > 0 ? 'LONG' : 'SHORT'
+        const size = Math.abs(amt)
+        const entryPrice = Number(position?.entryPrice || position?.averagePrice || 0)
+
+        const { runStrategyUpdate, fetchMarketDataForSymbol } = await import('../services/strategy-updater/strategy_updater_gpt')
+        const marketData = await fetchMarketDataForSymbol(symbol)
+        const currentPrice = Number(marketData?.price || position?.markPrice || 0)
+        const unrealizedPnl = Number(position?.unrealizedPnl || 0)
+
+        // Derive current SL/TP from live open orders
+        const exitSide = side === 'LONG' ? 'SELL' : 'BUY'
+        let currentSlLive: number | null = null
+        const tpLevels: Array<{ tag:'tp'; price:number; allocation_pct:number }> = []
+        try {
+          const list = Array.isArray(orders) ? orders : []
+          for (const o of list) {
+            try {
+              if (String(o?.symbol) !== symbol) continue
+              if (String(o?.side) !== exitSide) continue
+              const t = String(o?.type || '').toUpperCase()
+              const price = Number(o?.price || o?.stopPrice || 0)
+              if (!Number.isFinite(price) || price <= 0) continue
+              if (t.includes('TAKE_PROFIT')) tpLevels.push({ tag: 'tp', price, allocation_pct: 1.0 })
+            } catch {}
+          }
+          const stopOrders = list.filter((o: any) => {
+            try {
+              if (String(o?.symbol) !== symbol) return false
+              if (String(o?.side) !== exitSide) return false
+              const t = String(o?.type || '').toUpperCase()
+              return t.includes('STOP') && !t.includes('TAKE_PROFIT')
+            } catch { return false }
+          })
+          let markPx: number | null = null
+          try { markPx = Number(marketData?.price || position?.markPrice || 0) } catch {}
+          const candidates: number[] = []
+          for (const o of stopOrders) {
+            try {
+              const sp = Number(o?.stopPrice || o?.price || 0)
+              if (!Number.isFinite(sp) || sp <= 0) continue
+              if (Number.isFinite(markPx as any)) {
+                if (side === 'LONG') { if (sp < (markPx as number)) candidates.push(sp) }
+                else { if (sp > (markPx as number)) candidates.push(sp) }
+              }
+            } catch {}
+          }
+          if (candidates.length) currentSlLive = side === 'LONG' ? Math.max(...candidates) : Math.min(...candidates)
+        } catch {}
+
+        // Build input
+        const input: any = {
+          symbol,
+          position: {
+            side,
+            size,
+            entryPrice,
+            currentPrice,
+            unrealizedPnl,
+            unrealizedPnlPct: (entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * (side === 'LONG' ? 100 : -100) : 0)
+          },
+          currentSL: currentSlLive ?? null,
+          currentTP: tpLevels.length ? tpLevels : null,
+          posture: 'OK'
+        }
+        try {
+          const v = Number(process.env.MAX_SLIPPAGE_PCT)
+          if (Number.isFinite(v) && v > 0 && v < 1) input.exchange_filters = { maxSlippagePct: v }
+        } catch {}
+
+        const result = await runStrategyUpdate(input)
+        if (!result.ok || !result.data) {
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, code: result.code || 'failed', meta: result.meta || null }))
+          return
+        }
+
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, symbol, proposal: { newSL: result.data.newSL, tp_levels: result.data.tp_levels }, confidence: result.data.confidence, urgency: result.data.urgency }))
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: String(error?.message || error) }))
+      }
       return
     }
 
@@ -892,7 +1084,7 @@ const startStrategyUpdaterTimer = () => {
       const { processDueStrategyUpdates } = await import('../services/strategy-updater/trigger')
       processDueStrategyUpdates().catch(()=>{})
     } catch {}
-  }, 30000) // Every 30 seconds
+  }, 5000) // Every 5 seconds (faster tick so countdown flips from DUE -> PROCESSING promptly)
 }
 try { startStrategyUpdaterTimer() } catch {}
 
@@ -1157,7 +1349,8 @@ try {
           setTimeout(async () => {
             try {
               const { getOpenOrdersInMemory, getPositionsInMemory, isUserDataReady } = await import('../services/exchange/binance/userDataWs')
-              if (!isUserDataReady('orders') || !isUserDataReady('positions')) {
+              // Require only positions snapshot to schedule SU; orders snapshot is optional for scheduling
+              if (!isUserDataReady('positions')) {
                 // WS snapshot není připraven – nic nespouštěj (bez fallbacku)
                 return
               }
@@ -1801,11 +1994,70 @@ const server = http.createServer(async (req, res) => {
 
         // Spusť waiting TP processing pass na základě pozic (bez dalšího dodatečného REST čtení)
         try { waitingTpProcessPassFromPositions(positionsRaw).catch(()=>{}) } catch {}
+
+        // Cleanup: zruš sirotčí interní EXITy (SL/TP) pokud pro symbol neexistuje ani otevřený ENTRY, ani pozice
+        try {
+          const hasPosition = new Set<string>()
+          for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
+            try {
+              const sym = String(p?.symbol || '')
+              const amt = Number(p?.positionAmt)
+              if (sym && Number.isFinite(amt) && Math.abs(amt) > 0) hasPosition.add(sym)
+            } catch {}
+          }
+
+          const hasEntry = new Set<string>()
+          for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
+            try {
+              const sym = String(o?.symbol || '')
+              const side = String(o?.side || '').toUpperCase()
+              const t = String(o?.type || '').toUpperCase()
+              const isEntryType = (t === 'LIMIT' || t === 'STOP' || t === 'STOP_MARKET' || t === 'MARKET')
+              const reduceOnly = Boolean(o?.reduceOnly)
+              const closePosition = Boolean(o?.closePosition)
+              const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+              const isInternalEntry = /^sv2_/.test(cid) && /^(sv2_)?e_/.test(cid)
+              if (sym && isEntryType && !reduceOnly && !closePosition && (isInternalEntry || /^e_/.test(cid))) {
+                hasEntry.add(sym)
+              }
+            } catch {}
+          }
+
+          const exitOrdersToCancel: Array<{ symbol: string; orderId: number }> = []
+          for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
+            try {
+              const sym = String(o?.symbol || '')
+              if (!sym) continue
+              if (hasPosition.has(sym) || hasEntry.has(sym)) continue
+              const t = String(o?.type || '').toUpperCase()
+              const isExitType = /STOP|TAKE_PROFIT/.test(t)
+              const reduceOnly = Boolean(o?.reduceOnly)
+              const closePosition = Boolean(o?.closePosition)
+              const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+              const isOurExit = /^sv2_/.test(cid) && /(x_sl|x_sl_upd|x_tp_)/.test(cid)
+              if (isExitType && (reduceOnly || closePosition || isOurExit)) {
+                const id = Number(o?.orderId || o?.orderID)
+                if (Number.isFinite(id) && id > 0) exitOrdersToCancel.push({ symbol: sym, orderId: id })
+              }
+            } catch {}
+          }
+
+          if (exitOrdersToCancel.length > 0) {
+            const api = getBinanceAPI()
+            const toCancel = exitOrdersToCancel.slice(0, 20) // rate-limit safety
+            for (const x of toCancel) {
+              try { await cancelOrder(x.symbol, x.orderId); console.info('[ORPHAN_EXIT_CLEANUP]', { symbol: x.symbol, orderId: x.orderId }) } catch {}
+            }
+          }
+        } catch {}
         
         // Strategy updater: Auto-detect missing positions and trigger countdown
         try {
           const { detectInternalPositionOpened } = await import('../services/strategy-updater/trigger')
-          detectInternalPositionOpened(ordersRaw, positionsRaw)
+          // Only run detection/cleanup when WS snapshots are READY to avoid accidental registry cleanup
+          if (ordersReady && positionsReady) {
+            detectInternalPositionOpened(ordersRaw, positionsRaw)
+          }
           // Profit Taker disabled when Top-Up Executor is active
           try {
             const { getTopUpExecutorStatus } = await import('../services/top-up-executor/trigger')
@@ -1865,7 +2117,7 @@ const server = http.createServer(async (req, res) => {
           for (const s of waitingSymbols) pushUniq(s)
           for (const s of entrySymbols) pushUniq(s)
           for (const s of posSymbols) pushUniq(s)
-          const MAX_MARKS = 24
+          const MAX_MARKS = Math.min(120, ordered.length)
           const arr = ordered.slice(0, MAX_MARKS)
           if (arr.length > 0) {
             const limit = 4
@@ -1955,10 +2207,12 @@ const server = http.createServer(async (req, res) => {
                   const reduceOnly = Boolean((o as any)?.reduceOnly)
                   const closePosition = Boolean((o as any)?.closePosition)
                   const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-                  const isInternalEntry = /^e_l_/.test(clientId) && side === 'BUY' && type === 'LIMIT' && !reduceOnly && !closePosition
+                  const isEntryPrefix = /^(e_l_|e_stl_|e_stm_|e_m_)/.test(clientId)
+                  const isEntryType = (type === 'LIMIT' || type === 'STOP' || type === 'STOP_MARKET' || type === 'MARKET')
+                  const isInternalEntry = isEntryPrefix && (side === 'BUY' || side === 'SELL') && isEntryType && !reduceOnly && !closePosition
                   const isInternalTp = /^x_tp_/.test(clientId)
-                  // SL se nikdy nemaže automaticky (delta-based cleanup se vztahuje pouze na TP a ENTRY)
-                  if (isInternalEntry || isInternalTp) {
+                  // CRITICAL: Never auto-cancel TP orders - only ENTRY orders for delta cleanup
+                  if (isInternalEntry) {
                     const key = `${sym}:${orderId}`
                     if (!seen.has(key)) { seen.add(key); toCancel.push({ symbol: sym, orderId }) }
                   }
@@ -1999,8 +2253,10 @@ const server = http.createServer(async (req, res) => {
                 const type = String((o as any)?.type || '').toUpperCase()
                 const reduceOnly = Boolean((o as any)?.reduceOnly)
                 const closePosition = Boolean((o as any)?.closePosition)
-                const isEntryType = (type === 'LIMIT' || type === 'STOP' || type === 'STOP_MARKET')
-                return /^e_l_/.test(clientId) && side === 'BUY' && isEntryType && !reduceOnly && !closePosition
+                const isEntryType = (type === 'LIMIT' || type === 'STOP' || type === 'STOP_MARKET' || type === 'MARKET')
+                const isEntryPrefix = /^(e_l_|e_stl_|e_stm_|e_m_)/.test(clientId)
+                const isSideOk = (side === 'BUY' || side === 'SELL')
+                return isEntryPrefix && isSideOk && isEntryType && !reduceOnly && !closePosition
               } catch { return false }
             }
             const isInternalExit = (o: any): boolean => {
@@ -2186,6 +2442,8 @@ const server = http.createServer(async (req, res) => {
 
         // Ensure protective SL exists for ENTRY symbols when safe (mark > planned SL)
         try {
+          // Respect global DISABLE_SL: never auto-create SL
+          if (((tradingCfg as any)?.DISABLE_SL === true)) { throw new Error('sl_disabled_global') }
           const existingOrders = Array.isArray(ordersRaw) ? ordersRaw : []
           // Robustní detekce jakéhokoli existujícího SL (CP nebo RO), aby nedocházelo k duplicitám
           const hasAnySl = (sym: string): boolean => {
@@ -2201,11 +2459,14 @@ const server = http.createServer(async (req, res) => {
                 const ro = Boolean((o as any)?.reduceOnly)
                 const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
                 const isInternal = /^x_sl_/.test(cid)
-                return sideUp === 'SELL' && (cp || ro || isInternal)
+                // BUY i SELL, protože u SHORT pozice je SL BUY
+                const sideOk = (sideUp === 'SELL' || sideUp === 'BUY')
+                return sideOk && (cp || ro || isInternal)
               })
             } catch { return false }
           }
           const entrySyms: string[] = []
+          const entryOrderSideBySymbol: Record<string, 'BUY' | 'SELL'> = {}
           for (const o of existingOrders) {
             try {
               const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
@@ -2213,28 +2474,58 @@ const server = http.createServer(async (req, res) => {
               const type = String((o as any)?.type||'').toUpperCase()
               const reduceOnly = Boolean((o as any)?.reduceOnly)
               const closePosition = Boolean((o as any)?.closePosition)
-              const isInternalEntry = /^(e_l_|e_stl_|e_stm_)/.test(cid) && side==='BUY' && (type==='LIMIT'||type==='STOP'||type==='STOP_MARKET') && !reduceOnly && !closePosition
-              if (isInternalEntry) entrySyms.push(String((o as any)?.symbol||''))
+              const isInternalPrefix = /^(sv2_e_l_|sv2_e_stl_|sv2_e_stm_|e_l_|e_stl_|e_stm_)/.test(cid)
+              const isEntryType = (type==='LIMIT'||type==='STOP'||type==='STOP_MARKET')
+              const isInternalEntry = isInternalPrefix && isEntryType && !reduceOnly && !closePosition
+              if (isInternalEntry) {
+                const sym = String((o as any)?.symbol||'')
+                if (sym) {
+                  entrySyms.push(sym)
+                  entryOrderSideBySymbol[sym] = (side === 'SELL' ? 'SELL' : 'BUY')
+                }
+              }
             } catch {}
           }
           const toCreate: Array<{ symbol: string; stopPrice: number }> = []
+          const toCreateExits: Array<{ symbol: string; stopPrice: number; exitSide: 'BUY'|'SELL'; entrySide: 'BUY'|'SELL' }> = []
           for (const sym of Array.from(new Set(entrySyms)).filter(Boolean)) {
             try {
               if (hasAnySl(sym)) continue
               const plan = plannedExitBySymbol[sym]
               const slWanted = Number(plan?.sl)
               const mark = Number((marks as any)?.[sym])
-              if (Number.isFinite(slWanted) && slWanted > 0 && Number.isFinite(mark) && mark > slWanted) {
-                toCreate.push({ symbol: sym, stopPrice: slWanted })
+              const entrySide = (String(entryOrderSideBySymbol[sym] || 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY') as 'BUY'|'SELL'
+              const exitSide = (entrySide === 'BUY' ? 'SELL' : 'BUY') as 'BUY'|'SELL'
+              const cond = Number.isFinite(slWanted) && slWanted > 0 && Number.isFinite(mark) && (
+                (exitSide === 'SELL' && mark > slWanted) ||
+                (exitSide === 'BUY' && mark < slWanted)
+              )
+              if (cond) {
+                toCreateExits.push({ symbol: sym, stopPrice: slWanted, exitSide, entrySide })
               }
             } catch {}
           }
-          if (toCreate.length > 0) {
-            const api = getBinanceAPI()
+          if (toCreateExits.length > 0) {
+            const api = getBinanceAPI() as any
+            let isHedgeMode = false
+            try { isHedgeMode = Boolean(await api.getHedgeMode()) } catch {}
             const maxParallel = 3
-            for (let i = 0; i < toCreate.length; i += maxParallel) {
-              const batch = toCreate.slice(i, i + maxParallel)
-              await Promise.allSettled(batch.map(x => api.placeOrder({ symbol: x.symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(x.stopPrice), closePosition: true, workingType: 'MARK_PRICE', newClientOrderId: makeId('x_sl_auto'), newOrderRespType: 'RESULT' } as any)))
+            for (let i = 0; i < toCreateExits.length; i += maxParallel) {
+              const batch = toCreateExits.slice(i, i + maxParallel)
+              await Promise.allSettled(batch.map(async (x) => {
+                const base: any = {
+                  symbol: x.symbol,
+                  side: x.exitSide,
+                  type: 'STOP_MARKET',
+                  stopPrice: String(x.stopPrice),
+                  closePosition: true,
+                  workingType: 'MARK_PRICE',
+                  newClientOrderId: makeId('x_sl_auto'),
+                  newOrderRespType: 'RESULT'
+                }
+                if (isHedgeMode) base.positionSide = x.entrySide === 'BUY' ? 'LONG' : 'SHORT'
+                return api.placeOrder(base)
+              }))
             }
           }
         } catch {}
@@ -2285,7 +2576,8 @@ const server = http.createServer(async (req, res) => {
                   const sym = String((o as any)?.symbol || '')
                   const side = String((o as any)?.side || '').toUpperCase()
                   const type = String((o as any)?.type || '').toUpperCase()
-                  if (!sym || side !== 'SELL' || !type.includes('STOP')) continue
+                  // SL mohou být BUY i SELL podle směru pozice (SHORT -> BUY)
+                  if (!sym || !type.includes('STOP')) continue
                   const cp = Boolean((o as any)?.closePosition)
                   const ro = Boolean((o as any)?.reduceOnly)
                   const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
@@ -2348,6 +2640,22 @@ const server = http.createServer(async (req, res) => {
             } catch {}
           }
         } catch {}
+        // Build quick map of last planned ENTRY per symbol from last place_orders request (for Δ% fallback)
+        const plannedEntryBySymbol: Record<string, number> = (() => {
+          const map: Record<string, number> = {}
+          try {
+            const ords = (last?.request && Array.isArray((last as any).request?.orders)) ? (last as any).request.orders : []
+            for (const o of ords) {
+              try {
+                const sym = String((o as any)?.symbol || '')
+                const e = Number((o as any)?.entry)
+                if (sym && Number.isFinite(e) && e > 0) map[sym] = e
+              } catch {}
+            }
+          } catch {}
+          return map
+        })()
+
         // Normalize open orders to UI shape (consistent with /api/open_orders)
         let openOrdersUi = (Array.isArray(ordersRaw) ? ordersRaw : []).map((o: any) => ({
           orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0,
@@ -2362,6 +2670,21 @@ const server = http.createServer(async (req, res) => {
           closePosition: Boolean(o?.closePosition ?? false),
           positionSide: (typeof o?.positionSide === 'string' && o.positionSide) ? String(o.positionSide) : null,
           clientOrderId: ((): string | null => { const id = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || ''); return id || null })(),
+          // Strategy Updater marker: authoritative registry only (no prefix heuristics)
+          isStrategyUpdater: ((): boolean => {
+            try {
+              // Clear require cache to get fresh registry state
+              const registryPath = require.resolve('../services/strategy-updater/registry')
+              delete require.cache[registryPath]
+              const { isStrategyOrderId } = require('../services/strategy-updater/registry') as { isStrategyOrderId: (id: number | string | null | undefined) => boolean }
+              const oid = Number(o?.orderId ?? o?.orderID ?? 0) || 0
+              const resultRegistry = isStrategyOrderId(oid)
+              if (resultRegistry) {
+                console.log('[DEBUG_SERVER_STRATEGY_FLAG]', { orderId: oid, clientOrderId: String((o as any)?.clientOrderId || ''), source: 'registry', isStrategyUpdater: true })
+              }
+              return resultRegistry
+            } catch { return false }
+          })(),
           // Mark strategy-updater TP/SL (x_tp_*/x_sl_*) and internal entries (e_l_/e_stl_/e_stm_/e_m_) as internal or by known orderId set
           isExternal: ((): boolean => {
             try {
@@ -2375,7 +2698,8 @@ const server = http.createServer(async (req, res) => {
               // Short entry kontext (SELL bez exit flagů a SHORT posSide neznámý) – chovej se jako interní
               if (!posSide && side === 'SELL' && !(reduceOnly || closePosition)) return false
               // Consider known internal prefixes only; avoid dynamic requires in hot path
-              return idStr ? !/^(e_l_|e_stl_|e_stm_|e_m_|x_sl_|x_tp_)/.test(idStr) : true
+              // Treat strategy-updater immediate exit as internal too (sv2_x_exit_now)
+              return idStr ? !/^(e_l_|e_stl_|e_stm_|e_m_|x_sl_|x_tp_|sv2_x_exit_now)/.test(idStr) : true
             } catch { return true }
           })(),
           createdAt: (() => {
@@ -2391,7 +2715,7 @@ const server = http.createServer(async (req, res) => {
             return Number.isFinite(tt) && tt > 0 ? new Date(tt).toISOString() : null
           })()
         }))
-        // Attach leverage and investedUsd per order for complete UI rendering (no extra calls)
+        // Attach leverage, investedUsd and precomputed deltaPctEntry per order for complete UI rendering (no extra calls)
         try {
           openOrdersUi = openOrdersUi.map((o: any) => {
             const planned = __lastPlannedBySymbol[o.symbol]
@@ -2402,7 +2726,9 @@ const server = http.createServer(async (req, res) => {
               : (Number.isFinite(levFromPlanned) && levFromPlanned > 0 ? Math.floor(levFromPlanned) : null)
             let investedUsd: number | null = null
             try {
-              const isEntry = String(o.side || '').toUpperCase() === 'BUY' && !(o.reduceOnly || o.closePosition)
+              const typeUp = String(o.type || '').toUpperCase()
+              const isEntryType = (typeUp === 'LIMIT' || typeUp === 'STOP' || typeUp === 'STOP_MARKET' || typeUp === 'MARKET')
+              const isEntry = isEntryType && !(o.reduceOnly || o.closePosition)
               // Compute investedUsd only for internal entries
               const internal = /^(e_l_|x_sl_|x_tp_tm_|x_tp_l_)/.test(String(o.clientOrderId || ''))
               if (isEntry && internal) {
@@ -2415,6 +2741,30 @@ const server = http.createServer(async (req, res) => {
                   if (Number.isFinite(px) && px > 0 && Number.isFinite(qty) && qty > 0 && Number.isFinite(leverage as any) && (leverage as number) > 0) {
                     investedUsd = (px * qty) / (leverage as number)
                   }
+                }
+              }
+            } catch {}
+            // Precompute Δ% to entry target for ENTRY orders
+            let deltaPctEntry: number | null = null
+            try {
+              const typeUp = String(o.type || '').toUpperCase()
+              const isEntryType = (typeUp === 'LIMIT' || typeUp === 'STOP' || typeUp === 'STOP_MARKET' || typeUp === 'MARKET')
+              const isEntry = isEntryType && !(o.reduceOnly || o.closePosition)
+              if (isEntry) {
+                const priceNum = Number(o.price)
+                const stopNum = Number(o.stopPrice)
+                const hasPrice = Number.isFinite(priceNum) && priceNum > 0
+                const hasStop = Number.isFinite(stopNum) && stopNum > 0
+                const target = (() => {
+                  if (typeUp === 'LIMIT') return hasPrice ? priceNum : (hasStop ? stopNum : null)
+                  if (typeUp === 'STOP' || typeUp === 'STOP_MARKET') return hasStop ? stopNum : (hasPrice ? priceNum : null)
+                  return hasStop ? stopNum : (hasPrice ? priceNum : null)
+                })()
+                const plannedE = Number(plannedEntryBySymbol[o.symbol])
+                const tgt = Number.isFinite(target as any) && (target as number) > 0 ? (target as number) : (Number.isFinite(plannedE) && plannedE > 0 ? plannedE : null)
+                const mark = Number((marks as any)?.[o.symbol])
+                if (Number.isFinite(mark) && mark > 0 && Number.isFinite(tgt as any) && (tgt as number) > 0) {
+                  deltaPctEntry = Math.abs(((tgt as number) - mark) / mark) * 100
                 }
               }
             } catch {}
@@ -2436,7 +2786,7 @@ const server = http.createServer(async (req, res) => {
                 return !(isExitInternal || isShortEntry)
               } catch { return true }
             })()
-            return { ...o, leverage, investedUsd, isExternal }
+            return { ...o, leverage, investedUsd, isExternal, deltaPctEntry }
           })
         } catch {}
         // Normalize positions and filter zero-size entries (match /api/positions)
@@ -2526,15 +2876,15 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store')
       const t0 = performance.now()
       try {
-        // SHORT only: ignore ?universe=; always use 'volume' universe and rely on new 25+25 short preselect
-        const universeStrategy = 'volume'
+        const universeParam = url.searchParams.get('universe')
+        const universeStrategy = (universeParam || 'short_simple') as any
         const fresh = String(url.searchParams.get('fresh') || '1') === '1'
-        const topN = Number(url.searchParams.get('topN') || '')
+        const topN = Number(url.searchParams.get('topN') || '50') || 50
         // Persist poslední UI snapshot kritéria pro background autopilot
         try {
           persistBackgroundCriteria({ universe: universeStrategy as any, topN: Number.isFinite(topN) ? topN : null, fresh })
         } catch {}
-        const snapshot = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh, allowPartial: true })
+        const snapshot = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: topN, fresh, allowPartial: true })
         ;(snapshot as any).duration_ms = Math.round(performance.now() - t0)
         delete (snapshot as any).latency_ms
         const body = JSON.stringify(snapshot)
@@ -2571,9 +2921,10 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store')
       const pro = url.pathname === '/api/snapshot_pro'
       try {
-        const universeStrategy = 'volume'
+        const universeParam = url.searchParams.get('universe')
+        const universeStrategy = (universeParam || 'short_simple') as any
         const fresh = String(url.searchParams.get('fresh') || '1') === '1'
-        const topN = Number(url.searchParams.get('topN') || '')
+        const topN = Number(url.searchParams.get('topN') || '50') || 50
         // If a symbol is requested, force-include it in the universe build so it can't be dropped
         const includeSymbols = (() => {
           const s = url.searchParams.get('symbol')
@@ -2581,7 +2932,7 @@ const server = http.createServer(async (req, res) => {
           const v = String(s).toUpperCase()
           return [v]
         })()
-        const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, includeSymbols, fresh, allowPartial: true })
+        const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: topN, includeSymbols, fresh, allowPartial: true })
         type K = { time: string; open: number; high: number; low: number; close: number }
         const toBars = (arr: any[], keep: number): K[] => {
           if (!Array.isArray(arr)) return []
@@ -2861,8 +3212,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/intraday') {
       res.setHeader('Cache-Control', 'no-store')
       try {
-        const universeStrategy = 'volume'
-        const topN = Number(url.searchParams.get('topN') || '')
+        const universeParam = url.searchParams.get('universe')
+        const universeStrategy = (universeParam || 'short_simple') as any
+        const topN = Number(url.searchParams.get('topN') || '50') || 50
         const fresh = String(url.searchParams.get('fresh') || '1') === '1'
         const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh })
         type Bar = { time: string; open: number; high: number; low: number; close: number; volume: number }
@@ -3030,7 +3382,7 @@ const server = http.createServer(async (req, res) => {
           }
           throw lastErr
         }
-        const snap = await retry(() => buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh: true, allowPartial: true }))
+        const snap = await retry(() => buildMarketRawSnapshot({ universeStrategy, desiredTopN: topN, fresh: true, allowPartial: true }))
         type Bar = { time: string; open: number; high: number; low: number; close: number; volume: number }
         const toIsoNoMs = (isoLike: string): string => {
           const s = String(isoLike || '')
@@ -3072,18 +3424,8 @@ const server = http.createServer(async (req, res) => {
         let coins: any[] = []
         const universeCoins = (snap.universe || []).map(mapItem)
         
-        if (universeStrategy === 'gainers') {
-          // Pro gainers pouze actual gainers z universe, bez vynuceného BTC/ETH
-          coins = universeCoins
-        } else {
-          // Pro volume zachovat původní logiku s BTC/ETH na začátku
-          const coinsCore: any[] = []
-          const btc = (snap as any)?.btc
-          const eth = (snap as any)?.eth
-          if (btc && btc.klines) coinsCore.push(mapItem({ ...btc, symbol: 'BTCUSDT' }))
-          if (eth && eth.klines) coinsCore.push(mapItem({ ...eth, symbol: 'ETHUSDT' }))
-          coins = coinsCore.concat(universeCoins)
-        }
+        // For short_simple MVP: do NOT pin BTC/ETH ahead; apply same gates/ordering as alts
+        coins = universeCoins
         // OPRAVA: Použití konzistentní výpočetní funkce pro /api/metrics
         const regime = {
           BTCUSDT: { 
@@ -3341,7 +3683,7 @@ const server = http.createServer(async (req, res) => {
                   })
                 }
 
-                if (Number.isFinite(x.sl) && !(hasSameSl(Number(x.sl)))) {
+                if (!((tradingCfg as any)?.DISABLE_SL === true) && Number.isFinite(x.sl) && !(hasSameSl(Number(x.sl)))) {
                   const slParams: any = isHedge
                     ? { symbol: x.symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(x.sl), closePosition: true, workingType, positionSide: 'LONG', newClientOrderId: makeId('x_sl'), newOrderRespType: 'RESULT' }
                     : { symbol: x.symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(x.sl), closePosition: true, workingType, newClientOrderId: makeId('x_sl'), newOrderRespType: 'RESULT' }
@@ -3701,6 +4043,10 @@ const server = http.createServer(async (req, res) => {
           const tickSize = pf ? Number(pf.tickSize) : null
           if (Number.isFinite(tickSize as any) && (tickSize as number) > 0) emergencyPx = quantize(emergencyPx, tickSize as number)
         } catch {}
+        if (((tradingCfg as any)?.DISABLE_SL === true)) {
+          console.warn('[EMERGENCY_SL_SKIPPED_DISABLED]', { symbol })
+          return
+        }
         const base: any = { symbol, side: exitSide, type: 'STOP_MARKET', stopPrice: String(emergencyPx), closePosition: true, workingType, newClientOrderId: makeId('x_sl_em'), newOrderRespType: 'RESULT' }
         if (isHedgeMode) base.positionSide = amtRaw > 0 ? 'LONG' : 'SHORT'
         const r = await api.placeOrder(base)
@@ -4157,6 +4503,24 @@ const server = http.createServer(async (req, res) => {
       return
     }
 
+    // TEMP: Refresh positions from Binance API
+    if (url.pathname === '/api/positions/refresh' && req.method === 'POST') {
+      try {
+        const { fetchPositions } = await import('../services/trading/binance_futures')
+        const { upsertPositionsFromRest } = await import('../services/exchange/binance/userDataWs')
+        const positions = await fetchPositions()
+        upsertPositionsFromRest(positions)
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ success: true, count: positions.length }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ error: e?.message || 'Internal error' }))
+      }
+      return
+    }
+
     // Entry Updater status (UX aligned with Strategy Updater)
     if (url.pathname === '/api/entry_updater_status' && req.method === 'GET') {
       try {
@@ -4217,15 +4581,62 @@ const server = http.createServer(async (req, res) => {
         const fs = await import('node:fs')
         const path = await import('node:path')
         const file = path.resolve(process.cwd(), 'runtime/su_debug', `${sym}.json`)
-        if (!fs.existsSync(file)) { res.statusCode = 200; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: false, message: 'none' })); return }
+        if (!fs.existsSync(file)) { res.statusCode = 200; res.setHeader('Cache-Control', 'no-store'); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: false, message: 'none' })); return }
         const text = fs.readFileSync(file, 'utf8')
         res.statusCode = 200
+        res.setHeader('Cache-Control', 'no-store')
         res.setHeader('content-type', 'application/json')
         res.end(text)
       } catch (e: any) {
         res.statusCode = 500
+        res.setHeader('Cache-Control', 'no-store')
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+
+    // Strategy Updater debug: list recent saved inputs (by mtime desc)
+    if (url.pathname === '/api/debug/strategy_updater_recent' && req.method === 'GET') {
+      try {
+        const limitParam = Number(url.searchParams.get('limit') || 10)
+        const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(50, Math.floor(limitParam)) : 10
+        const maxAgeHParam = Number(url.searchParams.get('maxAgeH') || 24)
+        const maxAgeMs = Number.isFinite(maxAgeHParam) && maxAgeHParam > 0 ? maxAgeHParam * 3600 * 1000 : 24 * 3600 * 1000
+        const fs = await import('node:fs')
+        const path = await import('node:path')
+        const dir = path.resolve(process.cwd(), 'runtime/su_debug')
+        let items: Array<{ symbol: string; mtime: number }> = []
+        try {
+          const files = fs.existsSync(dir) ? fs.readdirSync(dir) : []
+          for (const f of files) {
+            if (!/\.json$/i.test(f)) continue
+            const sym = f.replace(/\.json$/i, '')
+            const full = path.join(dir, f)
+            try { const st = fs.statSync(full); items.push({ symbol: sym, mtime: st.mtimeMs }) } catch {}
+          }
+        } catch {}
+        const now = Date.now()
+        items = items.filter(it => (now - it.mtime) <= maxAgeMs)
+        items.sort((a, b) => b.mtime - a.mtime)
+        const top = items.slice(0, limit)
+        const out: Array<{ symbol: string; body: string; mtime: number }> = []
+        for (const it of top) {
+          try {
+            const full = path.join(dir, `${it.symbol}.json`)
+            const txt = fs.readFileSync(full, 'utf8')
+            out.push({ symbol: it.symbol, body: txt, mtime: it.mtime })
+          } catch {}
+        }
+        res.statusCode = 200
+        res.setHeader('Cache-Control', 'no-store')
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ items: out }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('Cache-Control', 'no-store')
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ items: [], error: e?.message || 'unknown' }))
       }
       return
     }
@@ -4384,12 +4795,9 @@ const server = http.createServer(async (req, res) => {
           return
         }
 
-        // Get current positions and orders
-        const api = getBinanceAPI()
-        const [positions, orders] = await Promise.all([
-          api.getPositions(),
-          api.getOpenOrders()
-        ])
+        // Strict: použij pouze WS snapshoty (žádné fallbacky ani REST)
+        const positions = getPositionsInMemory()
+        const orders = getOpenOrdersInMemory()
 
         // Find the position
         const position = positions.find((pos: any) => String(pos?.symbol) === symbol)
@@ -4400,14 +4808,19 @@ const server = http.createServer(async (req, res) => {
           return
         }
 
-        // Mark existing entry as due now if exists, otherwise run detection
+        // Ensure SU entry exists with zero delay, then mark as due and process immediately
         try {
-          const { forceDueNow } = await import('../services/strategy-updater/registry')
-          const forced = forceDueNow(symbol)
+          const reg = await import('../services/strategy-updater/registry')
+          const trg = await import('../services/strategy-updater/trigger')
+          let forced = reg.forceDueNow(symbol)
           if (!forced) {
-            const { detectInternalPositionOpened } = await import('../services/strategy-updater/trigger')
-            detectInternalPositionOpened(orders, positions, { type: 'filled', symbol, orderId: 0 })
+            try { trg.startStrategyUpdaterForPosition(symbol, position, orders, { initialDelayMs: 0 }) } catch {}
+            forced = reg.forceDueNow(symbol)
           }
+          try {
+            const { processDueStrategyUpdates } = await import('../services/strategy-updater/trigger')
+            await processDueStrategyUpdates()
+          } catch {}
         } catch {}
 
         res.statusCode = 200
@@ -4462,6 +4875,92 @@ const server = http.createServer(async (req, res) => {
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: true, workflowId: handle.workflowId }))
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: String(error?.message || error) }))
+      }
+      return
+    }
+    if (url.pathname === '/api/su/execute' && req.method === 'POST') {
+      try {
+        const body = await new Promise<string>((resolve) => {
+          let data = ''
+          req.on('data', chunk => data += chunk)
+          req.on('end', () => resolve(data))
+        })
+        const payload = (() => { try { return JSON.parse(body || '{}') } catch { return {} } })()
+        const symbol = String(payload?.symbol || '')
+        const newSL = Number(payload?.newSL)
+        const tp = Number(payload?.tp)
+        if (!symbol || !Number.isFinite(newSL) || !Number.isFinite(tp)) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'symbol,newSL,tp required' }))
+          return
+        }
+        const positions = getPositionsInMemory()
+        const orders = getOpenOrdersInMemory()
+        const pos = positions.find((p: any) => String(p?.symbol) === symbol)
+        const amt = Number(pos?.positionAmt || 0)
+        if (!pos || Math.abs(amt) <= 0) {
+          res.statusCode = 404
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'position not found' }))
+          return
+        }
+        const side: 'LONG'|'SHORT' = amt > 0 ? 'LONG' : 'SHORT'
+        const size = Math.abs(amt)
+        const entryPrice = Number(pos?.entryPrice || pos?.averagePrice || 0)
+        const exitSide = side === 'LONG' ? 'SELL' : 'BUY'
+        // Derive currentSL from live orders
+        let currentSL: number | null = null
+        try {
+          const list = Array.isArray(orders) ? orders : []
+          const stopOrders = list.filter((o: any) => {
+            try { return String(o?.symbol) === symbol && String(o?.side) === exitSide && /STOP/i.test(String(o?.type||'')) && !/TAKE_PROFIT/i.test(String(o?.type||'')) } catch { return false }
+          })
+          const candidates: number[] = []
+          const mark = Number(pos?.markPrice || 0)
+          for (const o of stopOrders) {
+            const sp = Number(o?.stopPrice || o?.price || 0)
+            if (!Number.isFinite(sp) || sp <= 0) continue
+            if (Number.isFinite(mark)) {
+              if (side === 'LONG') { if (sp < mark) candidates.push(sp) } else { if (sp > mark) candidates.push(sp) }
+            } else candidates.push(sp)
+          }
+          if (candidates.length) currentSL = side === 'LONG' ? Math.max(...candidates) : Math.min(...candidates)
+        } catch {}
+
+        const now = new Date()
+        const entry = {
+          symbol,
+          side,
+          entryPrice,
+          positionSize: size,
+          currentSL: currentSL ?? null,
+          currentTP: null,
+          triggerAt: new Date(now.getTime() - 1000).toISOString(),
+          since: new Date(now.getTime() - 1000).toISOString(),
+          lastCheck: null,
+          checks: 0,
+          status: 'waiting' as const,
+          lastError: null,
+          lastErrorAt: null
+        }
+        const response = {
+          symbol,
+          newSL: newSL,
+          tp_levels: [{ tag: 'tp' as const, price: tp, allocation_pct: 1 }],
+          reasoning: 'manual_execute',
+          confidence: 1,
+          urgency: 'high' as const
+        }
+        const { executeStrategyUpdate } = await import('../services/strategy-updater/executor')
+        const exec = await executeStrategyUpdate(symbol, response as any, entry as any)
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: exec.success, created: { sl: exec.newSlOrderId, tps: exec.newTpOrderIds }, cancelled: exec.cancelledOrderIds, error: exec.error || null }))
       } catch (error: any) {
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')
@@ -5176,7 +5675,6 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
-
     if (url.pathname === '/api/topup_watcher_toggle' && (req.method === 'GET' || req.method === 'POST')) {
       try {
         if (req.method === 'POST') {

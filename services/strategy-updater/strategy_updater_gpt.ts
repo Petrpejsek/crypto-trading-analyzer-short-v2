@@ -3,7 +3,7 @@ import Ajv from 'ajv'
 import addFormats from 'ajv-formats'
 import fs from 'node:fs'
 import path from 'node:path'
-import { buildMarketRawSnapshot } from '../../server/fetcher/binance'
+// Dynamic import for buildMarketRawSnapshot to avoid module resolution issues
 import { request as undiciRequest } from 'undici'
 import type { Kline } from '../../types/market_raw'
 import cfg from '../../config/fetcher.json'
@@ -136,6 +136,18 @@ export async function runStrategyUpdate(input: StrategyUpdateInput): Promise<{
       side: input.position.side,
       size: input.position.size,
       pnl: input.position.unrealizedPnl
+    })
+    
+    // DEBUG: Log key data being sent to AI
+    console.info('[STRATEGY_UPDATE_DEBUG_DATA]', {
+      symbol: input.symbol,
+      side: input.position.side,
+      entryPrice: input.position.entryPrice,
+      currentPrice: input.position.currentPrice,
+      currentSL: input.currentSL,
+      currentTP: input.currentTP,
+      marketDataPrice: input.marketData?.price,
+      marketSnapshotPrice: input.market_snapshot?.price
     })
 
     const schemaUpdater = {
@@ -284,38 +296,80 @@ export async function runStrategyUpdate(input: StrategyUpdateInput): Promise<{
   }
 }
 
-// Fetch fresh market data for a specific symbol (NO CACHE)
+// Fetch single-coin market data (same as entry strategy conservative)
 export async function fetchMarketDataForSymbol(symbol: string): Promise<any> {
   try {
-    // Use buildMarketRawSnapshot with proper backend configuration
-    const snapshot = await buildMarketRawSnapshot({ 
-      universeStrategy: 'volume', 
-      desiredTopN: 50,
-      includeSymbols: [symbol], 
-      fresh: true, 
-      allowPartial: true 
-    })
-
-    // Find the symbol data in BTC/ETH (always available) or universe
-    let coinData = null
-    
-    // Check if it's BTC or ETH
-    if (symbol === 'BTCUSDT') {
-      coinData = snapshot.btc
-    } else if (symbol === 'ETHUSDT') {
-      coinData = snapshot.eth
-    } else {
-      // Look in universe
-      coinData = snapshot.universe.find((coin: any) => coin.symbol === symbol)
+    // Normalize delivery/quarterly-like symbols (e.g., BTCUSDT_260327 -> BTCUSDT)
+    const normalize = (sym: string): string => {
+      try {
+        const s = String(sym)
+        const idx = s.indexOf('_')
+        return idx > 0 ? s.slice(0, idx) : s
+      } catch { return symbol }
     }
-    
-    if (!coinData) {
-      throw new Error(`Symbol ${symbol} not found in market data`)
-    }
+    const baseSymbol = normalize(symbol)
 
-    // Enrich with M5 data (last 60 candles) and basic M5 indicators (RSI14, EMA20, EMA50, ATR14)
+    // CRITICAL: Use FUTURES API for futures trading, NOT spot data!
+    let snapshot: any = null
     try {
-      const m5 = await fetchM5(symbol, 60)
+      // Get futures mark price directly from Binance Futures API
+      const { getBinanceAPI } = await import('../../services/trading/binance_futures')
+      const api = getBinanceAPI()
+      const markPrice = await api.getMarkPrice(symbol) // Use exact symbol (e.g., BTCUSDT_260327)
+      
+      snapshot = {
+        bySymbol: {
+          [baseSymbol]: {
+            symbol: baseSymbol,
+            price: Number(markPrice), // FUTURES mark price from exact symbol
+            priceChangePercent: 0,
+            volume: 0
+          }
+        }
+      }
+      console.info('[SU_FUTURES_PRICE_USED]', { symbol, baseSymbol, markPrice })
+    } catch (e) {
+      console.warn('[SU_MARKET_DATA_FALLBACK]', { symbol, error: (e as any)?.message })
+      // Fallback: create minimal snapshot for SU to work
+      snapshot = {
+        bySymbol: {
+          [baseSymbol]: {
+            symbol: baseSymbol,
+            price: 0, // Will be updated from API
+            priceChangePercent: 0,
+            volume: 0
+          }
+        }
+      }
+    }
+
+    // Resolve symbol: prefer direct BTC/ETH mapping, then bySymbol map, then universe
+    let coinData: any = null
+    try {
+      if (baseSymbol === 'BTCUSDT' && (snapshot as any)?.btc) coinData = (snapshot as any).btc
+      else if (baseSymbol === 'ETHUSDT' && (snapshot as any)?.eth) coinData = (snapshot as any).eth
+    } catch {}
+    if (!coinData) {
+      try {
+        const bySym = (snapshot as any)?.bySymbol || {}
+        if (bySym && bySym[baseSymbol]) coinData = bySym[baseSymbol]
+      } catch {}
+    }
+    if (!coinData) {
+      try {
+        const uni = Array.isArray((snapshot as any)?.universe) ? (snapshot as any).universe : []
+        coinData = uni.find((c: any) => String(c?.symbol) === baseSymbol) || null
+      } catch {}
+    }
+
+    if (!coinData) {
+      console.error('[SU_MARKET_DATA_NOT_FOUND]', { symbol: baseSymbol })
+      throw new Error(`symbol_not_found_in_snapshot:${baseSymbol}`)
+    }
+
+    // Enrich with M5 data (last 60 candles) and basic indicators
+    try {
+      const m5 = await fetchM5(baseSymbol, 60)
       if (Array.isArray(m5) && m5.length > 0) {
         const m5Close = m5.map(k => k.close)
         const ema20 = ema(m5Close, 20)
@@ -372,4 +426,27 @@ async function fetchM5(symbol: string, limit: number): Promise<Kline[]> {
   }
 }
 
-import { ema, rsi } from '../lib/indicators'
+async function fetchKlines(symbol: string, interval: string, limit: number): Promise<Kline[]> {
+  const qs = new URLSearchParams({ symbol, interval, limit: String(limit) }).toString()
+  const url = `https://fapi.binance.com/fapi/v1/klines?${qs}`
+  const ac = new AbortController()
+  const to = setTimeout(() => ac.abort(), (cfg as any)?.timeoutMs ?? 120000)
+  try {
+    const res = await undiciRequest(url, { method: 'GET', signal: ac.signal })
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw new Error(`HTTP ${res.statusCode} for ${url}`)
+    }
+    const text = await (res as any).body.text()
+    const raw = JSON.parse(text)
+    if (!Array.isArray(raw)) return []
+    const toNum = (v: any): number => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
+    const toIso = (n: number): string => new Date(n > 1e12 ? n : n * 1000).toISOString()
+    return raw.map((k: any) => ({
+      openTime: toIso(k[0]), open: toNum(k[1]), high: toNum(k[2]), low: toNum(k[3]), close: toNum(k[4]), volume: toNum(k[5]), closeTime: toIso(k[6])
+    })).filter(k => Number.isFinite(k.open) && Number.isFinite(k.close))
+  } finally {
+    clearTimeout(to)
+  }
+}
+
+import { ema, rsi, atr } from '../lib/indicators'

@@ -157,6 +157,62 @@ export function wrapBinanceFuturesApi(api: any, safeMode = true) {
   ;(api as any).__safeWrapped = true
 
   api.request = async (method: string, endpoint: string, params: AnyObj = {}) => {
+    // SMART SL FILTER - block unauthorized STOP_MARKET orders
+    try {
+      const isStopMarket = (o: AnyObj): boolean => String(o?.type || '').toUpperCase() === 'STOP_MARKET'
+      const isAuthorizedSL = (o: AnyObj): boolean => {
+        const clientId = String(o?.newClientOrderId || o?.clientOrderId || '')
+        const engine = String(o?.__engine || '')
+        
+        // Allow Entry Strategy SL (engine=entry or x_sl_ prefix without _em_)
+        if (engine === 'entry') return true
+        if (clientId.startsWith('x_sl_') && !clientId.includes('_em_')) return true
+        
+        // Allow Strategy Updater SL (sv2_x_sl_ prefix without _em_)
+        if (clientId.startsWith('sv2_x_sl_') && !clientId.includes('_em_')) return true
+        
+        // Block everything else (including emergency SL with _em_)
+        return false
+      }
+      
+      if (endpoint === '/fapi/v1/order') {
+        if (isStopMarket(params) && !isAuthorizedSL(params)) {
+          console.error('[BLOCKED_UNAUTHORIZED_SL]', { 
+            symbol: params?.symbol, 
+            clientOrderId: params?.newClientOrderId || params?.clientOrderId,
+            engine: params?.__engine,
+            stopPrice: params?.stopPrice,
+            stack: new Error().stack
+          })
+          return { status: 'blocked_unauthorized_sl', orderId: 0 }
+        }
+      } else if (endpoint === '/fapi/v1/batchOrders') {
+        const raw = (params as any).batchOrders
+        let orders: AnyObj[] | null = null
+        try {
+          if (Array.isArray(raw)) orders = raw as AnyObj[]
+          else if (typeof raw === 'string') orders = JSON.parse(raw)
+        } catch {}
+        if (Array.isArray(orders)) {
+          const unauthorized = orders.filter(o => isStopMarket(o) && !isAuthorizedSL(o))
+          if (unauthorized.length > 0) {
+            console.error('[BLOCKED_BATCH_UNAUTHORIZED_SL]', { 
+              count: unauthorized.length,
+              clientOrderIds: unauthorized.map(o => o?.newClientOrderId || o?.clientOrderId),
+              stack: new Error().stack
+            })
+            // Filter out unauthorized SL orders
+            const authorized = orders.filter(o => !isStopMarket(o) || isAuthorizedSL(o))
+            if (authorized.length === 0) {
+              return { status: 'blocked_all_unauthorized_sl', orderId: 0 }
+            }
+            // Update params with only authorized orders
+            (params as any).batchOrders = typeof raw === 'string' ? JSON.stringify(authorized) : authorized
+          }
+        }
+      }
+    } catch {}
+
     const isOrderPost = String(method || '').toUpperCase() === 'POST' && (endpoint === '/fapi/v1/order' || endpoint === '/fapi/v1/batchOrders')
     if (isOrderPost) {
       const engineTag = (()=>{ try { return String(params?.__engine || 'unknown') } catch { return 'unknown' } })()
@@ -212,6 +268,15 @@ export function wrapBinanceFuturesApi(api: any, safeMode = true) {
     }
 
     try {
+      // Ensure recvWindow is present for write ops as last-mile safety
+      const methodUp = String(method || '').toUpperCase()
+      const isWrite = methodUp === 'POST' || methodUp === 'DELETE'
+      const needsRecv = isWrite && (endpoint || '').startsWith('/fapi/')
+      if (needsRecv) {
+        const rwEnv = Number(process.env.BINANCE_RECV_WINDOW_MS)
+        const rw = Number.isFinite(rwEnv) && rwEnv > 0 ? Math.min(120000, Math.floor(rwEnv)) : 10000
+        try { if (params && typeof params === 'object' && params.recvWindow == null) (params as any).recvWindow = rw } catch {}
+      }
       return await original(method, endpoint, params)
     } catch (e: any) {
       try {

@@ -58,7 +58,14 @@ class BinanceFuturesAPI {
   }
 
   private async request(method: string, endpoint: string, params: Record<string, any> = {}): Promise<any> {
-    const timestamp = Date.now()
+    // Best-effort server time sync
+    let timestamp = Date.now()
+    try {
+      const res = await fetch('https://fapi.binance.com/fapi/v1/time')
+      const j = await res.json().catch(()=>null)
+      const srv = Number(j?.serverTime)
+      if (Number.isFinite(srv)) timestamp = srv
+    } catch {}
     // Last-mile global sanitization for all order-sending endpoints
     try {
       const methodUp = String(method || '').toUpperCase()
@@ -166,7 +173,12 @@ class BinanceFuturesAPI {
       }
     } catch {}
 
-    const queryString = `${Object.entries({ ...params, timestamp }).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')}`
+    const defaultRecvWindow = (() => {
+      const env = Number(process.env.BINANCE_RECV_WINDOW_MS)
+      if (Number.isFinite(env) && env > 0) return Math.min(120000, Math.floor(env))
+      return 60000
+    })()
+    const queryString = `${Object.entries({ ...params, timestamp, recvWindow: defaultRecvWindow }).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')}`
     const signature = this.sign(queryString)
     const finalQueryString = `${queryString}&signature=${signature}`
 
@@ -303,13 +315,15 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
   const makeId = (p: string) => `${PROJECT_CID_PREFIX}_${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 
   const tpMode = ((tradingCfg as any)?.TP_MODE === 'LIMIT_ON_FILL') ? 'LIMIT_ON_FILL' as const : 'MARKET_PREENTRY' as const
+  const disableSl = ((tradingCfg as any)?.DISABLE_SL === true)
   
   // DEBUG: Zkontroluj konfiguraci
   try {
     console.error('[TP_CONFIG_DEBUG]', { 
       finalTpMode: tpMode,
       mode: 'BATCH_SAFE',
-      rawConfig: { DISABLE_LIMIT_TP: (tradingCfg as any)?.DISABLE_LIMIT_TP, SAFE_MODE_LONG_ONLY: (tradingCfg as any)?.SAFE_MODE_LONG_ONLY }
+      rawConfig: { DISABLE_LIMIT_TP: (tradingCfg as any)?.DISABLE_LIMIT_TP, SAFE_MODE_LONG_ONLY: (tradingCfg as any)?.SAFE_MODE_LONG_ONLY, DISABLE_SL: (tradingCfg as any)?.DISABLE_SL },
+      disableSl
     })
   } catch {}
 
@@ -493,6 +507,7 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
             __engine: 'v2_batch_safe'
           }
           slParams = { 
+          slParams = { 
             symbol, 
             side: 'SELL', 
             type: 'STOP_MARKET', 
@@ -508,8 +523,8 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
         let slRes: any = null
         let tpRes: any = null
         if (tpMode === 'LIMIT_ON_FILL') {
-          // Pošli SL i TP LIMIT hned (bez reduceOnly, bez closePosition)
-          slRes = await api.placeOrder(slParams)
+          // Pošli TP LIMIT hned (bez reduceOnly, bez closePosition); SL jen pokud není vypnut
+          if (!disableSl) slRes = await api.placeOrder(slParams)
           const tpLimit: OrderParams & { __engine?: string } = {
             symbol,
             side: 'SELL',
@@ -533,11 +548,11 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
           const slOk = hasPosition || (Number(data.order.sl) < Number(markPx))
           console.error('[BATCH_TP_SL_POLICY]', { symbol, hasPosition, mark: Number(markPx), tp: Number(data.order.tp), sl: Number(data.order.sl), tpOk, slOk })
           const reqs: Array<Promise<any>> = []
-          if (slOk) reqs.push(api.placeOrder(slParams))
+          if (!disableSl && slOk) reqs.push(api.placeOrder(slParams))
           if (tpOk) reqs.push(api.placeOrder(tpParams))
           const pair = await Promise.all(reqs)
-          slRes = pair[0]
-          tpRes = pair[1]
+          if (reqs.length === 2) { slRes = pair[0]; tpRes = pair[1] }
+          else if (reqs.length === 1) { slRes = null; tpRes = pair[0] }
         }
         try {
           console.info('[BATCH_SL_TP_ECHO_BRIEF]', {

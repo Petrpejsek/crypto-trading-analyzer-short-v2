@@ -54,17 +54,24 @@ export async function readAuditEntries(symbol?: string | null, limit: number = 5
   try {
     const today = getAuditFilePath(new Date())
     const yest = getAuditFilePath(new Date(Date.now() - 24*60*60*1000))
-    const arr1 = await readJsonLines(today)
-    const arr2 = await readJsonLines(yest)
-    const all = arr1.concat(arr2)
-    const filtered = symbol ? all.filter(r => String(r?.symbol || '') === symbol) : all
-    return filtered.slice(Math.max(0, filtered.length - limit))
+    const arrToday = await readJsonLines(today)
+    const arrYest = await readJsonLines(yest)
+    // Merge and sort by ts ascending so that slicing from the end yields truly latest records across days
+    const merged = ([] as AuditRecord[]).concat(arrYest, arrToday).sort((a: any, b: any) => {
+      const ta = Date.parse(String((a as any)?.ts || ''))
+      const tb = Date.parse(String((b as any)?.ts || ''))
+      const na = Number.isFinite(ta) ? ta : 0
+      const nb = Number.isFinite(tb) ? tb : 0
+      return na - nb
+    })
+    const filtered = symbol ? merged.filter(r => String(r?.symbol || '') === symbol) : merged
+    return filtered.slice(Math.max(0, filtered.length - Math.max(1, limit)))
   } catch { return [] }
 }
 
 export async function readAuditLatest(symbol?: string | null): Promise<AuditRecord | null> {
   const list = await readAuditEntries(symbol || null, 1)
-  return list.length ? list[0] : null
+  return list.length ? list[list.length - 1] : null
 }
 
 

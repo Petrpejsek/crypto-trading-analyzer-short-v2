@@ -21,7 +21,7 @@ docker compose -f deploy/compose.yml up -d --build
 
 echo "[PROVISION] Waiting for backend health..."
 for i in {1..20}; do
-  if curl -fsS http://127.0.0.1:8789/api/trading/settings >/dev/null; then
+  if curl -fsS http://127.0.0.1:8888/api/trading/settings >/dev/null; then
     echo "[PROVISION] Backend is healthy."
     exit 0
   fi

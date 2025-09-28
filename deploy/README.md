@@ -11,7 +11,7 @@ Rychlé kroky
 3) Spusť build a stack:
    docker compose -f deploy/compose.yml up -d --build
 4) Ověř zdraví backendu:
-   curl -fsS http://127.0.0.1:8789/api/trading/settings
+   curl -fsS http://127.0.0.1:8888/api/trading/settings
 5) Ověř HTTPS na https://enermijo.cz
 
 Poznámky

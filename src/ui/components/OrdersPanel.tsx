@@ -377,7 +377,7 @@ export const OrdersPanel: React.FC = () => {
       const t = String(o.type || '').toUpperCase()
       const isTP = t.includes('TAKE_PROFIT')
       const isSL = t.includes('STOP') && !isTP
-      const isEntry = String(o.side || '').toUpperCase() === 'BUY' && !(o.reduceOnly || o.closePosition)
+      const isEntry = isEntryOrderUI(o)
       if (isEntry) return 1
       if (isSL) return 2
       if (isTP) return 3
@@ -408,8 +408,7 @@ export const OrdersPanel: React.FC = () => {
       for (const o of (orders || [])) {
         const sym = String(o?.symbol || '')
         if (!sym) continue
-        const sideBuy = String(o?.side || '').toUpperCase() === 'BUY'
-        const isEntry = sideBuy && !(o?.reduceOnly || o?.closePosition)
+        const isEntry = isEntryOrderUI(o)
         if (!isEntry) continue
         const t = String(o?.type || '').toUpperCase()
         const isStopType = t.includes('STOP')
@@ -424,16 +423,23 @@ export const OrdersPanel: React.FC = () => {
   const missingSlBySymbol = useMemo(() => {
     const set = new Set<string>()
     try {
+      // Pokud je SL vypnut v configu, nehlásit chybějící SL
+      try {
+        // dynamic import to access build-time config json
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const cfg = require('../../../config/trading.json') as any
+        if (cfg && cfg.DISABLE_SL === true) return new Set<string>()
+      } catch {}
       const bySym: Record<string, { hasEntry: boolean; hasSl: boolean }> = {}
       for (const o of (orders || [])) {
         const sym = String(o?.symbol || '')
         if (!sym) continue
-        const side = String(o?.side || '').toUpperCase()
         const type = String(o?.type || '').toUpperCase()
         const cp = Boolean(o?.closePosition)
         const reduceOnly = Boolean(o?.reduceOnly)
-        const isEntry = side === 'BUY' && !(reduceOnly || cp)
-        const isSl = side === 'SELL' && type === 'STOP_MARKET' && cp === true
+        const isEntry = isEntryOrderUI(o)
+        // Any STOP_MARKET with closePosition=true is considered SL (for both LONG/SHORT)
+        const isSl = type === 'STOP_MARKET' && cp === true
         if (!bySym[sym]) bySym[sym] = { hasEntry: false, hasSl: false }
         if (isEntry) bySym[sym].hasEntry = true
         if (isSl) bySym[sym].hasSl = true
@@ -448,9 +454,10 @@ export const OrdersPanel: React.FC = () => {
   const isExternalOrder = (o: OpenOrderUI): boolean => Boolean((o as any)?.isExternal === true)
   
   const isStrategyUpdaterOrder = (o: OpenOrderUI): boolean => {
-    const clientId = String(o?.clientOrderId || '')
-    // Recognize ONLY Strategy Updater exits: SL updates and TP splits (tp1/tp2/tp3)
-    return /^(sv2_x_sl_upd_|sv2_x_tp1_|sv2_x_tp2_|sv2_x_tp3_)/.test(clientId)
+    try {
+      // Authoritative server flag only – no client-side heuristics
+      return (o as any)?.isStrategyUpdater === true
+    } catch { return false }
   }
 
   // Entry Updater: highlight ENTRY orders that were repositioned by Entry Updater (clientOrderId prefix "eu_")
@@ -582,6 +589,17 @@ export const OrdersPanel: React.FC = () => {
       const m = v % 60
       return m ? `${h}h ${m}m` : `${h}h`
     } catch { return '-' }
+  }
+
+  // Robust detection: ENTRY orders are any non-exit orders (no reduceOnly/closePosition)
+  // of types LIMIT/STOP/STOP_MARKET/MARKET regardless of side (BUY for LONG, SELL for SHORT)
+  const isEntryOrderUI = (o: OpenOrderUI): boolean => {
+    try {
+      const typeUp = String(o.type || '').toUpperCase()
+      const isEntryType = (typeUp === 'LIMIT' || typeUp === 'STOP' || typeUp === 'STOP_MARKET' || typeUp === 'MARKET')
+      const exitFlag = Boolean(o.reduceOnly) || Boolean(o.closePosition)
+      return isEntryType && !exitFlag
+    } catch { return false }
   }
 
   const onChangePendingCancel = async (val: number) => {
@@ -956,7 +974,9 @@ export const OrdersPanel: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {stableWaiting.map((w) => (
+                {stableWaiting.map((w) => {
+                  const suActive = strategyUpdaterEntries.some((e: any) => String(e?.symbol||'') === w.symbol)
+                  return (
                   <tr key={w.symbol}>
                     <td>-</td>
                     <td>{w.symbol}</td>
@@ -974,24 +994,19 @@ export const OrdersPanel: React.FC = () => {
                       const suf = strat === 'aggressive' ? ' A' : (strat === 'conservative' ? ' C' : '')
                       return <span style={{ color: col }}>{ps}{suf}</span>
                     })()}</td>
-                    <td>{'TAKE_PROFIT'}</td>
+                    <td>
+                      <span>{'TAKE_PROFIT'}</span>
+                      {suActive ? (
+                        <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 4px', borderRadius: 4, background: '#22c55e', color: '#fff' }}>🤖 AI</span>
+                      ) : null}
+                    </td>
                     <td style={{ textAlign: 'right' }}>{w.qtyPlanned ?? '-'}</td>
                     <td style={{ textAlign: 'right' }}>-</td>
                     <td style={{ textAlign: 'right' }}>-</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(Number(w.tp) * 1.03, 6)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(Number(w.tp), 6)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(marks[w.symbol] as any, 6)}</td>
-                    <td style={{ textAlign: 'right' }}>{(() => {
-                      // Show Δ% to PLANNED ENTRY even when no entry order is open yet
-                      const plannedEntry = Number((lastEntryBySymbol as any)[w.symbol])
-                      const m = Number(marks[w.symbol])
-                      if (Number.isFinite(plannedEntry) && plannedEntry > 0 && Number.isFinite(m) && m > 0) {
-                        const pct = Math.abs((plannedEntry - m) / m) * 100
-                        const color = colorForDelta(pct)
-                        return <span style={{ color }}>{fmtPct(pct, 2)}</span>
-                      }
-                      return '-'
-                    })()}</td>
+                    <td style={{ textAlign: 'right' }}>-</td>
                     <td>{'GTC'}</td>
                     <td>{'reduceOnly'}</td>
                     <td>-</td>
@@ -999,7 +1014,7 @@ export const OrdersPanel: React.FC = () => {
                     <td>{w.lastCheck ? new Date(w.lastCheck).toLocaleTimeString() : '-'}</td>
                     <td>{(() => { const min = ageMinutes(w.since || null); const color = colorForAge(min); return <span style={{ color }}>{fmtAge(min)}</span> })()}</td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
           </div>
@@ -1121,11 +1136,21 @@ export const OrdersPanel: React.FC = () => {
                     })()}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(o.price, 6)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(o.stopPrice, 6)}</td>
-                    <td style={{ textAlign: 'right' }}>{String(o.side).toUpperCase() === 'BUY' ? fmtNum(marks[o.symbol], 6) : '-'}</td>
+                    <td style={{ textAlign: 'right' }}>{isEntryOrderUI(o) ? fmtNum(marks[o.symbol], 6) : '-'}</td>
                     <td style={{ textAlign: 'right' }}>
                       {(() => {
-                        const isEntry = String(o.side || '').toUpperCase() === 'BUY' && !(o.reduceOnly || o.closePosition)
+                        const isEntry = isEntryOrderUI(o)
                         if (!isEntry) return '-'
+                        // Compute Δ% ONLY when there is NO open position for this symbol
+                        const hasOpenPos = (() => {
+                          try { return Number.isFinite(Number(posBySymbol[o.symbol]?.size)) && Number(posBySymbol[o.symbol]?.size) > 0 } catch { return false } })()
+                        if (hasOpenPos) return '-'
+                        // Prefer server-precomputed value when present
+                        const pre = Number((o as any)?.deltaPctEntry)
+                        if (Number.isFinite(pre)) {
+                          const color = colorForDelta(pre)
+                          return <span style={{ color }} title={`Δ precomputed: ${pre.toFixed(4)}%`}>{fmtPct(pre, 2)}</span>
+                        }
                         const m = Number(marks[o.symbol])
                         const tgtFromOrder = pickOrderTargetPrice(o)
                         const planned = Number((lastEntryBySymbol as any)[o.symbol])
@@ -1135,7 +1160,7 @@ export const OrdersPanel: React.FC = () => {
                         if (Number.isFinite(m) && m > 0 && Number.isFinite(tgt) && tgt > 0) {
                           const pct = Math.abs(((tgt as number) - m) / m) * 100
                           const color = colorForDelta(pct)
-                          return <span style={{ color }}>{fmtPct(pct, 2)}</span>
+                          return <span style={{ color }} title={`Δ calc: tgt=${tgt} mark=${m}`}>{fmtPct(pct, 2)}</span>
                         }
                         return '-'
                       })()}

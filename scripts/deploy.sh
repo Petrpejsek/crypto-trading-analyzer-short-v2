@@ -100,7 +100,7 @@ else
 fi
 
 # Health-check
-HC_URL="http://127.0.0.1:8789/api/trading/settings"
+HC_URL="http://127.0.0.1:8888/api/trading/settings"
 log "Health-check: $HC_URL"
 if $DRY_RUN; then
   echo "+ curl -fsS $HC_URL | jq ."

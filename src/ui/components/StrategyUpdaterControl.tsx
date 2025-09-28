@@ -59,8 +59,8 @@ export const StrategyUpdaterControl: React.FC<Props> = ({ hasPositions, hasActiv
   // Determine status based on enabled state and position activity
   const getStatus = () => {
     if (!enabled) return { color: '#ef4444', text: '🔴 VYPNUTO', description: 'Strategy Updater je vypnutý' }
-    if (hasActiveCountdowns) return { color: '#22c55e', text: '🟢 AKTIVNÍ', description: 'Běží countdown u pozic' }
-    if (hasPositions) return { color: '#f59e0b', text: '🟠 ČEKÁ', description: 'Pozice otevřené, čeká na trigger' }
+    // Aktivní ihned po otevření pozice (nečekáme na první registry entry)
+    if (hasPositions || hasActiveCountdowns) return { color: '#22c55e', text: '🟢 AKTIVNÍ', description: hasActiveCountdowns ? 'Běží countdown u pozic' : 'Pozice otevřená – SU běží' }
     return { color: '#f59e0b', text: '🟠 WAITING', description: 'Čeká na otevření pozice' }
   }
 

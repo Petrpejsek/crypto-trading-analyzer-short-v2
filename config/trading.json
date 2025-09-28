@@ -13,6 +13,8 @@
   ,"RAW_PASSTHROUGH": true
   ,"BINANCE_WEIGHT_LIMIT_1M": 6000
   ,"V3_TP_IMMEDIATE_MARKET": false
+  ,"DISABLE_SL": false
+  ,"BLOCK_EMERGENCY_SL": true
   ,"COOLDOWN": {
     "enabled": true,
     "consecutiveLosses": 2,

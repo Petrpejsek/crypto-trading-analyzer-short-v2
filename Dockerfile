@@ -35,9 +35,9 @@ COPY --from=builder /app/vite.config.mts ./vite.config.mts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
 ENV NODE_ENV=production
-ENV PORT=8789
+ENV PORT=8888
 
-EXPOSE 8789
+EXPOSE 8888
 
 # Basic healthcheck hitting API settings endpoint
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \

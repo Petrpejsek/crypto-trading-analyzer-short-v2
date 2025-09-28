@@ -1,4 +1,5 @@
 import { fetchAllOpenOrders, fetchPositions } from './binance_futures'
+import tradingCfg from '../../config/trading.json'
 import { request as undiciRequest } from 'undici'
 
 type WatchItem = { symbol: string; deadline: number; side: 'LONG'|'SHORT'|null }
@@ -17,7 +18,7 @@ async function cancelAllOpenOrders(symbol: string): Promise<void> {
   // Pokud je pozice, SL/TP se nesmí rušit!
   try {
     const qs = new URLSearchParams({ symbol }).toString()
-    const url = `http://localhost:8789/__proxy/binance/cancelAllOpenOrders?${qs}`
+    const url = `http://localhost:8888/__proxy/binance/cancelAllOpenOrders?${qs}`
     await undiciRequest(url, { method: 'DELETE' })
   } catch {}
 }
@@ -25,7 +26,7 @@ async function cancelAllOpenOrders(symbol: string): Promise<void> {
 async function reduceOnlyMarket(symbol: string, side: 'LONG'|'SHORT'): Promise<void> {
   try {
     const qs = new URLSearchParams({ symbol, side }).toString()
-    const url = `http://localhost:8789/__proxy/binance/flatten?${qs}`
+    const url = `http://localhost:8888/__proxy/binance/flatten?${qs}`
     await undiciRequest(url, { method: 'POST' })
   } catch {}
 }
@@ -37,15 +38,22 @@ function hasExitsForSymbol(openOrders: any[], symbol: string, hasPosition: boole
   const hasTPMarketCloseOnly = bySym.some(o => String(o?.type||'') === 'TAKE_PROFIT_MARKET' && (o?.closePosition || o?.reduceOnly))
   const hasAnyTP = hasTPLimitReduceOnly || hasTPMarketCloseOnly
   
-  // KRITICKÁ OCHRANA: Pozice MUSÍ mít SL! Pokud ne, je to emergency
-  if (hasPosition && !hasSL) {
-    console.error('[CRITICAL_MISSING_SL]', { symbol, hasPosition, hasSL, hasAnyTP })
-    // Emergency SL recovery bude implementován později
+  // Pokud je SL globálně vypnut, nevyžaduj SL a nevypisuj varování
+  if (!((tradingCfg as any)?.DISABLE_SL === true)) {
+    // KRITICKÁ OCHRANA: Pozice MUSÍ mít SL! Pokud ne, je to emergency
+    if (hasPosition && !hasSL) {
+      console.error('[CRITICAL_MISSING_SL]', { symbol, hasPosition, hasSL, hasAnyTP })
+      // Emergency SL recovery bude implementován později
+    }
   }
   
   // Policy:
   // - If we already have a position, require both SL and TP present
   // - If we do NOT have a position yet (pre-entry), accept SL-only as sufficient
+  if ((tradingCfg as any)?.DISABLE_SL === true) {
+    // Bez SL: pokud je pozice, stačí mít nějaký TP; pre-entry stačí žádný exit
+    return hasPosition ? hasAnyTP : true
+  }
   return hasPosition ? (hasSL && hasAnyTP) : hasSL
 }
 

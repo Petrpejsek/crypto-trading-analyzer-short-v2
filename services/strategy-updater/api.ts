@@ -13,8 +13,26 @@ export async function getStrategyUpdaterStatus(symbol?: string): Promise<{
       enabled = isStrategyUpdaterEnabled()
     } catch {}
     
-    // Get all entries
-    const allEntries = getStrategyUpdaterList()
+    // Get in-memory entries
+    const memEntries = getStrategyUpdaterList()
+    // Merge with persisted registry on disk (source of truth across module reloads)
+    let diskEntries: StrategyUpdaterEntry[] = []
+    try {
+      const fs = await import('node:fs')
+      const path = await import('node:path')
+      const file = path.resolve(process.cwd(), 'runtime/strategy_updater.json')
+      if (fs.existsSync(file)) {
+        const raw = fs.readFileSync(file, 'utf8')
+        const parsed = JSON.parse(raw)
+        const arr: any[] = Array.isArray(parsed?.entries) ? parsed.entries : []
+        diskEntries = arr.filter(e => e && typeof e.symbol === 'string') as StrategyUpdaterEntry[]
+      }
+    } catch {}
+    // Union by symbol; prefer in-memory (latest), otherwise take disk
+    const bySymbol: Record<string, StrategyUpdaterEntry> = {}
+    for (const e of diskEntries) { bySymbol[e.symbol] = e }
+    for (const e of memEntries) { bySymbol[e.symbol] = e }
+    const allEntries = Object.values(bySymbol)
     
     // Filter by symbol if provided
     const entries = symbol 

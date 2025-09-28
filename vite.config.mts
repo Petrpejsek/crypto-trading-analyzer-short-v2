@@ -15,15 +15,15 @@ export default defineConfig({
   },
   server: {
     host: '::',
-    port: 4201,
+    port: 4302,
     strictPort: true,
     proxy: {
       '/api': {
-        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8789',
+        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8888',
         changeOrigin: true
       },
       '/__proxy': {
-        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8789',
+        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8888',
         changeOrigin: true
       },
       '/binance': {
@@ -36,15 +36,15 @@ export default defineConfig({
   },
   preview: {
     host: '::',
-    port: 4201,
+    port: 4302,
     strictPort: true,
     proxy: {
       '/api': {
-        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8789',
+        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8888',
         changeOrigin: true
       },
       '/__proxy': {
-        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8789',
+        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8888',
         changeOrigin: true
       },
       '/binance': {

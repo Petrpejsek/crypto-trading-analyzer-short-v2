@@ -6,10 +6,9 @@ MVP Analyze pipeline (M1–M4) is implemented:
 - M3-mini: Rules-based Market Decision
 - M4-mini: Rules-based Signals (1–3 setups)
 
-Run:
-- Start backend: `npm run dev:server`
-- Start UI: `npm run dev`
-- Open http://localhost:4200 and click Run
+Run (dev environment):
+- `npm run start:dev` – spustí backend na :8888, frontend (Vite) na :4302 a Temporal worker
+- Aplikace: http://localhost:4302 (proxy na backend :8888)
 
 QA:
 - Export fixtures: `npm run export:m1m2`

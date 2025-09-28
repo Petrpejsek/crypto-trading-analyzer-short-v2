@@ -43,6 +43,18 @@ stop_ports() {
   done
 }
 
+# Extra guard: also kill any rogue listeners on banned ports to avoid cross-project bleed
+stop_banned_ports() {
+  info "Stopping rogue listeners on banned ports :4201 and :8789 (if any)"
+  for p in 4201 8789; do
+    pids=$(lsof -n -iTCP:"$p" -sTCP:LISTEN -t 2>/dev/null || true)
+    if [ -n "${pids:-}" ]; then
+      info "Killing banned port $p PIDs: $pids"
+      kill -9 $pids || true
+    fi
+  done
+}
+
 stop_patterns() {
   info "Stopping dev processes by pattern (vite/tsx)"
   pkill -f "${SCRIPT_DIR}.*(vite|tsx|server/index.ts|npm run dev)" 2>/dev/null || true
@@ -66,6 +78,19 @@ clean_runtime() {
   info "Cleaning runtime logs and PIDs"
   mkdir -p "$RUNTIME_DIR"
   rm -f "$RUNTIME_DIR"/*.pid "$RUNTIME_DIR"/*log "$RUNTIME_DIR"/*.out "$RUNTIME_DIR"/*.err 2>/dev/null || true
+}
+
+# Remove persisted state files that can be rehydrated and cause stale behavior
+clean_runtime_state() {
+  info "Cleaning runtime state JSON (waiting_tp/strategy_updater/entry_updater/top_up_watcher/cooldowns/background_trading)"
+  rm -f \
+    "$RUNTIME_DIR/waiting_tp.json" \
+    "$RUNTIME_DIR/strategy_updater.json" \
+    "$RUNTIME_DIR/entry_updater.json" \
+    "$RUNTIME_DIR/top_up_watcher.json" \
+    "$RUNTIME_DIR/cooldowns.json" \
+    "$RUNTIME_DIR/background_trading.json" \
+    2>/dev/null || true
 }
 
 preflight_env() {
@@ -203,14 +228,16 @@ logs() {
 
 usage() {
   cat <<EOF
-Usage: ./dev.sh [start|stop|restart|status|logs]
+Usage: ./dev.sh [start|stop|restart|restart:fresh|status|logs|clean:state]
 
 Commands:
   start    Kill → clean → preflight → start backend+frontend+worker → verify
   stop     Stop listeners and dev processes including worker; clean runtime
   restart  stop then start (with preflight)
+  restart:fresh  restart + purge runtime state JSON before start (no stale rehydrate)
   status   Show listeners and runtime PIDs
   logs     Tail recent logs for backend/frontend
+  clean:state    Purge runtime state JSON only (safe to run while stopped)
 
 Environment:
   FRONTEND_PORT (default $FRONTEND_PORT), BACKEND_PORT (default $BACKEND_PORT)
@@ -224,7 +251,7 @@ cmd="${1:-}"
 case "${cmd}" in
   start)
     guard_ports
-    stop_ports; stop_patterns; stop_worker; clean_runtime
+    stop_ports; stop_banned_ports; stop_patterns; stop_worker; clean_runtime
     preflight_env; preflight_temporal
     start_backend; wait_backend
     start_frontend; wait_frontend
@@ -233,11 +260,21 @@ case "${cmd}" in
     status
     ;;
   stop)
-    stop_ports; stop_patterns; stop_worker; clean_runtime
+    stop_ports; stop_banned_ports; stop_patterns; stop_worker; clean_runtime
     ;;
   restart|"")
     guard_ports
-    stop_ports; stop_patterns; stop_worker; clean_runtime
+    stop_ports; stop_banned_ports; stop_patterns; stop_worker; clean_runtime
+    preflight_env; preflight_temporal
+    start_backend; wait_backend
+    start_frontend; wait_frontend
+    start_worker; wait_worker
+    verify_singletons
+    status
+    ;;
+  restart:fresh)
+    guard_ports
+    stop_ports; stop_banned_ports; stop_patterns; stop_worker; clean_runtime; clean_runtime_state
     preflight_env; preflight_temporal
     start_backend; wait_backend
     start_frontend; wait_frontend
@@ -250,6 +287,9 @@ case "${cmd}" in
     ;;
   logs)
     logs
+    ;;
+  clean:state)
+    clean_runtime_state
     ;;
   *)
     usage; exit 2

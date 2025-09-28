@@ -33,7 +33,7 @@ async function main(): Promise<void> {
   } catch {}
   const [,, symArg, multArg] = process.argv
   if (!symArg) { usage(); process.exit(1) }
-  const symbol = symArg.toUpperCase().endsWith('USDT') ? symArg.toUpperCase() : `${symArg.toUpperCase()}USDT`
+  const symbol = symArg.toUpperCase()
   const mult = Number(multArg || '1.03')
   if (!Number.isFinite(mult) || mult <= 0) { console.error('Bad multiplier'); process.exit(1) }
 

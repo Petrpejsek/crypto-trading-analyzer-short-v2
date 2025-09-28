@@ -21,8 +21,8 @@ export type StrategyUpdaterEntry = {
 const strategyUpdaterBySymbol: Record<string, StrategyUpdaterEntry> = {}
 const REGISTRY_DIR = path.resolve(process.cwd(), 'runtime')
 const REGISTRY_FILE = path.resolve(REGISTRY_DIR, 'strategy_updater.json')
-const UPDATE_DELAY_MS = 5 * 60 * 1000 // 5 minutes (subsequent updates)
-const INITIAL_DELAY_MS = 2 * 60 * 1000 // first run 2 minutes after open
+const UPDATE_DELAY_MS = 1 * 60 * 1000 // 1 minute between checks
+const INITIAL_DELAY_MS = 1 * 60 * 1000 // first run 1 minute after detection (can be overridden)
 
 // Track orderIds created by Strategy Updater so UI can highlight them reliably
 const strategyUpdaterOrderIds = new Set<number>()
@@ -113,11 +113,30 @@ export function scheduleStrategyUpdate(
   options?: { initialDelayMs?: number }
 ): void {
   try {
+    const existing = strategyUpdaterBySymbol[symbol]
     const now = new Date()
-    // First-run policy: default to 2 minutes unless caller requests otherwise
     const initialDelayMs = Number(options?.initialDelayMs ?? INITIAL_DELAY_MS)
+
+    // If entry already exists (waiting/processing), update mutable fields only,
+    // DO NOT reset triggerAt/since – prevents countdown resets on every poll.
+    if (existing && (existing.status === 'waiting' || existing.status === 'processing')) {
+      existing.side = side
+      existing.entryPrice = entryPrice
+      existing.positionSize = positionSize
+      existing.currentSL = currentSL
+      existing.currentTP = currentTP
+      // Keep existing.triggerAt and existing.since intact
+      persistRegistry()
+      console.info('[STRATEGY_UPDATER_UPSERT_NO_RESET]', {
+        symbol,
+        triggerAt: existing.triggerAt,
+        status: existing.status
+      })
+      return
+    }
+
+    // Fresh schedule
     const triggerAt = new Date(now.getTime() + initialDelayMs)
-    
     strategyUpdaterBySymbol[symbol] = {
       symbol,
       side,
@@ -133,7 +152,6 @@ export function scheduleStrategyUpdate(
       lastError: null,
       lastErrorAt: null
     }
-    
     persistRegistry()
     console.info('[STRATEGY_UPDATER_SCHEDULED]', {
       symbol,
@@ -215,8 +233,9 @@ export function forceDueNow(symbol: string): boolean {
     const entry = strategyUpdaterBySymbol[symbol]
     if (!entry) return false
     entry.triggerAt = new Date(Date.now() - 1000).toISOString()
+    entry.status = 'waiting' // Ensure it's waiting
     persistRegistry()
-    console.info('[STRATEGY_UPDATER_FORCE_DUE]', { symbol, triggerAt: entry.triggerAt })
+    console.info('[STRATEGY_UPDATER_FORCE_DUE]', { symbol, triggerAt: entry.triggerAt, status: entry.status })
     return true
   } catch (e) {
     console.error('[STRATEGY_UPDATER_FORCE_DUE_ERR]', (e as any)?.message || e)

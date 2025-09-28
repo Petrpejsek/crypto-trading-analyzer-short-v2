@@ -2,6 +2,7 @@ import config from '../../config/fetcher.json'
 import deciderCfg from '../../config/decider.json'
 import signalsCfg from '../../config/signals.json'
 import type { MarketRawSnapshot, Kline, ExchangeFilters, UniverseItem } from '../../types/market_raw'
+import { SHORT_SIMPLE as SHORT_SIMPLE_CFG } from '../config/short_simple'
 import { ema, rsi, atr } from '../../services/lib/indicators'
 import { calcSpreadBps, clampSnapshotSize, toNumber, toUtcIso } from '../../services/fetcher/normalize'
 import { request } from 'undici'
@@ -573,12 +574,21 @@ async function mapLimit<T, R>(arr: T[], limit: number, fn: (x: T) => Promise<R>)
 
 // REST-only builder – no WS cache access
 
-export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume'|'gainers'|'mix'; desiredTopN?: number; includeSymbols?: string[]; fresh?: boolean; allowPartial?: boolean }): Promise<MarketRawSnapshot> {
+export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume'|'gainers'|'mix'|'short_simple'; desiredTopN?: number; includeSymbols?: string[]; fresh?: boolean; allowPartial?: boolean; skipExchangeInfo?: boolean }): Promise<MarketRawSnapshot> {
   const t0 = Date.now()
   const globalAc = new AbortController()
   const globalTimeout = setTimeout(() => globalAc.abort(), (config as any).globalDeadlineMs ?? 8000)
   const uniKlines: Record<string, { H1?: Kline[]; M15?: Kline[]; H4?: Kline[] }> = {}
-  const exchangeFilters = await getExchangeInfo()
+  // Optionally skip fetching /exchangeInfo (used by Strategy Updater path)
+  const exchangeFilters = await (async (): Promise<ExchangeFilters> => {
+    if (opts?.skipExchangeInfo) {
+      // Strict: do NOT fabricate per-symbol filters; only return empty map.
+      // Callers that rely on includeSymbols will still work; universe pruning by
+      // exchange filters will be effectively disabled for this call.
+      return {} as any as ExchangeFilters
+    }
+    return await getExchangeInfo()
+  })()
   const filteredSymbols = Object.keys(exchangeFilters)
     .filter(sym => {
       try {
@@ -589,18 +599,110 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
         return ageDays >= minDays
       } catch { return true }
     })
-  // Fixed target: always BTC+ETH + exactly N-2 alts (when possible)
+  // Fixed target for legacy strategies (volume/gainers/mix)
   const desired = Number.isFinite(opts?.desiredTopN as any) && (opts!.desiredTopN as any) > 0 ? (opts!.desiredTopN as number) : config.universe.topN
   const altTarget = Math.max(0, desired - 2)
   // When includeSymbols provided, expand target to accommodate them
   const hasIncludeSymbols = Array.isArray(opts?.includeSymbols) && opts!.includeSymbols!.length > 0
   const effectiveAltTarget = hasIncludeSymbols ? Math.max(altTarget, altTarget + opts!.includeSymbols!.length) : altTarget
   // Pull a large candidate list (the endpoint returns all anyway)
-  const strategy = (opts?.universeStrategy || (config as any)?.universe?.strategy || 'volume') as 'volume'|'gainers'|'mix'
+  const strategy = (opts?.universeStrategy || (config as any)?.universe?.strategy || 'volume') as 'volume'|'gainers'|'mix'|'short_simple'
   const fresh = Boolean(opts?.fresh)
   let altSymbols: string[] = []
 
-  if (strategy === 'mix') {
+  if (strategy === 'short_simple') {
+    // MVP short screener: 50 candidates scored by zOverVWAP and RSI(M15) only; gates on liq/spread/age
+    const topN = Number.isFinite(opts?.desiredTopN as any) && (opts!.desiredTopN as any) > 0 ? (opts!.desiredTopN as number) : (SHORT_SIMPLE_CFG.topN || 50)
+    // Pool: take broad USDT perps (TRADING), biased by 24h volume for performance
+    const baseVol = await getTopNUsdtSymbols(Math.max(400, topN * 12), fresh)
+    const poolAll = baseVol.filter(s => filteredSymbols.includes(s))
+    const poolCap = Math.max(topN * 3, Math.min(poolAll.length, 240))
+    const pool = poolAll.slice(0, poolCap)
+
+    // Prefetch M15 klines for pool
+    const poolKlines: Record<string, { M15?: Kline[] }> = {}
+    const preTasks: Array<() => Promise<void>> = []
+    const m15Limit = Number((config as any)?.altM15Limit ?? 96)
+    for (const sym of pool) {
+      preTasks.push(async () => {
+        const k = await getKlines(sym, '15m', m15Limit)
+        poolKlines[sym] = poolKlines[sym] || {}
+        ;(poolKlines[sym] as any).M15 = k
+      })
+    }
+    await runWithConcurrency(preTasks, Math.min(16, (config as any).concurrency || 8))
+
+    // Orderbook metrics for pool (spread bps and 1% depth liquidity)
+    const spreadMap: Record<string, number | undefined> = {}
+    const liq1pctMap: Record<string, number | undefined> = {}
+    const obTasks: Array<() => Promise<void>> = []
+    for (const s of pool) {
+      obTasks.push(async () => {
+        const [bt, ob] = await Promise.all([getBookTicker(s), getOrderBook(s, (config as any)?.orderbook?.limit || 50)])
+        const spread = calcSpreadBps(bt.bid, bt.ask)
+        const mid = (bt.bid && bt.ask) ? ((bt.bid + bt.ask) / 2) : (tickerMap[s]?.lastPrice || 0)
+        const d1 = ob && mid ? calcDepthWithinPctUSD(ob.bids, ob.asks, mid, 0.01) : undefined
+        spreadMap[s] = Number.isFinite(spread as any) ? (spread as number) : undefined
+        liq1pctMap[s] = d1 ? (d1.bids + d1.asks) : undefined
+      })
+    }
+    await runWithConcurrency(obTasks, Math.min(8, (config as any).concurrency || 8))
+
+    // Gating helpers
+    const gates = SHORT_SIMPLE_CFG.gates
+    const weights = SHORT_SIMPLE_CFG.weights
+    const zOverVWAP = (m: any): number => {
+      const p = Number(m.price), v = Number(m.vwapToday), a = Number(m.atr15)
+      if (!Number.isFinite(p) || !Number.isFinite(v) || !Number.isFinite(a) || a <= 0) return -Infinity
+      return (p - v) / a
+    }
+    const rsi15Norm = (m: any): number => {
+      const r = Number(m.rsi15)
+      return Number.isFinite(r) ? Math.max(0, (r - 60) / 40) : 0
+    }
+    const passGates = (m: any): boolean => {
+      return (
+        (Number(m.ageDays) >= Number(gates.minAgeDays)) &&
+        (Number(m.volume24h_usd) >= Number(gates.minVolume24hUsd)) &&
+        (Number(m.spreadBps) <= Number(gates.maxSpreadBps)) &&
+        (Number(m.liq1pctUsd) >= Number(gates.minLiq1pctUsd)) &&
+        (!gates.requirePriceTs || !!m.priceTsUtc) &&
+        (!gates.requireAtr15 || (Number.isFinite(Number(m.atr15)) && Number(m.atr15) > 0)) &&
+        (!gates.requireVwap || Number.isFinite(Number(m.vwapToday)))
+      )
+    }
+
+    // Metric accessor
+    const metricsOf = (sym: string) => {
+      const M15 = (poolKlines[sym]?.M15 || []) as Kline[]
+      const closeM15 = M15.map(k => k.close)
+      const price = Number(tickerMap[sym]?.lastPrice ?? (closeM15.length ? closeM15[closeM15.length - 1] : NaN))
+      const atrPctM15 = atrPct(M15)
+      const atr15 = (atrPctM15 != null && closeM15.length) ? (atrPctM15 / 100) * closeM15[closeM15.length - 1] : null
+      const rsi15 = rsi(closeM15, 14)
+      const vwap = computeDailyVwapFromM15(M15).vwap
+      const ageDays = (() => { try { const onboard = (exchangeFilters as any)[sym]?.onboardDate; return Number.isFinite(onboard) ? ((Date.now() - Number(onboard)) / 86400000) : null } catch { return null } })()
+      const volume24h_usd = Number(tickerMap[sym]?.volume24h_usd ?? 0)
+      const spreadBps = spreadMap[sym]
+      const liq1pctUsd = liq1pctMap[sym]
+      const priceTsUtc = (() => { const ms = Number(tickerMap[sym]?.closeTimeMs); return Number.isFinite(ms) ? new Date(ms).toISOString() : null })()
+      return { price, vwapToday: vwap, atr15, rsi15, ageDays, volume24h_usd, spreadBps, liq1pctUsd, priceTsUtc }
+    }
+
+    const scored = pool
+      .map(s => ({ s, m: metricsOf(s) }))
+      .filter(x => passGates(x.m))
+      .map(x => {
+        const z = zOverVWAP(x.m)
+        const r = rsi15Norm(x.m)
+        const score = Number(weights.zOverVWAP) * z + Number(weights.rsi15Norm) * r
+        return { symbol: x.s, score }
+      })
+      .filter(x => Number.isFinite(x.score))
+      .sort((a, b) => (b.score - a.score) || a.symbol.localeCompare(b.symbol))
+
+    altSymbols = scored.slice(0, topN).map(x => x.symbol)
+  } else if (strategy === 'mix') {
     // Build a diversified universe: 30 Volume Core, 15 Decliners, 5 Overextended Gainers
     const baseVol = await getTopNUsdtSymbols(Math.max(300, desired * 10), fresh)
     const poolAll = baseVol.filter(s => s !== 'BTCUSDT' && s !== 'ETHUSDT' && filteredSymbols.includes(s))
@@ -756,9 +858,9 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
 
   const klinesTasks: Array<() => Promise<any>> = []
   const coreIntervals: Array<{ key: 'H4'|'H1'|'M15'; interval: string; limit: number }> = [
-    { key: 'H4', interval: '4h', limit: (config as any).candles || 220 },
-    { key: 'H1', interval: '1h', limit: (config as any).candles || 220 },
-    { key: 'M15', interval: '15m', limit: (config as any).candles || 220 }
+    { key: 'H4', interval: '4h', limit: 50 },  // 50 * 4h = 200h = ~8 dní
+    { key: 'H1', interval: '1h', limit: 100 }, // 100 * 1h = 100h = ~4 dny  
+    { key: 'M15', interval: '15m', limit: 200 } // 200 * 15m = 50h = ~2 dny
   ]
   for (const c of coreIntervals) klinesTasks.push(async () => ({ key: `btc.${c.key}`, k: await getKlines('BTCUSDT', c.interval, c.limit) }))
   for (const c of coreIntervals) klinesTasks.push(async () => ({ key: `eth.${c.key}`, k: await getKlines('ETHUSDT', c.interval, c.limit) }))
@@ -998,14 +1100,16 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
     if (item.vwap_today != null && mxToday != null && item.vwap_today > mxToday) { warnings.push(`drop:alt:vwap_gt_maxHigh:${sym}:${item.vwap_today}>${mxToday}`); continue }
     universe.push(item)
   }
-  // Enforce fixed size: require exactly 28 alts in the universe (unless includeSymbols override)
-  if (universe.length !== altTarget && !hasIncludeSymbols) {
-    if (!(opts as any)?.allowPartial) {
-      const err: any = new Error('UNIVERSE_INCOMPLETE')
-      err.stage = 'universe_incomplete'
-      err.expected = altTarget
-      err.actual = universe.length
-      throw err
+  // Enforce fixed size only for legacy strategies; short_simple already enforces exact topN
+  if (strategy !== 'short_simple') {
+    if (universe.length !== altTarget && !hasIncludeSymbols) {
+      if (!(opts as any)?.allowPartial) {
+        const err: any = new Error('UNIVERSE_INCOMPLETE')
+        err.stage = 'universe_incomplete'
+        err.expected = altTarget
+        err.actual = universe.length
+        throw err
+      }
     }
   }
 

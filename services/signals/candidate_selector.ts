@@ -196,12 +196,12 @@ export function selectCandidates(
   const topB = downtrend.slice(0, 25)
   const pool = [...topA, ...topB]
   // Keep original tie-breakers to stabilize ordering slightly
-  const ranked = pool
+  const poolRanked = pool
     .sort((a, b) => a.symbol.localeCompare(b.symbol))
     .slice(0, Math.max(1, Math.min((limit as any) ?? 50, 50)))
   // Persist lastTopK for sticky (best-effort)
-  try { localStorage.setItem('lastTopK', JSON.stringify({ ts: Date.now(), items: ranked.map((r,i)=>({ symbol: r.symbol, S: r.score ?? 0, rank: i+1 })) })) } catch {}
-  return ranked
+  try { localStorage.setItem('lastTopK', JSON.stringify({ ts: Date.now(), items: poolRanked.map((r,i)=>({ symbol: r.symbol, S: r.score ?? 0, rank: i+1 })) })) } catch {}
+  return poolRanked
   // Persist gate stats (optional, behind try/catch; feature-flag removed)
   try { localStorage.setItem('cand_gate_stats', JSON.stringify({ ts: Date.now(), universe: coins.length, counts: gateCounts })) } catch {}
 

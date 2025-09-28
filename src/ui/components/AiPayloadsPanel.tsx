@@ -11,6 +11,7 @@ export const AiPayloadsPanel: React.FC<{
   const [suBody, setSuBody] = React.useState<string>('')
   const [suLoading, setSuLoading] = React.useState<boolean>(false)
   const [suError, setSuError] = React.useState<string | null>(null)
+  const [recent, setRecent] = React.useState<Array<{ symbol: string; body: string; mtime: number }>>([])
   const copy = async (text: string) => {
     try { await navigator.clipboard.writeText(text) } catch {}
   }
@@ -23,6 +24,26 @@ export const AiPayloadsPanel: React.FC<{
   const combinedEntryArray = (() => {
     try { return `[\n${entryBodies.map(e => e.body).join(',\n')}\n]` } catch { return '[]' }
   })()
+
+  // Auto-load recent SU inputs on mount and preload the latest into the view
+  React.useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      try {
+        const r = await fetch('/api/debug/strategy_updater_recent?limit=10')
+        if (!r.ok) return
+        const j = await r.json()
+        const items = Array.isArray(j?.items) ? j.items : []
+        if (!mounted) return
+        setRecent(items)
+        if (items.length > 0) {
+          setSuSymbol(items[0].symbol.toUpperCase())
+          setSuBody(String(items[0].body || ''))
+        }
+      } catch {}
+    })()
+    return () => { mounted = false }
+  }, [])
 
   return (
     <div className="card" style={{ marginTop: 8, padding: 12 }}>
@@ -45,7 +66,7 @@ export const AiPayloadsPanel: React.FC<{
           </div>
         </div>
         <div style={{ marginTop: 6 }}>
-          <pre style={{ maxHeight: 220, overflow: 'auto', fontSize: 12, background: 'rgba(255,255,255,0.02)', padding: 8, border: '1px solid var(--border)', borderRadius: 6 }}>
+          <pre style={{ maxHeight: 220, overflow: 'auto', fontSize: 12, background: 'rgba(255,255,255,0.02)', padding: 8, border: '1px solid var(--border)', borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere', width: '100%' }}>
             {hsBody ? hsBody : '// No payload yet – run Copy RAW (Hot Screener) first'}
           </pre>
         </div>
@@ -89,7 +110,7 @@ export const AiPayloadsPanel: React.FC<{
                     </div>
                     <button className="btn" onClick={() => copy(e.body)}>Copy</button>
                   </div>
-                  <pre style={{ maxHeight: 200, overflow: 'auto', fontSize: 12, background: 'rgba(255,255,255,0.02)', padding: 8, border: '1px solid var(--border)', borderRadius: 6 }}>
+                  <pre style={{ maxHeight: 200, overflow: 'auto', fontSize: 12, background: 'rgba(255,255,255,0.02)', padding: 8, border: '1px solid var(--border)', borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere', width: '100%' }}>
                     {e.body}
                   </pre>
                 </div>
@@ -101,9 +122,26 @@ export const AiPayloadsPanel: React.FC<{
 
       {/* Strategy Updater debug (read-only from backend) */}
       <div style={{ marginTop: 12 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <div style={{ fontWeight: 600 }}>Strategy Updater request (last saved)</div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {recent.length > 0 && (
+              <select
+                value={suSymbol}
+                onChange={e=>{
+                  const sym = e.target.value
+                  setSuSymbol(sym)
+                  const it = recent.find(x => x.symbol === sym)
+                  if (it) setSuBody(String(it.body || ''))
+                }}
+                style={{ fontSize: 12, padding: '4px 6px' }}
+                title="Recently analyzed symbols"
+              >
+                {recent.map(it => (
+                  <option key={it.symbol} value={it.symbol}>{it.symbol}</option>
+                ))}
+              </select>
+            )}
             <input
               value={suSymbol}
               onChange={e=>setSuSymbol(e.target.value.toUpperCase())}
@@ -130,7 +168,7 @@ export const AiPayloadsPanel: React.FC<{
         </div>
         {suError ? <div style={{ color: 'crimson', fontSize: 12, marginTop: 6 }}>{suError}</div> : null}
         <div style={{ marginTop: 6 }}>
-          <pre style={{ maxHeight: 220, overflow: 'auto', fontSize: 12, background: 'rgba(255,255,255,0.02)', padding: 8, border: '1px solid var(--border)', borderRadius: 6 }}>
+          <pre style={{ maxHeight: 220, overflow: 'auto', fontSize: 12, background: 'rgba(255,255,255,0.02)', padding: 8, border: '1px solid var(--border)', borderRadius: 6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere', width: '100%' }}>
             {suBody || '// Load by symbol to view last SU input'}
           </pre>
         </div>

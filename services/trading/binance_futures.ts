@@ -49,6 +49,8 @@ class BinanceFuturesAPI {
   private apiKey: string
   private secretKey: string
   private baseURL = 'https://fapi.binance.com'
+  private serverTimeOffsetMs = 0
+  private lastServerTimeSync = 0
 
   constructor() {
     this.apiKey = process.env.BINANCE_API_KEY || ''
@@ -72,7 +74,25 @@ class BinanceFuturesAPI {
 
   private async request(method: string, endpoint: string, params: Record<string, any> = {}): Promise<any> {
 
-    const timestamp = Date.now()
+    // Sync server time aggressively to avoid -1021
+    let timestamp = Date.now()
+    try {
+      const now = Date.now()
+      const res = await fetch(`${this.baseURL}/fapi/v1/time`)
+      const j = await res.json().catch(()=>null)
+      const srv = Number(j?.serverTime)
+      if (Number.isFinite(srv)) {
+        this.serverTimeOffsetMs = srv - now
+        this.lastServerTimeSync = now
+      }
+      timestamp = Date.now() + (this.serverTimeOffsetMs || 0)
+    } catch {}
+    // Expand recvWindow to mitigate clock skew/network latency issues (-1021)
+    const defaultRecvWindow = (() => {
+      const env = Number(process.env.BINANCE_RECV_WINDOW_MS)
+      if (Number.isFinite(env) && env > 0) return Math.min(120000, Math.floor(env))
+      return 120000 // 120s default in dev to reduce -1021
+    })()
     // Last-mile global sanitization for all order-sending endpoints
     try {
       const methodUp = String(method || '').toUpperCase()
@@ -285,7 +305,7 @@ class BinanceFuturesAPI {
         })
         .map(([k, v]) => [k, String(v)])
     ) as Record<string, string>
-    const queryParams: Record<string,string> = { ...filteredParams, timestamp: String(timestamp) }
+    const queryParams: Record<string,string> = { ...filteredParams, timestamp: String(timestamp), recvWindow: String(defaultRecvWindow) }
     const queryString = new URLSearchParams(queryParams).toString()
     const signature = this.sign(queryString)
     const url = `${this.baseURL}${endpoint}?${queryString}&signature=${signature}`
@@ -1006,7 +1026,15 @@ export async function executeHotTradingOrdersV1_OLD(request: PlaceOrdersRequest)
   throw new Error('executeHotTradingOrdersV1_OLD is removed. Use executeHotTradingOrders (V3).')
 }
 
-export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Promise<any> {
+// HARD DISABLE: V2 engine is deprecated and must not be used. Keep function name to avoid import errors,
+// but throw immediately if ever called, so it cannot silently mix with V3.
+export async function executeHotTradingOrdersV2(_request: PlaceOrdersRequest): Promise<any> {
+  throw new Error('ENGINE_DISABLED: V2 engine is deprecated. Use executeHotTradingOrders (V3) only.')
+}
+
+/*
+// Legacy V2 implementation (kept for reference). DO NOT ENABLE.
+export async function __legacy_executeHotTradingOrdersV2(request: PlaceOrdersRequest): Promise<any> {
   const results: any[] = []
   const priceLogs: Array<{
     symbol: string
@@ -1051,15 +1079,17 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
   const killLimitTp = ((tradingCfg as any)?.DISABLE_LIMIT_TP === true)
   const safeModeLongOnly = ((tradingCfg as any)?.SAFE_MODE_LONG_ONLY === true)
   const tpMode = ((tradingCfg as any)?.TP_MODE === 'LIMIT_ON_FILL') ? 'LIMIT_ON_FILL' as const : 'MARKET_PREENTRY' as const
+  const disableSl = ((tradingCfg as any)?.DISABLE_SL === true)
   
   // DEBUG: Zkontroluj konfiguraci
   try {
     console.error('[TP_CONFIG_DEBUG]', { 
       killLimitTp, 
       safeModeLongOnly, 
+      disableSl,
       tpModeFromConfig: (tradingCfg as any)?.TP_MODE,
       finalTpMode: tpMode,
-      rawConfig: { DISABLE_LIMIT_TP: (tradingCfg as any)?.DISABLE_LIMIT_TP, SAFE_MODE_LONG_ONLY: (tradingCfg as any)?.SAFE_MODE_LONG_ONLY }
+      rawConfig: { DISABLE_LIMIT_TP: (tradingCfg as any)?.DISABLE_LIMIT_TP, SAFE_MODE_LONG_ONLY: (tradingCfg as any)?.SAFE_MODE_LONG_ONLY, DISABLE_SL: (tradingCfg as any)?.DISABLE_SL }
     })
   } catch {}
 
@@ -1339,13 +1369,25 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
         }
 
         try {
-          if (hasPosition) {
-            // S pozicí: SL + TP LIMIT současně
-            ;[slRes, tpRes] = await Promise.all([api.placeOrder(slParamsHasPos), api.placeOrder(tpParamsHasPos)])
+          if (disableSl) {
+            if (hasPosition) {
+              tpRes = await api.placeOrder(tpParamsHasPos)
+            } else {
+              tpRes = tpOk ? await api.placeOrder(tpParamsPre) : null
+            }
           } else {
-            // Bez pozice: nejprve SL (pokud OK), pak TP MARKET zvlášť, aby se TP nevynechal při částečném failu
-            slRes = slOk ? await api.placeOrder(slParamsPre) : null
-            tpRes = tpOk ? await api.placeOrder(tpParamsPre) : null
+            if (hasPosition) {
+              // S pozicí: SL + TP LIMIT současně (ale jen pokud SL není vypnut)
+              if (disableSl) {
+                tpRes = await api.placeOrder(tpParamsHasPos)
+              } else {
+                ;[slRes, tpRes] = await Promise.all([api.placeOrder(slParamsHasPos), api.placeOrder(tpParamsHasPos)])
+              }
+            } else {
+              // Bez pozice: nejprve SL (pokud OK a není vypnut), pak TP MARKET zvlášť
+          slRes = (slOk && !disableSl) ? await api.placeOrder(slParamsPre) : null
+              tpRes = tpOk ? await api.placeOrder(tpParamsPre) : null
+            }
           }
         } catch (exitError: any) {
           console.error('[SL_TP_ERROR]', { symbol: order.symbol, error: exitError?.message })
@@ -1389,7 +1431,11 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
         }
         tpPayload = { type: 'TAKE_PROFIT', price: tpRounded, stopPrice: tpRounded, workingType: String(workingType), closePosition: false }
         try { console.info('[TP_PAYLOAD]', { engine: 'v2_simple_bracket_immediate', symbol: order.symbol, type: 'TAKE_PROFIT', price: tpRounded, stopPrice: tpRounded }) } catch {}
-        ;[tpRes, slRes] = await Promise.all([ api.placeOrder(tpParams), api.placeOrder(slParams) ])
+        if (disableSl) {
+          tpRes = await api.placeOrder(tpParams)
+        } else {
+          ;[tpRes, slRes] = await Promise.all([ api.placeOrder(tpParams), api.placeOrder(slParams) ])
+        }
         console.info('[TP_POLICY]', { symbol: order.symbol, mode: 'LIMIT_PREENTRY_NO_RO', decision: 'preentry_forced' })
         try { console.info('[TP_BRIEF]', { symbol: order.symbol, tpType: 'TAKE_PROFIT', price: tpRounded, stopPrice: tpRounded }) } catch {}
       }
@@ -1397,7 +1443,9 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
       // LIMIT_ON_FILL: SL hned, TP jako TAKE_PROFIT (limit) pre-entry (bez reduceOnly)
       if (tpMode === 'LIMIT_ON_FILL') {
         // 1) SL hned
-        slRes = await api.placeOrder(slParams)
+        if (!disableSl) {
+          slRes = await api.placeOrder(slParams)
+        }
         // 2) TP LIMIT hned (bez reduceOnly, bez closePosition)
         const tpLimitParams: OrderParams & { __engine?: string } = {
           symbol: order.symbol,
@@ -1468,6 +1516,7 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
   const success = results.every(r => r.status === 'executed')
   return { success, orders: results, timestamp: new Date().toISOString(), engine: 'v2_simple_bracket_immediate', price_logs: priceLogs }
 }
+*/
 
 // Helper: count decimals from step like 0.001 -> 3
 function countStepDecimals(step: number): number {
@@ -1796,8 +1845,8 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
   console.error('[BATCH_PHASE_2_WAIT]', { ms: 3000, ts: new Date().toISOString() })
   await sleep(3000)
 
-  // Phase 3: Send ALL SL immediately; TP policy depends on config (default immediate)
-  const tpImmediateMarket = Boolean((tradingCfg as any)?.V3_TP_IMMEDIATE_MARKET !== false)
+  // Phase 3: Send ALL SL immediately; TP policy depends on config
+  const tpImmediateMarket = ((tradingCfg as any)?.V3_TP_IMMEDIATE_MARKET === true)
   console.error('[BATCH_PHASE_3_ALL_EXITS_PARALLEL]', { ts: new Date().toISOString(), tp_policy: tpImmediateMarket ? 'IMMEDIATE_MARKET' : 'WAITING_LIMIT' })
   const exitPromises: Array<Promise<any>> = []
   const exitIndex: Array<{ symbol: string; kind: 'SL' | 'TP' }> = []
@@ -1839,7 +1888,11 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
         })
       } catch { return false }
     })()
-    if (!hasOpenEntry && !posQtyStrForGate) {
+    // PRE-ENTRY GLOBAL GATE: pokud nemáme otevřený ENTRY a ani reálnou pozici, a PREENTRY_EXITS_ENABLED=false,
+    // neodesílej žádné CP/RO SL ani TP – zabráníme pre-entry exitům úplně.
+    const preentryEnabled = Boolean((tradingCfg as any)?.PREENTRY_EXITS_ENABLED === true)
+    // If pre-entry exits are disabled and we are in pure pre-entry (open entry present, no real position), skip exits
+    if (!preentryEnabled && hasOpenEntry && !posQtyStrForGate) {
       try { console.warn('[SKIP_EXITS_NO_ENTRY]', { symbol: p.symbol }) } catch {}
       continue
     }
@@ -1887,11 +1940,15 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       } catch { return false }
     })()
     
-    // 1) CP SL (closePosition=true) – ochranný SL vždy přítomen, ale nikdy ne pokud by okamžitě triggeroval (-2021)
+    // 1) CP SL (closePosition=true) – ochranný SL pouze pokud není čistý pre-entry bez pozice a PREENTRY_EXITS_ENABLED je true
     if (hasSameCpSL) {
       console.warn('[DEDUP_SKIP_SL_CP]', { symbol: p.symbol, reason: 'SL_CP_same_price_exists' })
     } else {
       let allowCpSl = true
+      if (!preentryEnabled && !posQtyStrForGate && hasOpenEntry) {
+        allowCpSl = false
+        console.info('[PREENTRY_CP_SL_BLOCKED]', { symbol: p.symbol })
+      }
       // PRE-ENTRY DEDUP/REPLACE: pokud máme otevřený interní ENTRY a nemáme reálnou pozici,
       // nech pouze nejvíce ochranný CP SL a novější SL posílej jen pokud je více ochranný.
       try {
@@ -1995,12 +2052,14 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       }
     }
 
-    // 2) RO SL (reduceOnly=true) – pokud máme otevřenou pozici, pošli i kvantitativní SL
+    // 2) RO SL (reduceOnly=true) – pouze pokud máme reálnou pozici (nikdy v čistém pre-entry)
     try {
       // Pozn.: posQtyStrForGate již načtený pro hlavní gate, použijeme jej
       let posQtyStr: string | null = posQtyStrForGate
 
-      if (posQtyStr && !hasSameRoSL) {
+      if (!preentryEnabled && !posQtyStr && hasOpenEntry) {
+        console.info('[PREENTRY_RO_SL_BLOCKED]', { symbol: p.symbol })
+      } else if (posQtyStr && !hasSameRoSL) {
         const roSlParams: OrderParams & { __engine?: string } = {
           symbol: p.symbol,
           side: (String(p.order?.side || 'LONG').toUpperCase() === 'SHORT') ? 'BUY' : 'SELL',
@@ -2048,7 +2107,9 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
           const tpParams: OrderParams & { __engine?: string } = p.positionSide
             ? { ...baseTp, positionSide: p.positionSide, newClientOrderId: makeDeterministicClientId('x_tp_tm', { ...baseTp, positionSide: p.positionSide }), newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' } as any
             : { ...baseTp, newClientOrderId: makeDeterministicClientId('x_tp_tm', baseTp), newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' } as any
-          exitPromises.push(api.placeOrder(tpParams))
+          // Send TP immediately; do NOT cleanup waiting TP here to avoid conflicts
+          const tpPromise = api.placeOrder(tpParams)
+          exitPromises.push(tpPromise)
           exitIndex.push({ symbol: p.symbol, kind: 'TP' })
         }
       }
@@ -2058,6 +2119,22 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
   if (!tpImmediateMarket) {
     // Defer TP LIMIT reduceOnly until a real position exists; schedule background pollers per symbol
     for (const p of prepared) {
+      // Guard: avoid duplicate waiting if a TP already exists on the exchange
+      try {
+        const open = await fetchAllOpenOrders()
+        const hasExistingTp = (Array.isArray(open) ? open : []).some((o: any) => {
+          try {
+            const sameSymbol = String(o?.symbol || '') === p.symbol
+            const typeUp = String(o?.type || '').toUpperCase()
+            const isTp = typeUp.includes('TAKE_PROFIT')
+            return sameSymbol && isTp
+          } catch { return false }
+        })
+        if (hasExistingTp) {
+          console.warn('[WAITING_TP_SKIP_EXISTING]', { symbol: p.symbol, reason: 'TP_already_exists' })
+          continue
+        }
+      } catch {}
       spawnDeferredTpPoller(p.symbol, p.rounded.tp, String(p.rounded.qty), p.positionSide, workingType).catch(()=>{})
     }
   }

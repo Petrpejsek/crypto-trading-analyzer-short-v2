@@ -957,13 +957,12 @@ export const App: React.FC = () => {
           const reduceOnly = Boolean(o?.reduceOnly)
           const closePosition = Boolean(o?.closePosition)
           const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-          const side = String((o as any)?.side || '')
           const type = String((o as any)?.type || '')
-          const isBuy = side.toUpperCase() === 'BUY'
           const isEntryType = ['LIMIT','STOP','STOP_MARKET','STOP_LIMIT'].includes(type.toUpperCase())
-          const isInternalEntry = /^(e_l_|e_stl_|e_stm_|e_m_)/.test(clientId)
-          // Block ONLY internal entry orders that are active (not reduceOnly/closePosition)
-          if (sym && isBuy && isEntryType && isInternalEntry && !(reduceOnly || closePosition)) blocked.add(sym)
+          // Support both V2 (e_*) and V3 (sv2_e_*) clientOrderId prefixes
+          const isInternalEntry = /^(?:sv2_)?(?:e_l_|e_stl_|e_stm_|e_m_)/.test(clientId)
+          // Block ANY internal ENTRY (both BUY/SELL) that is active (not reduceOnly/closePosition)
+          if (sym && isEntryType && isInternalEntry && !(reduceOnly || closePosition)) blocked.add(sym)
         }
         const pList = Array.isArray(j?.positions) ? j.positions : []
         for (const p of pList) {
@@ -1015,12 +1014,12 @@ export const App: React.FC = () => {
           const reduceOnly = Boolean(o?.reduceOnly)
           const closePosition = Boolean(o?.closePosition)
           const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-          const side = String((o as any)?.side || '')
           const type = String((o as any)?.type || '')
-          const isBuy = side.toUpperCase() === 'BUY'
           const isEntryType = ['LIMIT','STOP','STOP_MARKET','STOP_LIMIT'].includes(type.toUpperCase())
-          const isInternalEntry = /^(e_l_|e_stl_|e_stm_|e_m_)/.test(clientId)
-          if (sym && isBuy && isEntryType && isInternalEntry && !(reduceOnly || closePosition)) blocked.add(sym)
+          // Support both V2 (e_*) and V3 (sv2_e_*) clientOrderId prefixes
+          const isInternalEntry = /^(?:sv2_)?(?:e_l_|e_stl_|e_stm_|e_m_)/.test(clientId)
+          // Block ANY internal ENTRY (both BUY/SELL) that is active (not reduceOnly/closePosition)
+          if (sym && isEntryType && isInternalEntry && !(reduceOnly || closePosition)) blocked.add(sym)
         }
         const pList = Array.isArray(j?.positions) ? j.positions : []
         for (const p of pList) {

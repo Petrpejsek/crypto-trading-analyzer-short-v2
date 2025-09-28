@@ -39,7 +39,7 @@ npm run build    # vytvoří dist/
 npm run dev:server
 
 # Ověření
-curl http://localhost:8789/api/health
+curl http://localhost:8888/api/health
 ```
 
 ### Porty a proxy (v tomto repu)

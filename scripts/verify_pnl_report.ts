@@ -229,7 +229,7 @@ function compareWithTolerance(a: number, b: number, tol = 1e-9): boolean {
 
 async function fetchUiReport(preset: RangePreset, profile: 'aggressive'|'conservative'|'both'): Promise<string> {
     const params = new URLSearchParams({ preset, profile })
-    const port = Number(process.env.PORT || process.env.SERVER_PORT || 8789)
+    const port = Number(process.env.PORT || process.env.SERVER_PORT || 8888)
     const url = `http://127.0.0.1:${port}/api/reports/pnl?${params.toString()}`
 	const res = await fetch(url)
 	if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)

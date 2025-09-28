@@ -1,6 +1,16 @@
 import { getBinanceAPI } from '../trading/binance_futures'
 import { scheduleStrategyUpdate, cleanupStrategyUpdaterForSymbol } from './registry'
 
+// Local helper: stable order for TP tags
+function orderOf(tag: string): number {
+  try {
+    switch (String(tag)) {
+      case 'tp': return 1
+      default: return 999
+    }
+  } catch { return 999 }
+}
+
 // Detect internal entry order fills and trigger strategy updater
 export function detectInternalPositionOpened(
   orders: any[], 
@@ -35,7 +45,8 @@ function detectMissingStrategyUpdaters(orders: any[], positions: any[]): void {
         const symbol = String(position?.symbol || '')
         const amt = Number(position?.positionAmt || position?.size || 0)
         const isOpen = Math.abs(amt) > 0
-        const isShort = amt < 0
+        const ps = String((position as any)?.positionSide || '').toUpperCase()
+        const isShort = ps === 'SHORT' ? true : (amt < 0)
         // Pouze SHORT pozice jsou interní – naplánuj SU
         if (symbol && isOpen && isShort && !existingEntries.has(symbol)) {
           startStrategyUpdaterForPosition(symbol, position, orders)
@@ -68,7 +79,8 @@ function handlePotentialInternalFill(
     if (!position) return
 
     const amt = Number(position?.positionAmt || position?.size || 0)
-    const side: 'LONG' | 'SHORT' = amt > 0 ? 'LONG' : 'SHORT'
+    const ps = String((position as any)?.positionSide || '').toUpperCase()
+    const side: 'LONG' | 'SHORT' = ps === 'LONG' ? 'LONG' : ps === 'SHORT' ? 'SHORT' : (amt > 0 ? 'LONG' : 'SHORT')
     if (side === 'SHORT') startStrategyUpdaterForPosition(symbol, position, orders)
     else {
       try { const { cleanupStrategyUpdaterForSymbol } = require('./registry'); cleanupStrategyUpdaterForSymbol(symbol) } catch {}
@@ -87,7 +99,7 @@ function handlePotentialInternalFill(
 // Removed REST polling backup - WebSocket detection is sufficient
 
 // Start strategy updater timer for a position
-function startStrategyUpdaterForPosition(symbol: string, position: any, orders: any[], options?: { initialDelayMs?: number }): void {
+export function startStrategyUpdaterForPosition(symbol: string, position: any, orders: any[], options?: { initialDelayMs?: number }): void {
   try {
     const positionAmt = Number(position?.positionAmt || position?.size || 0)
     const entryPrice = Number(position?.entryPrice || position?.averagePrice || 0)
@@ -97,8 +109,11 @@ function startStrategyUpdaterForPosition(symbol: string, position: any, orders: 
       return
     }
 
-    const side: 'LONG' | 'SHORT' = positionAmt > 0 ? 'LONG' : 'SHORT'
+    const ps = String((position as any)?.positionSide || '').toUpperCase()
+    const side: 'LONG' | 'SHORT' = ps === 'LONG' ? 'LONG' : ps === 'SHORT' ? 'SHORT' : (positionAmt > 0 ? 'LONG' : 'SHORT')
     const size = Math.abs(positionAmt)
+
+    // Scheduling relies on provided positions argument; no extra WS readiness gate here
 
     // Find current SL and TP orders
     let currentSL: number | null = null
@@ -198,6 +213,8 @@ export async function processDueStrategyUpdates(): Promise<void> {
   if (!isStrategyUpdaterEnabled()) return
 
   try {
+    // No global WS readiness gate – we validate per-symbol below if needed
+
     const { getDueUpdates } = await import('./registry')
     const { markStrategyUpdateProcessing } = await import('./registry')
     const { rescheduleStrategyUpdate } = await import('./registry')
@@ -213,7 +230,19 @@ export async function processDueStrategyUpdates(): Promise<void> {
 
     for (const entry of dueUpdates) {
       try {
+        // Proceed without hard-skipping; per-symbol validation is handled during execution
+
         console.info('[STRATEGY_UPDATER_PROCESS_START]', { symbol: entry.symbol })
+        // Persist minimal marker immediately (prevents stale files from other symbols being shown)
+        try {
+          const fs = await import('node:fs')
+          const path = await import('node:path')
+          const dir = path.resolve('runtime/su_debug')
+          try { fs.mkdirSync(dir, { recursive: true }) } catch {}
+          const file = path.join(dir, `${entry.symbol}.json`)
+          const blob = { ts: new Date().toISOString(), symbol: entry.symbol, status: 'processing_start' as const }
+          fs.writeFileSync(file, JSON.stringify(blob, null, 2), 'utf8')
+        } catch {}
         markStrategyUpdateProcessing(entry.symbol)
         
         // 0. Read shared chosen_plan + posture from Risk Manager (optional)
@@ -222,21 +251,34 @@ export async function processDueStrategyUpdates(): Promise<void> {
         const currentPlan = riskRec?.plan
         const posture = riskRec?.posture
 
-        // 1. Fetch fresh market data (NO CACHE)
+        // 1. Fetch fresh FUTURES market data (NO CACHE, exact symbol only)
         const marketData = await fetchMarketDataForSymbol(entry.symbol)
         
-        // 2. Get current position info
-        const api = getBinanceAPI()
-        const positions = await api.getPositions()
-        const currentPosition = positions.find((pos: any) => String(pos?.symbol) === entry.symbol)
-        
-        if (!currentPosition || Math.abs(Number(currentPosition?.positionAmt || 0)) <= 0) {
-          // Position no longer exists - cleanup
-          const { markStrategyUpdateCompleted } = await import('./registry')
-          markStrategyUpdateCompleted(entry.symbol)
-          console.info('[STRATEGY_UPDATER_POSITION_GONE]', { symbol: entry.symbol })
-          continue
+        // 1b. Get full market snapshot with klines and depth data
+        let fullSnapshot: any = null
+        try {
+          const { buildMarketRawSnapshot } = await import('../../server/fetcher/binance')
+          fullSnapshot = await buildMarketRawSnapshot({
+            universeStrategy: 'volume',
+            desiredTopN: 2,
+            includeSymbols: [entry.symbol],
+            fresh: true,
+            allowPartial: true,
+            skipExchangeInfo: true
+          })
+        } catch (e) {
+          console.warn('[SU_FULL_SNAPSHOT_FALLBACK]', { symbol: entry.symbol, error: (e as any)?.message })
+          fullSnapshot = { universe: [], bySymbol: {} }
         }
+        
+        // 2. Use entry position data directly (avoid fresh REST call inconsistency)
+        const currentPosition = {
+          symbol: entry.symbol,
+          positionAmt: entry.side === 'LONG' ? entry.positionSize : -entry.positionSize,
+          entryPrice: entry.entryPrice,
+          markPrice: 0 // Will be updated from market data
+        }
+        console.info('[SU_USING_ENTRY_DATA_TRIGGER]', { symbol: entry.symbol, side: entry.side, size: entry.positionSize })
 
         const currentPrice = Number(marketData?.price || currentPosition?.markPrice || 0)
         const unrealizedPnl = Number(currentPosition?.unrealizedPnl || 0)
@@ -263,9 +305,11 @@ export async function processDueStrategyUpdates(): Promise<void> {
         } catch {}
 
         // 2a. Read live open orders and derive current TP trio and current SL (no fallbacks)
+        const api = getBinanceAPI()
         const openOrdersRaw = await api.getOpenOrders(entry.symbol).catch(() => [])
         const exitSide = entry.side === 'LONG' ? 'SELL' : 'BUY'
-        const tagOf = (cid: string): 'tp'|null => cid.startsWith('x_tp_') ? 'tp' : null
+        // Accept project-prefixed IDs (sv2_x_tp_...) and plain x_tp_
+        const tagOf = (cid: string): 'tp'|null => (String(cid).includes('x_tp_') ? 'tp' : null)
         const tpLevels: Array<{ tag:'tp'; price:number; allocation_pct:number }> = []
         let currentSlLive: number | null = null
         try {
@@ -355,139 +399,120 @@ export async function processDueStrategyUpdates(): Promise<void> {
           return undefined
         })()
 
-        const updateInput = {
+        const rawM5List = (() => {
+          const list = marketData?.klines?.M5 ?? marketData?.klines?.m5 ?? []
+          if (!Array.isArray(list) || list.length === 0) return []
+          return list.slice(-60)
+        })()
+
+        const normalizedM5 = rawM5List.map((c: any) => ({
+          time: c?.openTime ?? c?.t ?? null,
+          open: Number(c?.open ?? c?.o ?? 0),
+          high: Number(c?.high ?? c?.h ?? 0),
+          low: Number(c?.low ?? c?.l ?? 0),
+          close: Number(c?.close ?? c?.c ?? 0),
+          volume: Number(c?.volume ?? c?.v ?? 0)
+        })).filter(row => typeof row.time === 'string' || typeof row.time === 'number')
+
+        const lastRaw = rawM5List[rawM5List.length - 1] || null
+        const closeTimeMs = Number(lastRaw?.closeTime ?? lastRaw?.close_time ?? NaN)
+        const priceTs = marketData?.price_ts ?? new Date().toISOString()
+        const isLastClosed = Number.isFinite(closeTimeMs) ? closeTimeMs <= Date.now() : Boolean(lastRaw)
+
+        const tpDisplay = tpLevels.map(tp => ({ price: tp.price, sizePct: Number(tp.allocation_pct ?? 0) }))
+        const unrealizedPnlPct = (entry.entryPrice > 0
+          ? ((currentPrice - entry.entryPrice) / entry.entryPrice) * (entry.side === 'LONG' ? 100 : -100)
+          : 0)
+
+        const minimalSnapshot = {
+          ts: priceTs,
           symbol: entry.symbol,
           position: {
             side: entry.side,
             size: entry.positionSize,
-            initialSize: initialSizeAbs || undefined,
-            sizeRemainingPct: sizeRemainingPct,
             entryPrice: entry.entryPrice,
             currentPrice,
-            unrealizedPnl,
-            unrealizedPnlPct: (entry.entryPrice > 0 ? ((currentPrice - entry.entryPrice) / entry.entryPrice) * (entry.side === 'LONG' ? 100 : -100) : 0)
+            currentSL: currentSlLive ?? null,
+            currentTP: tpDisplay,
+            unrealizedPnlPct
           },
-          currentSL: currentSlLive ?? null,
-          currentTP: tpLevels.length ? tpLevels.sort((a,b)=>orderOf(a.tag)-orderOf(b.tag)) : [],
-          // Risk-aligned inputs
-          current_plan: currentPlan || undefined,
-          market_snapshot: {
-            ts: Date.now(),
-            markPrice: currentPrice,
-            bestBid: null,
-            bestAsk: null,
-            spread: null,
-            atr: { m5: (marketData?.atr_m15 ?? null), m15: (marketData?.atr_h1 ?? null) },
-            rsi: { m5: (marketData?.rsi_M5 ?? null), m15: (marketData?.rsi_M15 ?? null) },
-            ema: { m5: { 20: (marketData?.ema20_M5 ?? null), 50: (marketData?.ema50_M5 ?? null) }, m15: { 20: (marketData?.ema20_M15 ?? null), 50: (marketData?.ema50_M15 ?? null) } },
-            vwap: (marketData?.vwap_today ?? marketData?.vwap_daily ?? null),
-            volume: { m5: (marketData?.volume ?? null), spike: null },
-            delta: { m5: null },
-            sr: { nearestSupport: (Array.isArray(marketData?.support) && marketData.support.length ? marketData.support[0] : null), nearestResistance: (Array.isArray(marketData?.resistance) && marketData.resistance.length ? marketData.resistance[0] : null) }
+          market: {
+            is_last_candle_closed: isLastClosed,
+            ohlcv: { m5: normalizedM5 },
+            indicators: {
+              rsi: { m5: marketData?.rsi_M5 ?? null },
+              ema: { m5: { '20': marketData?.ema20_M5 ?? null, '50': marketData?.ema50_M5 ?? null } },
+              atr: { m5: marketData?.atr_m5 ?? null }
+            }
           },
-          posture: posture || 'OK',
-          exchange_filters: ((): any => {
-            const v = Number(process.env.MAX_SLIPPAGE_PCT)
-            if (!(Number.isFinite(v) && v > 0 && v < 1)) {
-              throw new Error('slippage_env_missing')
-            }
-            return { maxSlippagePct: v, minNotional: 5 }
-          })(),
-          lastDecision,
-          // Fills metadata strictly from actual Binance fills (no heuristics)
-          fills: await (async (): Promise<{ tp_hits_count: number; last_tp_hit_tag: 'tp1'|'tp2'|'tp3'|null; realized_pct_of_initial: number }> => {
-            try {
-              const sinceMs = Date.parse(String(entry.since || ''))
-              if (!Number.isFinite(sinceMs)) {
-                console.warn('[SU_FILLS_FALLBACK]', { symbol: entry.symbol, reason: 'bad_since' })
-                return { tp_hits_count: 0, last_tp_hit_tag: null, realized_pct_of_initial: 0 }
-              }
-              const endMs = Date.now()
-              // Fetch all orders and user trades since entry start (narrow window)
-              const [allOrders, trades] = await Promise.all([
-                api.getAllOrders(entry.symbol, { startTime: sinceMs, endTime: endMs, limit: 1000 }).catch((e: any) => { console.warn('[SU_FILLS_FALLBACK]', { symbol: entry.symbol, reason: 'getAllOrders_error', error: (e?.message||'unknown') }); return [] }),
-                api.getUserTrades(entry.symbol, { startTime: sinceMs, endTime: endMs, limit: 1000 }).catch((e: any) => { console.warn('[SU_FILLS_FALLBACK]', { symbol: entry.symbol, reason: 'getUserTrades_error', error: (e?.message||'unknown') }); return [] })
-              ])
-              const ordersArr = Array.isArray(allOrders) ? allOrders : []
-              const tradesArr = Array.isArray(trades) ? trades : []
-              if (ordersArr.length === 0 || tradesArr.length === 0) {
-                console.warn('[SU_FILLS_FALLBACK]', { symbol: entry.symbol, reason: 'empty_data', orders: ordersArr.length, trades: tradesArr.length })
-              }
-              const cidOf = (o: any): string => String(o?.clientOrderId || o?.C || o?.c || '')
-              const tagOfCid = (cid: string): 'tp1'|'tp2'|'tp3'|null => cid.startsWith('x_tp1_') ? 'tp1' : cid.startsWith('x_tp2_') ? 'tp2' : cid.startsWith('x_tp3_') ? 'tp3' : null
-
-              // Map orderId -> tag (based solely on CID prefix)
-              const tagByOrderId: Map<number, 'tp1'|'tp2'|'tp3'> = new Map()
-              for (const o of ordersArr) {
-                try {
-                  const id = Number(o?.orderId || o?.orderID || 0)
-                  if (!Number.isFinite(id) || id <= 0) continue
-                  const tag = tagOfCid(cidOf(o))
-                  if (tag) tagByOrderId.set(id, tag)
-                } catch {}
-              }
-
-              // Aggregate fills per tag using trades linked to TP orders
-              const qtyByTag: Record<'tp1'|'tp2'|'tp3', number> = { tp1: 0, tp2: 0, tp3: 0 }
-              let lastTradeTime: number = 0
-              let lastTag: 'tp1'|'tp2'|'tp3'|null = null
-              const exitOrderIds = new Set<number>()
-              for (const [oid, t] of tagByOrderId.entries()) exitOrderIds.add(oid)
-
-              for (const tr of tradesArr) {
-                try {
-                  const oid = Number(tr?.orderId || tr?.orderID || tr?.id || tr?.tradeId || 0)
-                  if (!exitOrderIds.has(oid)) continue
-                  const tag = tagByOrderId.get(oid)
-                  if (!tag) continue
-                  const q = Number(tr?.qty || tr?.qtyFilled || tr?.executedQty || 0)
-                  const tt = Number(tr?.time || tr?.T || 0)
-                  if (Number.isFinite(q) && q > 0) {
-                    qtyByTag[tag] += q
-                    if (Number.isFinite(tt) && tt >= lastTradeTime) { lastTradeTime = tt; lastTag = tag }
-                  }
-                } catch {}
-              }
-
-              const distinctHits = (['tp1','tp2','tp3'] as const).filter(t => qtyByTag[t] > 0)
-
-              // Realized percent from actual exit trades (TP + SL); include any reduce-only/closePosition sells matching exit side too
-              let realizedQty = 0
-              for (const tr of tradesArr) {
-                try {
-                  const oid = Number(tr?.orderId || tr?.orderID || tr?.id || tr?.tradeId || 0)
-                  if (!Number.isFinite(oid) || oid <= 0) continue
-                  const isExit = exitOrderIds.has(oid)
-                  if (!isExit) continue
-                  const q = Number(tr?.qty || tr?.qtyFilled || tr?.executedQty || 0)
-                  if (Number.isFinite(q) && q > 0) realizedQty += q
-                } catch {}
-              }
-              const realizedPct = initialSizeAbs > 0 ? Math.max(0, Math.min(1, realizedQty / initialSizeAbs)) : 0
-
-              const out = { tp_hits_count: Math.max(0, Math.min(3, distinctHits.length)), last_tp_hit_tag: lastTag, realized_pct_of_initial: realizedPct }
-              try { console.info('[SU_FILLS_ACTUAL]', { symbol: entry.symbol, ...out }) } catch {}
-              return out
-            } catch (e: any) {
-              try { console.warn('[SU_FILLS_FALLBACK]', { symbol: entry.symbol, reason: 'exception', error: (e?.message||'unknown') }) } catch {}
-              return { tp_hits_count: 0, last_tp_hit_tag: null, realized_pct_of_initial: 0 }
-            }
-          })()
+          exchange_filters: {
+            minNotional: Number(process.env.MIN_NOTIONAL ?? 5),
+            maxSlippagePct: Number(process.env.MAX_SLIPPAGE_PCT ?? 0.05)
+          }
         }
 
-        // 4. Call OpenAI for strategy update
-        // DEBUG: persist exact input 1:1 for UI payload preview (read-only)
         try {
           const fs = await import('node:fs')
           const path = await import('node:path')
           const dir = path.resolve('runtime/su_debug')
           try { fs.mkdirSync(dir, { recursive: true }) } catch {}
           const file = path.join(dir, `${entry.symbol}.json`)
-          const blob = { ts: new Date().toISOString(), symbol: entry.symbol, input: updateInput }
-          fs.writeFileSync(file, JSON.stringify(blob, null, 2), 'utf8')
+          fs.writeFileSync(file, JSON.stringify(minimalSnapshot, null, 2), 'utf8')
         } catch {}
 
-        const aiResult = await runStrategyUpdate(updateInput)
+        const pnlDirection = entry.side === 'LONG' ? 1 : -1
+        const unrealizedPnlUsd = Number(((currentPrice - entry.entryPrice) * entry.positionSize * pnlDirection).toFixed(4))
+
+        const aiInput: StrategyUpdateInput = {
+          symbol: entry.symbol,
+          position: {
+            side: entry.side,
+            size: entry.positionSize,
+            entryPrice: entry.entryPrice,
+            currentPrice,
+            unrealizedPnl: unrealizedPnlUsd,
+            unrealizedPnlPct
+          },
+          currentSL: currentSlLive ?? null,
+          currentTP: tpLevels,
+          market_snapshot: {
+            ts: Date.now(),
+            price_ts: priceTs,
+            is_last_candle_closed: isLastClosed,
+            ohlcv: { m5: normalizedM5 },
+            indicators: minimalSnapshot.market.indicators
+          },
+          exchange_filters: minimalSnapshot.exchange_filters,
+          fills: await (async () => {
+            const sinceMs = Date.parse(String(entry.since || ''))
+            if (!Number.isFinite(sinceMs)) return { tp_hits_count: 0, last_tp_hit_tag: null, realized_pct_of_initial: 0 }
+            const endMs = Date.now()
+            const [allOrders, trades] = await Promise.all([
+              api.getAllOrders(entry.symbol, { startTime: sinceMs, endTime: endMs, limit: 1000 }).catch(() => []),
+              api.getUserTrades(entry.symbol, { startTime: sinceMs, endTime: endMs, limit: 1000 }).catch(() => [])
+            ])
+            const tagByOrderId: Map<number, 'tp'> = new Map()
+            for (const o of allOrders || []) {
+              const id = Number(o?.orderId)
+              if (!Number.isFinite(id)) continue
+              const cid = String(o?.clientOrderId || '')
+              if (cid.includes('x_tp_')) tagByOrderId.set(id, 'tp')
+            }
+            let hits = 0
+            let realizedQty = 0
+            for (const tr of trades || []) {
+              const oid = Number(tr?.orderId)
+              if (!tagByOrderId.has(oid)) continue
+              hits = 1
+              const qty = Number(tr?.qty || tr?.executedQty || 0)
+              if (Number.isFinite(qty)) realizedQty += qty
+            }
+            const realizedPct = entry.positionSize > 0 ? Math.max(0, Math.min(1, realizedQty / entry.positionSize)) : 0
+            return { tp_hits_count: hits, last_tp_hit_tag: hits ? 'tp' : null, realized_pct_of_initial: realizedPct }
+          })()
+        }
+
+        const aiResult = await runStrategyUpdate(aiInput)
         
         if (!aiResult.ok || !aiResult.data) {
           const { markStrategyUpdateError } = await import('./registry')
@@ -502,23 +527,83 @@ export async function processDueStrategyUpdates(): Promise<void> {
 
         const response = aiResult.data
         
-        // 5. Check confidence threshold
-        if (response.confidence < 0.5) {
-          // Low confidence: keep cadence; reschedule next pass in 5 minutes
+        // 5. Check confidence threshold (configurable)
+        const floorRaw = process.env.SU_CONFIDENCE_FLOOR
+        const confFloor = (() => { const v = Number(floorRaw); return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 0.0 })()
+        if (response.confidence < confFloor) {
+          // Low confidence: keep cadence; reschedule next pass in 1 minute
           rescheduleStrategyUpdate(entry.symbol)
-          if (isAuditEnabled()) appendAudit({ id: `su_${Date.now()}_${entry.symbol}`, symbol: entry.symbol, phase: 'skipped_low_conf', confidence: response.confidence })
+          if (isAuditEnabled()) appendAudit({ id: `su_${Date.now()}_${entry.symbol}`, symbol: entry.symbol, phase: 'skipped_low_conf', confidence: response.confidence, floor: confFloor })
           console.info('[STRATEGY_UPDATER_LOW_CONFIDENCE]', { 
             symbol: entry.symbol, 
-            confidence: response.confidence 
+            confidence: response.confidence,
+            floor: confFloor
           })
           continue
         }
 
-        // 6. Execute the strategy update (create new orders, delete old)
+        // 6. CRITICAL: Validate SL for SHORT positions before execution
+        if (entry.side === 'SHORT') {
+          // Ensure SL is above current mark with a realistic buffer and never increase against current SL
+          let mark = 0
+          let tickSize: number | null = null
+          try {
+            const { getBinanceAPI } = await import('../trading/binance_futures')
+            const api = getBinanceAPI()
+            mark = Number(await api.getMarkPrice(entry.symbol))
+            try {
+              const info = await api.getSymbolInfo(entry.symbol)
+              const pf = (info?.filters || []).find((f: any) => f?.filterType === 'PRICE_FILTER')
+              tickSize = pf ? Number(pf.tickSize) : null
+            } catch {}
+          } catch {}
+
+          const quantize = (value: number, step: number | null): number => {
+            if (!Number.isFinite(step as any) || (step as number) <= 0) return value
+            const s = String(step)
+            const idx = s.indexOf('.')
+            const decimals = idx >= 0 ? (s.length - idx - 1) : 0
+            const factor = Math.pow(10, decimals)
+            return Math.round(value * factor) / factor
+          }
+
+          if (Number.isFinite(mark) && mark > 0) {
+            const atrM5 = Number(marketData?.atr_m5)
+            const minAtrBuf = Number.isFinite(atrM5) && atrM5 > 0 ? atrM5 * 0.15 : 0
+            const minTickBuf = Number.isFinite(tickSize as any) && (tickSize as number) > 0 ? (tickSize as number) * 3 : 0
+            const buffer = Math.max(minAtrBuf, minTickBuf)
+
+            if (response.newSL < mark + buffer) {
+              const unclamped = quantize(mark + buffer, tickSize)
+              const currentSlCap = currentSlLive != null ? Number(currentSlLive) : null
+              const corrected = currentSlCap != null ? Math.min(unclamped, currentSlCap) : unclamped
+              console.warn('[STRATEGY_UPDATE_SL_VALIDATION_TRIGGER]', {
+                symbol: entry.symbol,
+                side: entry.side,
+                proposedSL: response.newSL,
+                markPrice: mark,
+                buffer,
+                tickSize,
+                atrM5,
+                currentSlLive,
+                corrected
+              })
+              response.newSL = corrected
+              console.info('[STRATEGY_UPDATE_SL_CORRECTED]', {
+                symbol: entry.symbol,
+                originalSL: response.newSL,
+                correctedSL: corrected
+              })
+            }
+          }
+        }
+
+        // 7. Execute the strategy update (create new orders, delete old)
+        try { console.info('[STRATEGY_UPDATER_EXECUTE_CALL]', { symbol: entry.symbol, proposedSL: response.newSL, tp: response.tp_levels, confidence: response.confidence }) } catch {}
         const execResult = await executeStrategyUpdate(entry.symbol, response, entry)
         
         if (execResult.success) {
-          // Success: maintain 5-minute cadence while position is open
+          // Success: maintain 1-minute cadence while position is open
           rescheduleStrategyUpdate(entry.symbol)
           if (isAuditEnabled()) appendAudit({ id: `su_${Date.now()}_${entry.symbol}`, symbol: entry.symbol, phase: 'success', created: { sl: execResult.newSlOrderId, tps: execResult.newTpOrderIds }, cancelled: execResult.cancelledOrderIds })
           console.info('[STRATEGY_UPDATER_SUCCESS]', { 
@@ -542,6 +627,16 @@ export async function processDueStrategyUpdates(): Promise<void> {
         const { markStrategyUpdateError } = await import('./registry')
         markStrategyUpdateError(entry.symbol, (error as any)?.message || 'unknown_error')
         try { const { appendAudit, isAuditEnabled } = await import('./audit'); if (isAuditEnabled()) appendAudit({ id: `su_${Date.now()}_${entry.symbol}`, symbol: entry.symbol, phase: 'process_error', error: (error as any)?.message || 'unknown_error' }) } catch {}
+        // Persist error snapshot for UI visibility (replaces processing_start)
+        try {
+          const fs = await import('node:fs')
+          const path = await import('node:path')
+          const dir = path.resolve('runtime/su_debug')
+          try { fs.mkdirSync(dir, { recursive: true }) } catch {}
+          const file = path.join(dir, `${entry.symbol}.json`)
+          const blob = { ts: new Date().toISOString(), symbol: entry.symbol, status: 'process_error' as const, error: String((error as any)?.message || 'unknown_error') }
+          fs.writeFileSync(file, JSON.stringify(blob, null, 2), 'utf8')
+        } catch {}
         console.error('[STRATEGY_UPDATER_PROCESS_ERR]', {
           symbol: entry.symbol,
           error: (error as any)?.message || error

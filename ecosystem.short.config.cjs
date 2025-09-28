@@ -2,43 +2,23 @@ module.exports = {
   apps: [
     {
       name: 'trader-short-backend',
-      script: 'tsx',
-      args: 'server/index.ts',
-      env: {
-        NODE_ENV: 'production',
-        TRADE_SIDE: 'SHORT',
-        PORT: '3081'
-      }
-    },
-    {
-      name: 'trader-short-worker',
-      script: 'tsx',
-      args: 'temporal/worker.ts',
-      env: {
-        NODE_ENV: 'production',
-        TRADE_SIDE: 'SHORT',
-        PORT: '3081'
-      }
-    }
-  ]
-}
-
-module.exports = {
-  apps: [
-    {
-      name: 'trader-short-backend',
       script: 'server/index.ts',
       interpreter: './node_modules/.bin/tsx',
       exec_mode: 'fork',
       instances: 1,
       watch: false,
       time: true,
+      env_file: '.env.local',
       env: {
         PM2_NAME: 'trader-short-backend',
         NODE_ENV: 'production',
         TRADE_SIDE: 'SHORT',
         PORT: '3081',
-        TEMPORAL_NAMESPACE: 'trader-short'
+        TEMPORAL_NAMESPACE: 'trader-short',
+        STRATEGY_UPDATER_MODEL: 'gpt-4o',
+        MAX_SLIPPAGE_PCT: '0.05',
+        STRATEGY_UPDATER_AUDIT: '1',
+        STRATEGY_UPDATER_ENABLED: '1'
       },
       error_file: './logs/short/backend.err.log',
       out_file: './logs/short/backend.out.log',
@@ -52,18 +32,15 @@ module.exports = {
       instances: 1,
       watch: false,
       time: true,
+      env_file: '.env.local',
       env: {
         PM2_NAME: 'trader-short-worker',
         NODE_ENV: 'production',
         TRADE_SIDE: 'SHORT',
         TEMPORAL_NAMESPACE: 'trader-short',
-        TEMPORAL_ADDRESS: process.env.TEMPORAL_ADDRESS,
         TASK_QUEUE: 'entry-short',
         TASK_QUEUE_OPENAI: 'openai-short',
-        TASK_QUEUE_BINANCE: 'binance-short',
-        OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-        OPENAI_ORG_ID: process.env.OPENAI_ORG_ID,
-        OPENAI_PROJECT: process.env.OPENAI_PROJECT
+        TASK_QUEUE_BINANCE: 'binance-short'
       },
       error_file: './logs/short/worker.err.log',
       out_file: './logs/short/worker.out.log',
@@ -71,5 +48,4 @@ module.exports = {
     }
   ]
 }
-
 

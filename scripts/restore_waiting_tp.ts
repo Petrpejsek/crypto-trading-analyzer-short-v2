@@ -60,7 +60,7 @@ async function main() {
           // We need to access the internal waitingTpSchedule function
           const restorePayload = {
             method: 'POST',
-            url: `http://localhost:8789/__internal/restore_waiting_tp`,
+            url: `http://localhost:8888/__internal/restore_waiting_tp`,
             symbol,
             tp,
             qty,

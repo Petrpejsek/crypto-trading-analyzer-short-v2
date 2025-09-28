@@ -26,18 +26,7 @@ type StrategyUpdateEntry = {
 
 // Entry is provided by parent via props.entry
 
-// Check if position is from internal entry (has internal orders)
-// This is a simplified check - in reality we'd need current orders data
-function hasInternalEntry(symbol: string): boolean {
-  try {
-    // For now, we'll check if there might be internal activity
-    // This could be enhanced to call an API or access orders data
-    // For the initial implementation, we'll return false to avoid false positives
-    return false
-  } catch {
-    return false
-  }
-}
+// Simplified: rendering is driven by props; no extra fetching here.
 
 export const StrategyUpdateStatus: React.FC<Props> = ({ symbol, entry: entryProp, enabled }) => {
   const [entry, setEntry] = useState<StrategyUpdateEntry | null>(entryProp ?? null)
@@ -87,18 +76,8 @@ export const StrategyUpdateStatus: React.FC<Props> = ({ symbol, entry: entryProp
     return <span style={{ fontSize: 10, color: '#6b7280' }}>—</span>
   }
 
-  // No entry found - check if this position is from internal entry
-  if (!entry) {
-    const hasInternal = hasInternalEntry(symbol)
-    if (hasInternal) {
-      return (
-        <span style={{ fontSize: 10, color: '#f59e0b' }} title="Internal position detected, waiting for strategy updater to activate">
-          🟡 Waiting
-        </span>
-      )
-    }
-    return <span style={{ fontSize: 10, color: '#6b7280' }}>—</span>
-  }
+  // No entry yet -> show nothing; countdown will appear once registry entry exists with triggerAt
+  if (!entry) { return <span style={{ fontSize: 10, color: '#6b7280' }}>—</span> }
 
   // Show status based on entry state
   switch (entry.status) {
