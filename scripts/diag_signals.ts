@@ -36,7 +36,7 @@ function setupRuleCounts(f: FeaturesSnapshot) {
 
 async function main() {
   // Fetch latest snapshot from local server
-  const res = await fetch('http://localhost:8788/api/snapshot', { cache: 'no-store' })
+  const res = await fetch('http://localhost:8888/api/snapshot', { cache: 'no-store' })
   if (!res.ok) {
     const body = await res.text()
     console.error('SNAPSHOT_ERROR', res.status, body)

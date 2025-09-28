@@ -23,7 +23,7 @@ curl -sf http://127.0.0.1:3081/api/limits
 
 ### Dev util – vynucení pozice (opatrně)
 ```bash
-curl -X POST localhost:8788/api/test/market_fill \
+curl -X POST localhost:8888/api/test/market_fill \
   -H 'Content-Type: application/json' \
   -d '{"symbol":"BTCUSDT","side":"BUY","quantity":"0.001"}'
 ```

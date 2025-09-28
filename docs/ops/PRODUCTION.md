@@ -21,8 +21,8 @@
 ### Reverse proxy (Nginx)
 - Static UI: served from `/srv/trader/dist` (index.html, assets)
 - API proxy:
-  - `/api/` → `http://127.0.0.1:8788/api/`
-  - `/__proxy/` → `http://127.0.0.1:8788/`
+  - `/api/` → `http://127.0.0.1:3081/api/`
+  - `/__proxy/` → `http://127.0.0.1:3081/`
 - Security:
   - Basic Auth enabled na statické části (UI). Uživatel `trader`, heslo uložené v `/etc/nginx/.htpasswd`.
   - Basic Auth je vypnuto pro `/api/` a `/__proxy/` (aby UI polling nespouštěl přihlašovací dialog).
@@ -77,7 +77,7 @@ ssh deploy@SERVER 'sudo mv /srv/trader /srv/trader.bak-$(date +%Y%m%d%H%M%S) && 
 ```
 
 ### Health‑check
-- `GET http://127.0.0.1:8788/api/trading/settings` ⇒ `{ ok: true, pending_cancel_age_min: 0 }`
+- `GET http://127.0.0.1:3081/api/trading/settings` ⇒ `{ ok: true, pending_cancel_age_min: 0 }`
 - Nginx proxy: `https://enermijo.cz/api/trading/settings`
 
 ### Firewall
@@ -100,8 +100,8 @@ location / {
 - Git: `git -C /srv/trader fetch --all && git -C /srv/trader checkout <ref> && npm ci && npm run build && pm2 reload trader-backend`
 
 ### Incident checklist
-- `pm2 logs trader-backend` – ověř chyby / port 8788
-- `ss -ltnp | grep 80\|443\|8788` – ověř, že Nginx i Node poslouchají
+- `pm2 logs trader-backend` – ověř chyby / port 3081
+- `ss -ltnp | grep 80\|443\|3081` – ověř, že Nginx i Node poslouchají
 - `nginx -t && systemctl reload nginx` – test a reload proxy
 - Certbot log: `/var/log/letsencrypt/letsencrypt.log`
 

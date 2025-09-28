@@ -20,7 +20,7 @@ async function main() {
   await ensureDir(m1Dir)
   await ensureDir(m2Dir)
 
-  const res = await fetch('http://localhost:8788/api/snapshot', { cache: 'no-store' })
+  const res = await fetch('http://localhost:8888/api/snapshot', { cache: 'no-store' })
   if (!res.ok) throw new Error(`HTTP ${res.status} fetching snapshot`)
   const snapshot: MarketRawSnapshot = await res.json()
   const fn1 = path.join(m1Dir, `snapshot_${ts()}.json`)

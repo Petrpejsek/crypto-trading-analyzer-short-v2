@@ -1,6 +1,6 @@
 ## Backend API – přehled endpointů
 
-Základ: `http://localhost:8788`
+Základ: `http://localhost:8888` (dev) / `http://localhost:3081` (prod)
 
 ### Zdraví a limity
 - `GET /api/health` – ping
@@ -40,7 +40,7 @@ Základ: `http://localhost:8788`
 - `GET /api/entry_strategy` – `debug/entry_last?symbol=...` poslední vstupní analýza
 
 ### Proxy a speciální routy
-- Frontend dev proxy (Vite) mapuje `/api` a `/__proxy` na `:8788`.
+- Frontend dev proxy (Vite) mapuje `/api` a `/__proxy` na `:8888`.
 - UI používá flatten/cancel-all přes `/__proxy/binance/...` (server poskytuje kompatibilní handler).
 
 ### Sémantika odpovědí

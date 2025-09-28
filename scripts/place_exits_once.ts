@@ -12,7 +12,7 @@ async function httpJson<T=any>(method: string, url: string, body?: any): Promise
     const u = new URL(url)
     const req = http.request({
       hostname: u.hostname,
-      port: Number(u.port || 8788),
+      port: Number(u.port || 8888),
       path: u.pathname + (u.search || ''),
       method,
       headers: body ? { 'content-type': 'application/json' } : undefined
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   const slMult = Number(slArg || '0.97')
   const tpMult = Number(tpArg || '1.03')
 
-  const markRes: any = await httpJson('GET', `http://localhost:8788/api/mark?symbol=${symbol}`)
+  const markRes: any = await httpJson('GET', `http://localhost:8888/api/mark?symbol=${symbol}`)
   const mark = Number((markRes as any)?.mark)
   if (!Number.isFinite(mark) || mark <= 0) { throw new Error('Bad mark from /api/mark') }
 
@@ -49,10 +49,10 @@ async function main(): Promise<void> {
   const payload: any = { symbol, sl, tp }
   console.log('[PLACE_EXITS_PAYLOAD]', payload)
 
-  const out: any = await httpJson('POST', 'http://localhost:8788/api/place_exits', payload)
+  const out: any = await httpJson('POST', 'http://localhost:8888/api/place_exits', payload)
   console.log('[PLACE_EXITS_RES]', out)
 
-  const open: any = await httpJson('GET', 'http://localhost:8788/api/open_orders')
+  const open: any = await httpJson('GET', 'http://localhost:8888/api/open_orders')
   console.log('[OPEN_ORDERS_BRIEF]', Array.isArray(open?.orders) ? open.orders.map((o: any) => ({ symbol: o.symbol, side: o.side, type: o.type, price: o.price, stopPrice: o.stopPrice, reduceOnly: o.reduceOnly, closePosition: o.closePosition, positionSide: o.positionSide })) : open)
 }
 

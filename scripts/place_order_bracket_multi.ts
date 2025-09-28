@@ -13,7 +13,7 @@ async function httpJson<T=any>(method: string, url: string, body?: any): Promise
     const u = new URL(url)
     const req = http.request({
       hostname: u.hostname,
-      port: Number(u.port || 8788),
+      port: Number(u.port || 8888),
       path: u.pathname + (u.search || ''),
       method,
       headers: body ? { 'content-type': 'application/json' } : undefined
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
   const marks: Record<string, number> = {}
   const tick: Record<string, number> = {}
   for (const sym of symbols) {
-    const r: any = await httpJson('GET', `http://localhost:8788/api/mark?symbol=${sym}`)
+    const r: any = await httpJson('GET', `http://localhost:8888/api/mark?symbol=${sym}`)
     const m = Number((r as any)?.mark)
     if (!Number.isFinite(m) || m <= 0) throw new Error(`Bad mark for ${sym}`)
     marks[sym] = m
@@ -84,11 +84,11 @@ async function main(): Promise<void> {
 
   const payload = { orders }
   console.log('[PLACE_ORDERS_PAYLOAD]', payload)
-  const res: any = await httpJson('POST', 'http://localhost:8788/api/place_orders', payload)
+  const res: any = await httpJson('POST', 'http://localhost:8888/api/place_orders', payload)
   console.log('[PLACE_ORDERS_RES]', res)
 
   await new Promise(r => setTimeout(r, 4000))
-  const open: any = await httpJson('GET', 'http://localhost:8788/api/open_orders')
+  const open: any = await httpJson('GET', 'http://localhost:8888/api/open_orders')
   const brief = Array.isArray(open?.orders)
     ? open.orders.map((o: any) => ({ symbol: o.symbol, side: o.side, type: o.type, price: o.price, stopPrice: o.stopPrice, reduceOnly: o.reduceOnly, closePosition: o.closePosition, positionSide: o.positionSide }))
     : open

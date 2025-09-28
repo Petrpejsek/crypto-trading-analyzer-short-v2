@@ -3,7 +3,7 @@ import { computeFeatures } from '../services/features/compute'
 import type { MarketRawSnapshot } from '../types/market_raw'
 
 async function main() {
-  const res = await request('http://localhost:8788/api/snapshot', { method: 'GET' })
+  const res = await request('http://localhost:8888/api/snapshot', { method: 'GET' })
   if (res.statusCode !== 200) throw new Error(`snapshot HTTP ${res.statusCode}`)
   const text = await res.body.text()
   const snapshot = JSON.parse(text) as any as MarketRawSnapshot & { duration_ms?: number; latency_ms?: number }

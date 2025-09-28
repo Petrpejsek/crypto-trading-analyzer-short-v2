@@ -3,12 +3,12 @@ import { computeFeatures } from '../services/features/compute'
 import type { MarketRawSnapshot } from '../types/market_raw'
 
 async function main() {
-  const snapRes = await request('http://localhost:8788/api/snapshot', { method: 'GET' })
+  const snapRes = await request('http://localhost:8888/api/snapshot', { method: 'GET' })
   if (snapRes.statusCode !== 200) throw new Error(`snapshot HTTP ${snapRes.statusCode}`)
   const snapTxt = await snapRes.body.text()
   const snapshot = JSON.parse(snapTxt) as MarketRawSnapshot
   const features = computeFeatures(snapshot)
-  const decideRes = await request('http://localhost:8788/api/decide', {
+  const decideRes = await request('http://localhost:8888/api/decide', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ features, snapshot })

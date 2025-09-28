@@ -9,11 +9,11 @@ async function fetchJson(url: string) {
 async function sleep(ms: number) { return new Promise(res => setTimeout(res, ms)) }
 
 async function main() {
-  try { await fetchJson('http://localhost:8788/api/snapshot') } catch {}
+  try { await fetchJson('http://localhost:8888/api/snapshot') } catch {}
   const runs: Array<{ ms: number; syms: number }> = []
   for (let i = 0; i < 3; i++) {
     const t0 = Date.now()
-    const snap = await fetchJson('http://localhost:8788/api/snapshot')
+    const snap = await fetchJson('http://localhost:8888/api/snapshot')
     const dt = Date.now() - t0
     const syms = Array.isArray(snap?.universe) ? (2 + snap.universe.length) : 0
     runs.push({ ms: snap?.duration_ms ?? dt, syms })
