@@ -33,7 +33,7 @@
     "name": "entry_risk_manager",
     "path": "prompts/short/entry_risk_manager.md",
     "version": "20250928T1951",
-    "checksum_sha256": "abb3fba1db05ad3d6a3de7ce604445f97f57ddc79984212723068dc815834188"
+    "checksum_sha256": "8bb7f8106b84b0f0de0a6a9c5be8f1288f696221c6bf589b578d431963aaffc8"
   },
   {
     "name": "entry_strategy_aggressive",
@@ -45,7 +45,7 @@
     "name": "entry_strategy_conservative",
     "path": "prompts/short/entry_strategy_conservative.md",
     "version": "20250928T1951",
-    "checksum_sha256": "f54937edcc814fdc80d3a184f5772fc325511435a50632262bebcca3f5736ddf"
+    "checksum_sha256": "9a3303573d59cbc32391ff3de50326690101eaa352835636685c6f9514c22eb1"
   },
   {
     "name": "entry_updater",
@@ -57,7 +57,7 @@
     "name": "hot_screener",
     "path": "prompts/short/hot_screener.md",
     "version": "20250928T1951",
-    "checksum_sha256": "fbd2a7aecd7a6535c14cdf5811b81156b4bbadca6f4f360f34aa4e656c3b36db"
+    "checksum_sha256": "03dcfe5347eedd2a085cf46938674fdf3ffb9c0f505068b71764bb91076b8a8c"
   },
   {
     "name": "profit_taker",
@@ -69,7 +69,7 @@
     "name": "strategy_updater",
     "path": "prompts/short/strategy_updater.md",
     "version": "20250928T1951",
-    "checksum_sha256": "d1de8c2c08c28c8eb9040295e32a2692fa2a3c047820d7eebce54af53da6c957"
+    "checksum_sha256": "3a2fc027ef85c2db0567bf9901849d2873905874846a91e857f974e582371251"
   },
   {
     "name": "top_up_executor",
