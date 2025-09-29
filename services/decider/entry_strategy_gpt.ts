@@ -40,14 +40,14 @@ const ajv = new Ajv({ allErrors: true, removeAdditional: false, strict: false })
 addFormats(ajv)
 const validate = ajv.compile(entryStrategySchemaJson as any)
 
-const SYSTEM_PROMPT_CONS = (() => {
-  try { return fs.readFileSync(resolvePromptPathShort('entry_strategy_conservative.md'), 'utf8') } catch { return '' }
-})()
-const SYSTEM_PROMPT_AGGR = (() => {
-  try { return fs.readFileSync(resolvePromptPathShort('entry_strategy_aggressive.md'), 'utf8') } catch { return '' }
-})()
-const PROMPT_CONS_HASH = crypto.createHash('sha256').update(SYSTEM_PROMPT_CONS).digest('hex')
-const PROMPT_AGGR_HASH = crypto.createHash('sha256').update(SYSTEM_PROMPT_AGGR).digest('hex')
+function getEntryStrategyPrompt(preset: 'conservative' | 'aggressive'): { text: string; sha256: string } {
+  const { resolveAssistantPrompt, notePromptUsage } = require('../lib/dev_prompts')
+  const key = preset === 'conservative' ? 'entry_strategy_conservative' : 'entry_strategy_aggressive'
+  const fallback = resolvePromptPathShort(preset === 'conservative' ? 'entry_strategy_conservative.md' : 'entry_strategy_aggressive.md')
+  const result = resolveAssistantPrompt(key, fallback)
+  notePromptUsage(key, result.sha256)
+  return result
+}
 const SCHEMA_VERSION = String((entryStrategySchemaJson as any).version || '2.1.0')
 const schema = cleanSchema(entryStrategySchemaJson as any)
 
@@ -90,14 +90,14 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
       required: ['entry','sl']
     }) as const
 
-    const callAssistant = async (kind: AssistantKind): Promise<{ ok: true, data: any, requestId?: string } | { ok: false, code: 'no_api_key'|'invalid_json'|'schema'|'empty_output'|'timeout'|'http'|'http_400'|'http_401'|'http_403'|'http_404'|'http_409'|'http_422'|'http_429'|'http_500'|'unknown', requestId?: string } > => {
+    const callAssistant = async (kind: AssistantKind): Promise<{ ok: true, data: any, requestId?: string; promptSha256?: string } | { ok: false, code: 'no_api_key'|'invalid_json'|'schema'|'empty_output'|'timeout'|'http'|'http_400'|'http_401'|'http_403'|'http_404'|'http_409'|'http_422'|'http_429'|'http_500'|'unknown', requestId?: string } > => {
       try {
-        const systemPrompt = kind === 'conservative' ? SYSTEM_PROMPT_CONS : SYSTEM_PROMPT_AGGR
+        const promptResult = getEntryStrategyPrompt(kind)
         const body: any = {
           model,
           messages: [
             { role: 'system', content: 'Reply with JSON only. Output must be a single JSON object with numeric fields where applicable. No prose.' },
-            { role: 'system', content: systemPrompt },
+            { role: 'system', content: promptResult.text },
             { role: 'user', content: JSON.stringify(input) }
           ],
           temperature: 0.2,
@@ -277,7 +277,7 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
             return { ok: false, code: 'schema', requestId }
           }
         } catch {}
-        return { ok: true, data: parsed, requestId }
+        return { ok: true, data: parsed, requestId, promptSha256: promptResult.sha256 }
       } catch (e: any) {
         const name = String(e?.name || '').toLowerCase()
         const status = Number(e?.status || e?.response?.status)
@@ -296,8 +296,10 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
 
     // Call only conservative planner; aggressively skip aggressive variant
     const cons = await callAssistant('conservative')
+    const consHash = cons.ok ? cons.promptSha256 : undefined
     try { console.info('[ENTRY_STRATEGY_AGGRESSIVE_SKIPPED] reason:"temporarily disabled"') } catch {}
     const aggr = { ok: false, code: 'skipped' } as any
+    const aggrHash = aggr.ok ? aggr.promptSha256 : undefined
 
     // Now GPT returns the plan directly, not wrapped in a key
     // Sanitize helper: trim reasoning to schema limits and strip unsupported props
@@ -390,8 +392,8 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
 
     const latencyMs = Date.now() - t0
     return result(true, undefined, latencyMs, output, {
-      prompt_hash_conservative: PROMPT_CONS_HASH,
-      prompt_hash_aggressive: PROMPT_AGGR_HASH,
+      prompt_hash_conservative: consHash,
+      prompt_hash_aggressive: aggrHash,
       schema_version: SCHEMA_VERSION
     })
 

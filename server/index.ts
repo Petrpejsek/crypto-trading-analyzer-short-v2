@@ -8,9 +8,9 @@ import { PROMPTS_SIDE } from '../services/prompts/guard'
 import { loadShortRegistry, verifyShortRegistry } from '../services/prompts/registry'
 import { performance } from 'node:perf_hooks'
 import http from 'node:http'
-import { decideMarketStrict } from '../services/decider/market_decider_gpt'
+// import { decideMarketStrict } from '../services/decider/market_decider_gpt' // REMOVED
 import { ema as emaShared, rsi as rsiShared, atrPctFromBars } from '../services/lib/indicators'
-import { runFinalPicker as runFinalPickerServer } from '../services/decider/final_picker_gpt'
+// import { runFinalPicker as runFinalPickerServer } from '../services/decider/final_picker_gpt' // REMOVED
 import { runHotScreener } from '../services/decider/hot_screener_gpt'
 import { request as undiciRequest } from 'undici'
 import { runEntryStrategy } from '../services/decider/entry_strategy_gpt'
@@ -1492,6 +1492,115 @@ const server = http.createServer(async (req, res) => {
         }
       }
     } catch {}
+
+    // === DEV-ONLY PROMPT MANAGEMENT API ===
+    const isDevEnv = process.env.NODE_ENV !== 'production'
+    const checkDevAuth = (authHeader: string | undefined): boolean => {
+      if (!isDevEnv) return false
+      const expected = process.env.DEV_AUTH_TOKEN || 'dev-secret-token'
+      return authHeader === expected
+    }
+    
+    if (url.pathname === '/dev/prompts' && req.method === 'GET') {
+      if (!isDevEnv) { res.statusCode = 404; res.end('Not Found'); return }
+      if (!checkDevAuth(req.headers['x-dev-auth'] as string)) {
+        res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'unauthorized' })); return
+      }
+      try {
+        const { listAssistants } = await import('../services/lib/dev_prompts.js')
+        res.statusCode = 200; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ assistants: listAssistants() }))
+      } catch (e: any) {
+        res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    
+    if (url.pathname.startsWith('/dev/prompts/') && req.method === 'GET') {
+      if (!isDevEnv) { res.statusCode = 404; res.end('Not Found'); return }
+      if (!checkDevAuth(req.headers['x-dev-auth'] as string)) {
+        res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'unauthorized' })); return
+      }
+      try {
+        const key = url.pathname.split('/dev/prompts/')[1]
+        if (!key) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_key' })); return }
+        const { getOverlayPrompt } = await import('../services/lib/dev_prompts.js')
+        const overlay = getOverlayPrompt(key)
+        if (!overlay) { res.statusCode = 404; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'not_found' })); return }
+        res.statusCode = 200; res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ text: overlay.text, sha256: overlay.sha256, revision: overlay.revision, updatedAt: overlay.updatedAt }))
+      } catch (e: any) {
+        res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    
+    if (url.pathname.startsWith('/dev/prompts/') && req.method === 'PUT') {
+      if (!isDevEnv) { res.statusCode = 404; res.end('Not Found'); return }
+      if (!checkDevAuth(req.headers['x-dev-auth'] as string)) {
+        res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'unauthorized' })); return
+      }
+      try {
+        const key = url.pathname.split('/dev/prompts/')[1]
+        if (!key) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_key' })); return }
+        const chunks: Buffer[] = []; for await (const ch of req) chunks.push(ch as Buffer)
+        const bodyStr = Buffer.concat(chunks).toString('utf8')
+        let parsed: any = null
+        try { parsed = JSON.parse(bodyStr) } catch { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'invalid_json' })); return }
+        const { text, clientSha256, ifMatchRevision } = parsed
+        if (!text || typeof text !== 'string') { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_text' })); return }
+        if (!clientSha256 || typeof clientSha256 !== 'string') { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_clientSha256' })); return }
+        const { setOverlayPrompt } = await import('../services/lib/dev_prompts.js')
+        try {
+          const result = setOverlayPrompt(key, text, clientSha256, ifMatchRevision)
+          res.statusCode = 200; res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: true, storedSha256: result.sha256, revision: result.revision, updatedAt: result.updatedAt }))
+        } catch (e: any) {
+          const msg = e?.message || ''
+          if (msg.includes('Revision conflict')) { res.statusCode = 409; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'revision_conflict', message: msg })); return }
+          if (msg.includes('Lint failed')) { res.statusCode = 422; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'lint_failed', message: msg })); return }
+          if (msg.includes('SHA-256 mismatch')) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'sha256_mismatch', message: msg })); return }
+          throw e
+        }
+      } catch (e: any) {
+        res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    
+    if (url.pathname.startsWith('/dev/prompt-attestation/') && req.method === 'GET') {
+      if (!isDevEnv) { res.statusCode = 404; res.end('Not Found'); return }
+      if (!checkDevAuth(req.headers['x-dev-auth'] as string)) {
+        res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'unauthorized' })); return
+      }
+      try {
+        const key = url.pathname.split('/dev/prompt-attestation/')[1]
+        if (!key) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_key' })); return }
+        const { getPromptAttestation } = await import('../services/lib/dev_prompts.js')
+        res.statusCode = 200; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(getPromptAttestation(key)))
+      } catch (e: any) {
+        res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    
+    if (url.pathname === '/dev/prompts/export-all' && req.method === 'POST') {
+      if (!isDevEnv) { res.statusCode = 404; res.end('Not Found'); return }
+      if (!checkDevAuth(req.headers['x-dev-auth'] as string)) {
+        res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'unauthorized' })); return
+      }
+      try {
+        const { exportAllOverlaysToRegistry } = await import('../services/lib/dev_prompts.js')
+        const results = exportAllOverlaysToRegistry()
+        const success = results.filter(r => r.exported).length
+        const failed = results.filter(r => !r.exported).length
+        res.statusCode = 200; res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, total: results.length, success, failed, results }))
+      } catch (e: any) {
+        res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    // === KONEC DEV-ONLY PROMPT MANAGEMENT API ===
 
     const hasRealBinanceKeys = (): boolean => {
       try {

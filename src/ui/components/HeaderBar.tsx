@@ -32,9 +32,11 @@ type Props = {
   serverNextAt?: string | null
   // NEW: toggle AI Payloads panel
   onToggleAiPayloads?: () => void
+  // NEW: toggle Prompts modal (dev-only)
+  onTogglePrompts?: () => void
 }
 
-export const HeaderBar: React.FC<Props> = ({ running, onRun, onExportSnapshot, onExportFeatures, onToggleSettings, onToggleReport, showingReport, defaultPreset='conservative', onChangeDefaultPreset, defaultSide='LONG', onChangeDefaultSide, defaultTPLevel='tp2', onChangeDefaultTPLevel, defaultAmount=20, onChangeDefaultAmount, defaultLeverage=15, onChangeDefaultLeverage, onCopyRawAll, rawLoading=false, rawCopied=false, onAutoCopyRawToggle, serverNextAt=null, onToggleAiPayloads }) => {
+export const HeaderBar: React.FC<Props> = ({ running, onRun, onExportSnapshot, onExportFeatures, onToggleSettings, onToggleReport, showingReport, defaultPreset='conservative', onChangeDefaultPreset, defaultSide='LONG', onChangeDefaultSide, defaultTPLevel='tp2', onChangeDefaultTPLevel, defaultAmount=20, onChangeDefaultAmount, defaultLeverage=15, onChangeDefaultLeverage, onCopyRawAll, rawLoading=false, rawCopied=false, onAutoCopyRawToggle, serverNextAt=null, onToggleAiPayloads, onTogglePrompts }) => {
   // Auto Copy RAW – jednoduchý interval s odpočtem
   const [autoCopyEnabled, setAutoCopyEnabled] = useState<boolean>(() => {
     try { return localStorage.getItem('auto_copy_enabled') === '1' } catch { return false }
@@ -231,6 +233,25 @@ export const HeaderBar: React.FC<Props> = ({ running, onRun, onExportSnapshot, o
             >
               AI Payloads
             </button>
+            {(() => {
+              try {
+                const isDev = process.env.NODE_ENV !== 'production'
+                if (!isDev) return null
+              } catch {
+                return null
+              }
+              return (
+                <button
+                  className="btn"
+                  onClick={() => { try { onTogglePrompts && onTogglePrompts() } catch {} }}
+                  style={{ border: '1px solid #dc2626', background: '#1a0a0a' }}
+                  aria-label="Open Prompts (DEV)"
+                  title="Prompts (DEV)"
+                >
+                  📝 Prompts
+                </button>
+              )
+            })()}
           </div>
         </div>
       </div>

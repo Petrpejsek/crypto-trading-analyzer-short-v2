@@ -45,6 +45,7 @@ import PnlReportPanel from './components/PnlReportPanel'
 import TradingHoursTrafficLight from './components/TradingHoursTrafficLight'
 import FearGreedWidget from './components/FearGreedWidget'
 import { AiPayloadsPanel } from './components/AiPayloadsPanel'
+import { PromptsModal } from './components/PromptsModal'
 // Lightweight inline ActiveEntries Panel (detail + cancel)
 const ActiveEntriesPanel: React.FC = () => {
   type Item = {
@@ -155,6 +156,7 @@ export const App: React.FC = () => {
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [wsHealth, setWsHealth] = useState<WsHealth | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [promptsOpen, setPromptsOpen] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   // Hide snapshot/status container (per request we use Copy RAW flow only)
@@ -1083,7 +1085,13 @@ export const App: React.FC = () => {
             })
             clearTimeout(timeout)
             try { setAiEntryBodies(prev => [{ symbol: current, body: entryBody, sentAt: new Date().toISOString() }, ...prev].slice(0, 50)) } catch {}
-            if (!strategyRes || !(strategyRes as any).ok) { failed.push(current); continue }
+            if (!strategyRes || !(strategyRes as any).ok) {
+              try {
+                const code = strategyRes ? String(strategyRes.status) : 'no_response'
+                ;(window as any).__entry_failed_reasons = Object.assign((window as any).__entry_failed_reasons || {}, { [current]: code })
+              } catch {}
+              failed.push(current); continue
+            }
             const strategyResult = await (strategyRes as any).json()
             if (strategyResult.ok && strategyResult.data) {
               console.log('[ENTRY_STRATEGY_UI_SUCCESS]', { 
@@ -1095,6 +1103,10 @@ export const App: React.FC = () => {
               strategies.push(strategyResult.data)
             } else { 
               console.error('[ENTRY_STRATEGY_UI_FAIL]', { symbol: current, result: strategyResult })
+              try {
+                const code = String(strategyResult?.code || 'unknown')
+                ;(window as any).__entry_failed_reasons = Object.assign((window as any).__entry_failed_reasons || {}, { [current]: code })
+              } catch {}
               failed.push(current) 
             }
           } catch {
@@ -1644,6 +1656,7 @@ export const App: React.FC = () => {
         rawCopied={rawCopied}
         count={(displayCoins as any[]).length}
         onToggleAiPayloads={() => setAiShowPanel(v => !v)}
+        onTogglePrompts={() => setPromptsOpen(v => !v)}
         onAutoCopyRawToggle={(enabled)=>{
           // Toggle pouze připojí/odpojí – žádné mock spouštění
           try {
@@ -1679,6 +1692,10 @@ export const App: React.FC = () => {
           onClose={()=>setAiShowPanel(false)}
         />
       )}
+      <PromptsModal 
+        isOpen={promptsOpen} 
+        onClose={() => setPromptsOpen(false)} 
+      />
       {/* Auto Copy status banner */}
       {autoCopyId && (
         <div className="card" style={{ marginTop: 8, padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

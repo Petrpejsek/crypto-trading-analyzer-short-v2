@@ -91,9 +91,12 @@ const ajv = new Ajv({ strict: false })
 addFormats(ajv)
 const validateResponse = ajv.compile(responseSchema)
 
-function readStrategyUpdaterPrompt(): string {
-  const file = path.resolve('prompts/short/strategy_updater.md')
-  return fs.readFileSync(file, 'utf8')
+function readStrategyUpdaterPrompt(): { text: string; sha256: string } {
+  const { resolveAssistantPrompt, notePromptUsage } = require('../lib/dev_prompts')
+  const fallback = path.resolve('prompts/short/strategy_updater.md')
+  const result = resolveAssistantPrompt('strategy_updater', fallback)
+  notePromptUsage('strategy_updater', result.sha256)
+  return result
 }
 
 function result(ok: boolean, code: string | undefined, latencyMs: number, data: StrategyUpdateResponse | null, meta?: any) {
@@ -179,10 +182,11 @@ export async function runStrategyUpdate(input: StrategyUpdateInput): Promise<{
       }
     } as const
 
+    const promptResult = readStrategyUpdaterPrompt()
     const body: any = {
       model,
       messages: [
-        { role: 'system', content: readStrategyUpdaterPrompt() },
+        { role: 'system', content: promptResult.text },
         { role: 'user', content: JSON.stringify(input) }
       ],
       response_format: { type: 'json_schema', json_schema: schemaUpdater as any },
@@ -275,7 +279,8 @@ export async function runStrategyUpdate(input: StrategyUpdateInput): Promise<{
 
     return result(true, undefined, Date.now() - t0, response, {
       request_id: (resp as any)?.id ?? null,
-      model
+      model,
+      prompt_sha256: promptResult.sha256
     })
 
   } catch (error: any) {

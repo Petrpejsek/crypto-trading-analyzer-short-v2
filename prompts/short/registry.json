@@ -2,85 +2,79 @@
   {
     "name": "SNAPSHOT_20250927T1701",
     "path": "prompts/short/SNAPSHOT_20250927T1701.md",
-    "version": "20250927T1845",
+    "version": "20250928T1951",
     "checksum_sha256": "0c7ad24e4f049762d370d4012ecab1456b17522d4953d7a5f5fe324e145129e0"
   },
   {
     "name": "SNAPSHOT_20250927T1840",
     "path": "prompts/short/SNAPSHOT_20250927T1840.md",
-    "version": "20250927T1845",
+    "version": "20250928T1951",
     "checksum_sha256": "cb02db8e88e4b3aa2b76eeea5d0fa40fe00577297e282849b18fd09aec42bbbe"
+  },
+  {
+    "name": "SNAPSHOT_20250927T1845",
+    "path": "prompts/short/SNAPSHOT_20250927T1845.md",
+    "version": "20250928T1951",
+    "checksum_sha256": "ec6a7fefb9d14281556648a782903a2742e7cb85089f2c7e25fc50cf3fb0ecb0"
+  },
+  {
+    "name": "SNAPSHOT_20250928T1920",
+    "path": "prompts/short/SNAPSHOT_20250928T1920.md",
+    "version": "20250928T1951",
+    "checksum_sha256": "9ddb2ccbdaf25cd3b42186b2b2d82c4760ef27a38bef3ac2b735f0891e9718be"
+  },
+  {
+    "name": "SNAPSHOT_20250928T1930",
+    "path": "prompts/short/SNAPSHOT_20250928T1930.md",
+    "version": "20250928T1951",
+    "checksum_sha256": "44841e5a277b222f7d955fd6e8ce2023b2b7a76b5c4d8d38d018b71462b237e7"
   },
   {
     "name": "entry_risk_manager",
     "path": "prompts/short/entry_risk_manager.md",
-    "version": "20250927T1845",
+    "version": "20250928T1951",
     "checksum_sha256": "abb3fba1db05ad3d6a3de7ce604445f97f57ddc79984212723068dc815834188"
-  },
-  {
-    "name": "entry_strategy",
-    "path": "prompts/short/entry_strategy.md",
-    "version": "20250927T1845",
-    "checksum_sha256": "d07b7fa80d493938f1e5a75a4b50506ac55a3673d0b58373cb2045d4d2634ba4"
   },
   {
     "name": "entry_strategy_aggressive",
     "path": "prompts/short/entry_strategy_aggressive.md",
-    "version": "20250927T1845",
+    "version": "20250928T1951",
     "checksum_sha256": "a8b378223e74c0e3b58fc8fa8d0beaa4ec0946f593b221d46194b185d5d40d10"
   },
   {
     "name": "entry_strategy_conservative",
     "path": "prompts/short/entry_strategy_conservative.md",
-    "version": "20250927T1845",
-    "checksum_sha256": "1626843e2b97d5f28e18209eb6906f6d4ada4779c19d70bbce6bfc011e8b2d76"
+    "version": "20250928T1951",
+    "checksum_sha256": "f54937edcc814fdc80d3a184f5772fc325511435a50632262bebcca3f5736ddf"
   },
   {
     "name": "entry_updater",
     "path": "prompts/short/entry_updater.md",
-    "version": "20250927T1845",
+    "version": "20250928T1951",
     "checksum_sha256": "8a22d240a02cd9c039390adbffc069a2fb68e67c3b9d5359f27e1d955c1fffce"
-  },
-  {
-    "name": "final_picker",
-    "path": "prompts/short/final_picker.md",
-    "version": "20250927T1845",
-    "checksum_sha256": "0176b42831991a2e0c9e9c74a19177e8a13e3486bc4755a76070c67d901188ef"
   },
   {
     "name": "hot_screener",
     "path": "prompts/short/hot_screener.md",
-    "version": "20250927T1845",
+    "version": "20250928T1951",
     "checksum_sha256": "fbd2a7aecd7a6535c14cdf5811b81156b4bbadca6f4f360f34aa4e656c3b36db"
-  },
-  {
-    "name": "hot_screener_short",
-    "path": "prompts/short/hot_screener_short.md",
-    "version": "20250927T1845",
-    "checksum_sha256": "d4906bd91009b222732548d2c7bba72bc43a587b70b1e9df2ee5478877d6518c"
-  },
-  {
-    "name": "market_decider",
-    "path": "prompts/short/market_decider.md",
-    "version": "20250927T1845",
-    "checksum_sha256": "cd2fed41bcef56bee4ce1076d2a549a1ff780bbcf99242925fd03e8e358a2be4"
   },
   {
     "name": "profit_taker",
     "path": "prompts/short/profit_taker.md",
-    "version": "20250927T1845",
+    "version": "20250928T1951",
     "checksum_sha256": "a6d991bd986b9b6b6cf8b95a23f929c699056a5e26317fa57462b8aacdb00bf1"
   },
   {
     "name": "strategy_updater",
     "path": "prompts/short/strategy_updater.md",
-    "version": "20250927T1845",
-    "checksum_sha256": "d33e2278286ee29014f71909a02f101ff7bab126be96edcdaef83e31c2c79ca6"
+    "version": "20250928T1951",
+    "checksum_sha256": "d1de8c2c08c28c8eb9040295e32a2692fa2a3c047820d7eebce54af53da6c957"
   },
   {
     "name": "top_up_executor",
     "path": "prompts/short/top_up_executor.md",
-    "version": "20250927T1845",
+    "version": "20250928T1951",
     "checksum_sha256": "66d122f10ca0ae425d89771d456bf31f4f420bfac54058d8704f00222a491ffa"
   }
 ]

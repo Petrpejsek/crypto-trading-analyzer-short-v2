@@ -8,9 +8,12 @@ import type { EntryUpdaterInput, EntryUpdaterResponse } from './types'
 const ajv = new Ajv({ strict: false })
 addFormats(ajv)
 
-function readPrompt(): string {
-  const file = path.resolve('prompts/short/entry_updater.md')
-  return fs.readFileSync(file, 'utf8')
+function readPrompt(): { text: string; sha256: string } {
+  const { resolveAssistantPrompt, notePromptUsage } = require('../lib/dev_prompts')
+  const fallback = path.resolve('prompts/short/entry_updater.md')
+  const result = resolveAssistantPrompt('entry_updater', fallback)
+  notePromptUsage('entry_updater', result.sha256)
+  return result
 }
 
 function makeSchema(): any {
@@ -42,11 +45,12 @@ export async function runEntryUpdater(input: EntryUpdaterInput): Promise<{
     const model = 'gpt-5'
     const schema = makeSchema()
     const validate = ajv.compile(schema)
+    const promptResult = readPrompt()
 
     const body: any = {
       model,
       messages: [
-        { role: 'system', content: readPrompt() },
+        { role: 'system', content: promptResult.text },
         { role: 'user', content: JSON.stringify(input) }
       ],
       response_format: { type: 'json_schema', json_schema: { name: 'EntryUpdater', strict: true, schema } as any },
@@ -67,7 +71,7 @@ export async function runEntryUpdater(input: EntryUpdaterInput): Promise<{
     }
 
     const data = parsed as EntryUpdaterResponse
-    return { ok: true, latencyMs: Date.now() - t0, data, meta: { request_id: (resp as any)?.id ?? null } }
+    return { ok: true, latencyMs: Date.now() - t0, data, meta: { request_id: (resp as any)?.id ?? null, prompt_sha256: promptResult.sha256 } }
   } catch (error: any) {
     const code = error?.status === 401 ? 'no_api_key' : error?.response?.status ? 'http' : error?.message?.includes('timeout') ? 'timeout' : 'unknown'
     try { console.error('[ENTRY_UPDATER_GPT_ERR]', error?.message || error) } catch {}

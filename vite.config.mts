@@ -22,6 +22,10 @@ export default defineConfig({
         target: process.env.VITE_PROXY_TARGET || 'http://localhost:8888',
         changeOrigin: true
       },
+      '/dev': {
+        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8888',
+        changeOrigin: true
+      },
       '/__proxy': {
         target: process.env.VITE_PROXY_TARGET || 'http://localhost:8888',
         changeOrigin: true
@@ -40,6 +44,10 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
+        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8888',
+        changeOrigin: true
+      },
+      '/dev': {
         target: process.env.VITE_PROXY_TARGET || 'http://localhost:8888',
         changeOrigin: true
       },

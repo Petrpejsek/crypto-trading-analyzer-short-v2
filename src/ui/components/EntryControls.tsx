@@ -221,6 +221,18 @@ export function EntryControls({
       {Array.isArray(failedSymbols) && failedSymbols.length > 0 && (
         <div style={{ marginBottom: 12, padding: 8, border: '1px solid #664', borderRadius: 6, background: 'rgba(255,200,0,0.07)', fontSize: 12 }}>
           Některé coiny nevrátily platný GPT plán a nejsou zahrnuté v Entry: <strong>{failedSymbols.join(', ')}</strong>.
+          {(() => {
+            try {
+              const map = (window as any).__entry_failed_reasons || {}
+              const parts = failedSymbols.map(s => {
+                const c = map[s]
+                return c ? `${s}(${c})` : null
+              }).filter(Boolean)
+              return parts.length ? (
+                <span style={{ marginLeft: 6, opacity: 0.9 }}>Důvod: {parts.join(', ')}</span>
+              ) : null
+            } catch { return null }
+          })()}
           <span style={{ marginLeft: 6, opacity: 0.8 }}>Klikni znovu na Analyze Selected pro opakování.</span>
         </div>
       )}
