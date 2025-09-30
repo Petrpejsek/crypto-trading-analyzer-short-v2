@@ -24,5 +24,4 @@ safety-pre-prompts-restore-short-2025-09-27-1845
 └────┴─────────────────────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
 
 ## Listening ports
-node      20504 petrliesner   26u  IPv6 0xd0e3cf4a3c8cdab1      0t0  TCP *:8789 (LISTEN)
 node      42616 petrliesner   27u  IPv6 0xd0e3cf4a3c8efab1      0t0  TCP *:3081 (LISTEN)

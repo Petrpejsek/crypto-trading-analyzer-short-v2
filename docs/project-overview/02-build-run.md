@@ -21,7 +21,7 @@ npm ci
 
 ### Dev režim (bezpečné porty pro tento projekt)
 ```bash
-# Doporučené oddělené porty (aby se NIKDY nemíchalo s "trader new new new")
+# Standardní porty pro tento projekt
 FRONTEND_PORT=4302 BACKEND_PORT=8888 ./dev.sh restart
 
 # Kontroly
@@ -95,10 +95,10 @@ Poznámky:
 - Vite má `strictPort: true` – pro tento projekt použij `:4302`.
 - Backend používej na `:8888` (lze dočasně měnit proměnnou `PORT`).
 
-### Oddělení od „trader new new new“ (kriticky důležité)
-- Tento projekt NESMÍ používat porty 4201/8789.
+### Projekt izolace (kriticky důležité)
+- Tento projekt používá porty 4302 (frontend) a 8888 (backend).
 - Vždy spouštěj přes `FRONTEND_PORT=4302 BACKEND_PORT=8888 ./dev.sh restart`.
-- Rychlá kontrola oddělení:
+- Rychlá kontrola portů:
 ```bash
 PID=$(lsof -n -iTCP:4302 -sTCP:LISTEN -t | head -n1); lsof -a -p "$PID" -d cwd
 PID=$(lsof -n -iTCP:8888 -sTCP:LISTEN -t | head -n1); lsof -a -p "$PID" -d cwd

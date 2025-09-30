@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Consistent, reliable dev orchestration for Trader SHORT V2
-# - Strict ports (no fallbacks): frontend :4302, backend :8888 (BANNED: 4201/8789)
+# - Strict ports (no fallbacks): frontend :4302, backend :8888
 # - Health checks required; fail fast on errors
 # - Cleans runtime logs/PIDs
 
@@ -22,11 +22,8 @@ err()  { echo "[ERROR] $*" >&2; exit 1; }
 
 need_cmd() { command -v "$1" >/dev/null 2>&1 || err "Missing required command: $1"; }
 
-# Hard guard: never use ports of the other project
+# Port validation
 guard_ports() {
-  if [ "$FRONTEND_PORT" = "4201" ] || [ "$BACKEND_PORT" = "8789" ]; then
-    err "BANNED_PORTS: 4201/8789 are reserved for another project. Use FRONTEND_PORT=4302 BACKEND_PORT=8888."
-  fi
   if [ "$FRONTEND_PORT" = "$BACKEND_PORT" ]; then
     err "Invalid config: FRONTEND_PORT and BACKEND_PORT must differ."
   fi
@@ -43,17 +40,7 @@ stop_ports() {
   done
 }
 
-# Extra guard: also kill any rogue listeners on banned ports to avoid cross-project bleed
-stop_banned_ports() {
-  info "Stopping rogue listeners on banned ports :4201 and :8789 (if any)"
-  for p in 4201 8789; do
-    pids=$(lsof -n -iTCP:"$p" -sTCP:LISTEN -t 2>/dev/null || true)
-    if [ -n "${pids:-}" ]; then
-      info "Killing banned port $p PIDs: $pids"
-      kill -9 $pids || true
-    fi
-  done
-}
+# Removed: stop_banned_ports function to avoid killing other project's servers
 
 stop_patterns() {
   info "Stopping dev processes by pattern (vite/tsx)"
@@ -251,7 +238,7 @@ cmd="${1:-}"
 case "${cmd}" in
   start)
     guard_ports
-    stop_ports; stop_banned_ports; stop_patterns; stop_worker; clean_runtime
+    stop_ports; stop_patterns; stop_worker; clean_runtime
     preflight_env; preflight_temporal
     start_backend; wait_backend
     start_frontend; wait_frontend
@@ -260,11 +247,11 @@ case "${cmd}" in
     status
     ;;
   stop)
-    stop_ports; stop_banned_ports; stop_patterns; stop_worker; clean_runtime
+    stop_ports; stop_patterns; stop_worker; clean_runtime
     ;;
   restart|"")
     guard_ports
-    stop_ports; stop_banned_ports; stop_patterns; stop_worker; clean_runtime
+    stop_ports; stop_patterns; stop_worker; clean_runtime
     preflight_env; preflight_temporal
     start_backend; wait_backend
     start_frontend; wait_frontend
@@ -274,7 +261,7 @@ case "${cmd}" in
     ;;
   restart:fresh)
     guard_ports
-    stop_ports; stop_banned_ports; stop_patterns; stop_worker; clean_runtime; clean_runtime_state
+    stop_ports; stop_patterns; stop_worker; clean_runtime; clean_runtime_state
     preflight_env; preflight_temporal
     start_backend; wait_backend
     start_frontend; wait_frontend
