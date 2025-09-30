@@ -18,6 +18,11 @@ export function loadEnv(): TemporalEnv {
   if (!temporalAddress) {
     throw new Error('TEMPORAL_ADDRESS is required (e.g. 127.0.0.1:7233 or cloud endpoint)');
   }
+  
+  // CRITICAL: Hard-enforce correct Temporal address for SHORT instance
+  if (temporalAddress !== '127.0.0.1:7233') {
+    throw new Error(`TEMPORAL_ADDRESS MUST be 127.0.0.1:7233 for SHORT instance (got: ${temporalAddress}). NEVER use 7234 - that's for LONG instance!`);
+  }
   if (!traderQueue) {
     throw new Error('TASK_QUEUE is required for orchestrators (e.g. trader)');
   }
@@ -35,6 +40,12 @@ export function loadEnv(): TemporalEnv {
   if (!endsWithShort(binanceQueue)) throw new Error('TASK_QUEUE_BINANCE must end with -short');
   const ns = String(process.env.TEMPORAL_NAMESPACE || '');
   if (ns && !endsWithShort(ns)) throw new Error('TEMPORAL_NAMESPACE must end with -short');
+  
+  // CRITICAL: Never allow -long in queue names (prevents cross-contamination)
+  const hasLong = (v?: string) => typeof v === 'string' && /-long/i.test(v);
+  if (hasLong(traderQueue)) throw new Error('TASK_QUEUE contains "-long" - this is SHORT instance!');
+  if (hasLong(openaiQueue)) throw new Error('TASK_QUEUE_OPENAI contains "-long" - this is SHORT instance!');
+  if (hasLong(binanceQueue)) throw new Error('TASK_QUEUE_BINANCE contains "-long" - this is SHORT instance!');
 
   return { temporalAddress, traderQueue, openaiQueue, binanceQueue };
 }

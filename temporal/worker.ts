@@ -1,4 +1,8 @@
 import 'dotenv/config';
+import dotenv from 'dotenv';
+// CRITICAL: Load .env.local BEFORE anything else to prevent cross-contamination
+dotenv.config({ path: '.env.local' });
+
 import { Worker } from '@temporalio/worker';
 import { loadEnv } from './lib/env';
 import activities from './activities';
