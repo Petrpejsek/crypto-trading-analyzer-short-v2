@@ -213,6 +213,11 @@ export async function processDueStrategyUpdates(): Promise<void> {
   if (!isStrategyUpdaterEnabled()) return
 
   try {
+    // CRITICAL: First cleanup registry for symbols WITHOUT positions
+    const api = getBinanceAPI()
+    const positions = await api.getPositions().catch(() => [])
+    cleanupExpiredTracking(positions)
+
     // No global WS readiness gate – we validate per-symbol below if needed
 
     const { getDueUpdates } = await import('./registry')
