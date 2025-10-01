@@ -2,79 +2,109 @@
   {
     "name": "SNAPSHOT_20250927T1701",
     "path": "prompts/short/SNAPSHOT_20250927T1701.md",
-    "version": "20250928T1951",
+    "version": "20251001T2133",
     "checksum_sha256": "0c7ad24e4f049762d370d4012ecab1456b17522d4953d7a5f5fe324e145129e0"
   },
   {
     "name": "SNAPSHOT_20250927T1840",
     "path": "prompts/short/SNAPSHOT_20250927T1840.md",
-    "version": "20250928T1951",
+    "version": "20251001T2133",
     "checksum_sha256": "cb02db8e88e4b3aa2b76eeea5d0fa40fe00577297e282849b18fd09aec42bbbe"
   },
   {
     "name": "SNAPSHOT_20250927T1845",
     "path": "prompts/short/SNAPSHOT_20250927T1845.md",
-    "version": "20250928T1951",
+    "version": "20251001T2133",
     "checksum_sha256": "ec6a7fefb9d14281556648a782903a2742e7cb85089f2c7e25fc50cf3fb0ecb0"
   },
   {
     "name": "SNAPSHOT_20250928T1920",
     "path": "prompts/short/SNAPSHOT_20250928T1920.md",
-    "version": "20250928T1951",
+    "version": "20251001T2133",
     "checksum_sha256": "9ddb2ccbdaf25cd3b42186b2b2d82c4760ef27a38bef3ac2b735f0891e9718be"
   },
   {
     "name": "SNAPSHOT_20250928T1930",
     "path": "prompts/short/SNAPSHOT_20250928T1930.md",
-    "version": "20250928T1951",
+    "version": "20251001T2133",
     "checksum_sha256": "44841e5a277b222f7d955fd6e8ce2023b2b7a76b5c4d8d38d018b71462b237e7"
+  },
+  {
+    "name": "SNAPSHOT_20250928T1951",
+    "path": "prompts/short/SNAPSHOT_20250928T1951.md",
+    "version": "20251001T2133",
+    "checksum_sha256": "ffd206d875d4e498169c5ba363ddae97795160cc6da46f59537890c0d794dfa0"
+  },
+  {
+    "name": "SNAPSHOT_20251001T2055",
+    "path": "prompts/short/SNAPSHOT_20251001T2055.md",
+    "version": "20251001T2133",
+    "checksum_sha256": "e4793c540e18e689330c7c2d0d23c9cbbd5138e43fa9e93eb44051047954e0c3"
+  },
+  {
+    "name": "SNAPSHOT_20251001T2104",
+    "path": "prompts/short/SNAPSHOT_20251001T2104.md",
+    "version": "20251001T2133",
+    "checksum_sha256": "eef96ca3ae5f78eb1177ab58fd089628da317db337c5ddfef35544d02803f169"
   },
   {
     "name": "entry_risk_manager",
     "path": "prompts/short/entry_risk_manager.md",
-    "version": "20250928T1951",
-    "checksum_sha256": "8bb7f8106b84b0f0de0a6a9c5be8f1288f696221c6bf589b578d431963aaffc8"
+    "version": "20251001T2133",
+    "checksum_sha256": "5a6e005ef0180658ca1d913489d7da5954ef17b0395ce5fef3ff998a30e5fcfd"
   },
   {
     "name": "entry_strategy_aggressive",
     "path": "prompts/short/entry_strategy_aggressive.md",
-    "version": "20250928T1951",
-    "checksum_sha256": "a8b378223e74c0e3b58fc8fa8d0beaa4ec0946f593b221d46194b185d5d40d10"
+    "version": "20251001T2133",
+    "checksum_sha256": "a909b620099a036d492765948c38bd9ef7ca4e72e443039b22132860119ca601"
   },
   {
     "name": "entry_strategy_conservative",
     "path": "prompts/short/entry_strategy_conservative.md",
-    "version": "20250928T1951",
-    "checksum_sha256": "9a3303573d59cbc32391ff3de50326690101eaa352835636685c6f9514c22eb1"
+    "version": "20251001T2133",
+    "checksum_sha256": "a5582986e05673aaef808b6189e53633f3bb10ef1bb3ad9d633413b1b18127a9"
   },
   {
     "name": "entry_updater",
     "path": "prompts/short/entry_updater.md",
-    "version": "20250928T1951",
+    "version": "20251001T2133",
     "checksum_sha256": "8a22d240a02cd9c039390adbffc069a2fb68e67c3b9d5359f27e1d955c1fffce"
   },
   {
     "name": "hot_screener",
     "path": "prompts/short/hot_screener.md",
-    "version": "20250928T1951",
-    "checksum_sha256": "03dcfe5347eedd2a085cf46938674fdf3ffb9c0f505068b71764bb91076b8a8c"
+    "version": "20251001T2133",
+    "checksum_sha256": "9196e004f5537699cfbcf8a9b4786f98ca6e6ab316fd66088e597f2fd8ceef4f"
+  },
+  {
+    "name": "market_decider",
+    "path": "prompts/short/market_decider.md",
+    "version": "20251001T2133",
+    "checksum_sha256": "e9a1f4a255ff6607b7b0cb0c438a95f9fc88f3920eecc3a4f082ea0784dd9e26"
   },
   {
     "name": "profit_taker",
     "path": "prompts/short/profit_taker.md",
-    "version": "20250928T1951",
+    "version": "20251001T2133",
     "checksum_sha256": "a6d991bd986b9b6b6cf8b95a23f929c699056a5e26317fa57462b8aacdb00bf1"
   },
   {
     "name": "strategy_updater",
     "path": "prompts/short/strategy_updater.md",
-    "version": "20250928T1951",
-    "checksum_sha256": "3a2fc027ef85c2db0567bf9901849d2873905874846a91e857f974e582371251"
+    "version": "20251001T2133",
+    "checksum_sha256": "210403e552b45657af55105ea0c1730bf2d3cf04b083400fdefd16ef956ff2cb"
+  },
+  {
+    "name": "strategy_updater_fixed",
+    "path": "prompts/short/strategy_updater_fixed.md",
+    "version": "20251001T2133",
+    "checksum_sha256": "582ad2dd402de95cc5047194385861b12d9c7ebe7801f68d06d82c83b7ce0543"
   },
   {
     "name": "top_up_executor",
     "path": "prompts/short/top_up_executor.md",
-    "version": "20250928T1951",
+    "version": "20251001T2133",
     "checksum_sha256": "66d122f10ca0ae425d89771d456bf31f4f420bfac54058d8704f00222a491ffa"
   }
 ]
