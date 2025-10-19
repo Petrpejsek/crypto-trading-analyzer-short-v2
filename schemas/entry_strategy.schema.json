@@ -45,7 +45,6 @@
             "tp3": { "type": "number", "description": "Take profit 3 price (number)" },
             "risk": {
               "type": "string",
-              "enum": ["Nízké", "Střední", "Vysoké"],
               "description": "Risk level"
             },
             "reasoning": {
@@ -80,7 +79,6 @@
             "tp3": { "type": "number", "description": "Take profit 3 price (number)" },
             "risk": {
               "type": "string",
-              "enum": ["Nízké", "Střední", "Vysoké"],
               "description": "Risk level"
             },
             "reasoning": {

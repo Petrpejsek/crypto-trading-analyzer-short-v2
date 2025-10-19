@@ -7,6 +7,9 @@ import path from 'node:path'
 import { resolvePromptPathShort } from '../prompts/guard'
 import crypto from 'node:crypto'
 import { cleanSchema } from './lib/clean_schema'
+import { aiTap } from '../lib/ai_tap'
+import { validateSnapshotFreshness, validateCandleFreshness } from '../lib/freshness_guard'
+import { logPayloadSize } from '../lib/payload_monitor'
 
 export type StrategyPlan = {
   entry: number
@@ -68,10 +71,51 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
       organization: (process as any)?.env?.OPENAI_ORG_ID,
       project: (process as any)?.env?.OPENAI_PROJECT
     } as any)
-    // Model lze konfigurovat přes ENTRY_STRATEGY_MODEL; default: gpt-4o-mini (stabilní JSON mode)
-    const model = String(process.env.ENTRY_STRATEGY_MODEL || 'gpt-4o-mini')
+    // Model lze konfigurovat přes ENTRY_STRATEGY_MODEL; default: gpt-4o
+    const model = String(process.env.ENTRY_STRATEGY_MODEL || 'gpt-4o')
 
-    console.info('[ENTRY_STRATEGY_PAYLOAD_BYTES]', JSON.stringify(input).length)
+    // PAYLOAD SIZE MONITORING
+    logPayloadSize('entry_strategy', input, input.symbol)
+    
+    // FRESHNESS VALIDATION: Check asset_data timestamp and last candle
+    if (input.asset_data) {
+      // Check main timestamp if available
+      if ((input.asset_data as any).timestamp) {
+        const freshness = validateSnapshotFreshness({ timestamp: (input.asset_data as any).timestamp }, 60000)
+        console.info('[ENTRY_STRATEGY_FRESHNESS]', {
+          symbol: input.symbol,
+          ok: freshness.ok,
+          age_seconds: freshness.age_seconds,
+          error: freshness.error || null
+        })
+        
+        if (!freshness.ok) {
+          console.warn('[ENTRY_STRATEGY_STALE_DATA]', {
+            symbol: input.symbol,
+            age_seconds: freshness.age_seconds
+          })
+        }
+      }
+      
+      // Check last candle freshness (M15 preferred, fallback to M5)
+      const klines = (input.asset_data as any).klines
+      if (klines) {
+        const m15 = klines.M15 || klines.m15
+        const m5 = klines.M5 || klines.m5
+        const lastCandle = (Array.isArray(m15) && m15.length > 0) ? m15[m15.length - 1] : 
+                           (Array.isArray(m5) && m5.length > 0) ? m5[m5.length - 1] : null
+        
+        if (lastCandle && lastCandle.closeTime) {
+          const candleFreshness = validateCandleFreshness(lastCandle, 300000) // 5 min max age
+          console.info('[ENTRY_STRATEGY_CANDLE_FRESHNESS]', {
+            symbol: input.symbol,
+            ok: candleFreshness.ok,
+            age_seconds: candleFreshness.age_seconds,
+            error: candleFreshness.error || null
+          })
+        }
+      }
+    }
 
     type AssistantKind = 'conservative' | 'aggressive'
     // Simplified schema - GPT returns just the plan without wrapper
@@ -87,7 +131,7 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
         risk: { type: 'string' },
         reasoning: { type: 'string' }
       },
-      required: ['entry','sl']
+      required: ['entry','sl','tp1','tp2','tp3','risk','reasoning']
     }) as const
 
     const callAssistant = async (kind: AssistantKind): Promise<{ ok: true, data: any, requestId?: string; promptSha256?: string } | { ok: false, code: 'no_api_key'|'invalid_json'|'schema'|'empty_output'|'timeout'|'http'|'http_400'|'http_401'|'http_403'|'http_404'|'http_409'|'http_422'|'http_429'|'http_500'|'unknown', requestId?: string } > => {
@@ -100,10 +144,35 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
             { role: 'system', content: promptResult.text },
             { role: 'user', content: JSON.stringify(input) }
           ],
-          temperature: 0.2,
-          response_format: { type: 'json_object' }
+          temperature: 0.1,
+          response_format: { type: 'json_schema', json_schema: { name: 'entry_strategy', schema: buildSubSchema(kind) as any, strict: true } }
         }
+        
+        // AI Overview: Emit request payload
+        try {
+          aiTap.emit(
+            kind === 'conservative' ? 'entry_strategy_conservative' : 'entry_strategy_aggressive',
+            {
+              symbol: input?.symbol || null,
+              raw_request: body,
+              raw_response: null
+            }
+          )
+        } catch {}
+        
         const resp = await client.chat.completions.create(body)
+        
+        // AI Overview: Emit response payload
+        try {
+          aiTap.emit(
+            kind === 'conservative' ? 'entry_strategy_conservative' : 'entry_strategy_aggressive',
+            {
+              symbol: input?.symbol || null,
+              raw_request: null,
+              raw_response: resp
+            }
+          )
+        } catch {}
         const text = resp.choices?.[0]?.message?.content || ''
         try { console.info(`[ENTRY_STRATEGY_${kind.toUpperCase()}_OUT_LEN]`, text ? text.length : 0) } catch {}
         try { console.info(`[ENTRY_STRATEGY_${kind.toUpperCase()}_OUT_START]`, text.slice(0, 200)) } catch {}
@@ -256,9 +325,8 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
                 const r = String((parsed as any).reasoning)
                 if (r.length >= 10) next.reasoning = r.slice(0, 4000)
               }
-              if (typeof (parsed as any).risk === 'string') {
-                const allowed = new Set(['Nízké', 'Střední', 'Vysoké'])
-                if (allowed.has((parsed as any).risk)) next.risk = (parsed as any).risk
+              if (typeof (parsed as any).risk === 'string' && String((parsed as any).risk).trim().length > 0) {
+                next.risk = String((parsed as any).risk).trim()
               }
               parsed = next
             }
@@ -269,10 +337,16 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
         try {
           const ajvLocal = new Ajv({ allErrors: true, strict: false })
           const v = ajvLocal.compile(cleanSchema(buildSubSchema(kind) as any) as any)
+          console.info(`[ENTRY_STRATEGY_${kind.toUpperCase()}_PRE_VALIDATION]`, {
+            symbol: input.symbol,
+            parsed: parsed,
+            has_all_required: parsed && typeof parsed === 'object' && 'entry' in parsed && 'sl' in parsed && 'tp1' in parsed && 'tp2' in parsed && 'tp3' in parsed && 'risk' in parsed && 'reasoning' in parsed
+          })
           if (!v(parsed)) {
             console.error(`[ENTRY_STRATEGY_${kind.toUpperCase()}_VALIDATION_FAIL]`, {
               symbol: input.symbol,
-              errors: (ajvLocal.errors || []).slice(0, 3)
+              errors: v.errors || ajvLocal.errors || [],
+              parsed: parsed
             })
             return { ok: false, code: 'schema', requestId }
           }
@@ -327,9 +401,8 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
         maybeAddTp('tp2')
         maybeAddTp('tp3')
         // Optional properties – keep only when valid
-        if (typeof p.risk === 'string') {
-          const allowed = new Set(['Nízké', 'Střední', 'Vysoké'])
-          if (allowed.has(p.risk)) out.risk = p.risk
+        if (typeof p.risk === 'string' && String(p.risk).trim().length > 0) {
+          out.risk = String(p.risk).trim()
         }
         if (typeof p.reasoning === 'string') {
           const r = String(p.reasoning)
@@ -364,8 +437,8 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
         })
       } catch {}
       return result(false, 'schema', Date.now() - t0, null, {
-        prompt_hash_conservative: PROMPT_CONS_HASH,
-        prompt_hash_aggressive: PROMPT_AGGR_HASH,
+        prompt_hash_conservative: consHash,
+        prompt_hash_aggressive: aggrHash,
         schema_version: SCHEMA_VERSION
       })
     }
@@ -380,11 +453,11 @@ export async function runEntryStrategy(input: EntryStrategyInput): Promise<{ ok:
           const entry = Number(plan.entry), sl = Number(plan.sl)
           const orderOk = (Number.isFinite(tp3) && Number.isFinite(tp2) && Number.isFinite(tp1)) ? (tp3 < tp2 && tp2 < tp1 && tp1 < entry && entry < sl) : (entry < sl)
           if (!orderOk) {
-            return result(false, 'schema', Date.now() - t0, null, { prompt_hash_conservative: PROMPT_CONS_HASH, prompt_hash_aggressive: PROMPT_AGGR_HASH, schema_version: SCHEMA_VERSION })
+            return result(false, 'schema', Date.now() - t0, null, { prompt_hash_conservative: consHash, prompt_hash_aggressive: aggrHash, schema_version: SCHEMA_VERSION })
           }
           const rrr = (Number.isFinite(tp2) ? (entry - tp2) : (Number.isFinite(tp1) ? (entry - tp1) : 0)) / Math.max(1e-9, (sl - entry))
           if (!(Number.isFinite(rrr) && rrr > 0)) {
-            return result(false, 'schema', Date.now() - t0, null, { prompt_hash_conservative: PROMPT_CONS_HASH, prompt_hash_aggressive: PROMPT_AGGR_HASH, schema_version: SCHEMA_VERSION })
+            return result(false, 'schema', Date.now() - t0, null, { prompt_hash_conservative: consHash, prompt_hash_aggressive: aggrHash, schema_version: SCHEMA_VERSION })
           }
         }
       }

@@ -1,0 +1,101 @@
+{
+  "profile": "lean",
+  "topK": 12,
+  "hard_gates": {
+    "min_quote_volume_usd": 5000000,
+    "min_trades_24h": 20000,
+    "atr_pct_h1_min": 1,
+    "atr_pct_h1_max": 12
+  },
+  "score": {
+    "penalty_missing_oi_delta": 0.02,
+    "penalty_missing_vwap": 0.01,
+    "penalty_oi_unreliable": 0.015,
+    "penalty_oi_unreliable_by_age": { "enabled": true, "max_additional": 0.015 },
+    "w_burst_m15": 0.08
+  },
+  "score_extra": {
+    "w_body_ratio_m15": 0.08,
+    "w_consec_above_vwap_m15": 0.05,
+    "w_oi_divergence": 0.05,
+    "w_rvol_liq_product": 0.06,
+    "penalty_cooldown_max": 0.04,
+    "thr_oi_div": 5.0
+  },
+  "quantile_gates": {
+    "enabled": true,
+    "ret_m15_q_min": 0.65,
+    "rvol_h1_q_min": 0.70,
+    "h1_range_pos_q_min": 0.70,
+    "apply_only_in_no_trade": true
+  },
+  "sticky": { "enabled": true, "sticky_minutes": 30, "bonus_max": 0.015, "delta_s_max": 0.02 },
+  "weights": {
+    "ret_m15_pct": 0.25,
+    "rvol_h1": 0.20,
+    "ret_h1_pct": 0.15,
+    "atr_pct_h1": 0.15,
+    "vwap_rel_m15": 0.15,
+    "oi_change_pct_h1": 0.10,
+    "ema_stack_bonus": 0.5,
+    "new_coin_bonus": 0.5
+  },
+  "h1_range_lookback": 12,
+  "sim_preview_enabled_default": false,
+  "gates": {
+    "min_avg_trade_usdt": 12,
+    "min_body_ratio_m15": 0.44,
+    "max_upper_wick_ratio_m15": 0.45
+  },
+  "cooldown_minutes": 90,
+  "presets": {
+    "momentum": {
+      "weights": {
+        "ret_m15_pct": 0.25,
+        "rvol_h1": 0.20,
+        "ret_h1_pct": 0.15,
+        "atr_pct_h1": 0.15,
+        "vwap_rel_m15": 0.15,
+        "oi_change_pct_h1": 0.10,
+        "ema_stack_bonus": 0.5,
+        "new_coin_bonus": 0.5
+      },
+      "atr_bounds": [1, 12]
+    },
+    "conservative": {
+      "weights": {
+        "ret_m15_pct": 0.2,
+        "rvol_h1": 0.16,
+        "ret_h1_pct": 0.15,
+        "atr_pct_h1": 0.20,
+        "vwap_rel_m15": 0.17,
+        "oi_change_pct_h1": 0.12,
+        "ema_stack_bonus": 0.5,
+        "new_coin_bonus": 0.5
+      },
+      "atr_bounds": [1, 8]
+    }
+  },
+  "profiles": {
+    "lean": {
+      "topK": 8,
+      "quantile_gates_enabled": false,
+      "sticky_enabled": false,
+      "cooldown_minutes": 60,
+      "score": {
+        "w_burst_m15": 0.04,
+        "w_body_ratio_m15": 0.04,
+        "w_consec_above_vwap_m15": 0.03,
+        "w_rvol_liq_product": 0.04,
+        "w_oi_divergence": 0.03,
+        "penalty_cooldown_max": 0.02,
+        "penalty_oi_unreliable": 0.012,
+        "penalty_oi_unreliable_by_age": { "enabled": true, "max_additional": 0.010 }
+      },
+      "adapter_compact_payload": false,
+      "diag_enabled": false
+    }
+  }
+}
+
+

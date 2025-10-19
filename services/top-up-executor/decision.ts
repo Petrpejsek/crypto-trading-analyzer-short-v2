@@ -96,11 +96,12 @@ export async function runTopUpExecutorDecision(input: TopUpExecutorInput): Promi
     try { console.info('[TUP_GPT_PAYLOAD_BYTES]', payloadStr.length) } catch {}
 
     const body: any = {
-      model: cfg?.openai?.model || 'gpt-5',
+      model: cfg?.openai?.model || 'gpt-4o',
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: payloadStr }
       ],
+      temperature: 0.1,
       response_format: {
         type: 'json_schema',
         json_schema: {

@@ -16,7 +16,7 @@ async function main() {
   const entryPrice = process.env.ENTRY_PRICE ? Number(process.env.ENTRY_PRICE) : undefined
   const sl = Number(process.env.SL || 0)
   const tp = Number(process.env.TP || 0)
-  const side = String(process.env.SIDE || 'LONG') as any
+  const side = String(process.env.SIDE || 'SHORT') as any
 
   const wfId = `trade_${symbol}_${Date.now()}`
   const handle = await client.workflow.start('TradeLifecycleWorkflow', {

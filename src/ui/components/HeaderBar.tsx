@@ -19,9 +19,10 @@ type Props = {
   onChangeDefaultAmount?: (n: number) => void
   defaultLeverage?: number
   onChangeDefaultLeverage?: (n: number) => void
-  // RAW copy flow (propagováno z App)
-  universeStrategy?: 'volume' | 'gainers'
-  onChangeUniverse?: (u: 'volume' | 'gainers') => void
+  // RAW copy flow (propagováno z App) - CHANGED to array
+  selectedUniverses?: string[]
+  onChangeSelectedUniverses?: (arr: string[]) => void
+  currentStrategy?: string
   onCopyRawAll?: () => Promise<void> | void
   rawLoading?: boolean
   rawCopied?: boolean
@@ -34,9 +35,11 @@ type Props = {
   onToggleAiPayloads?: () => void
   // NEW: toggle Prompts modal (dev-only)
   onTogglePrompts?: () => void
+  // NEW: toggle AI Overview (dev-only)
+  onToggleAiOverview?: () => void
 }
 
-export const HeaderBar: React.FC<Props> = ({ running, onRun, onExportSnapshot, onExportFeatures, onToggleSettings, onToggleReport, showingReport, defaultPreset='conservative', onChangeDefaultPreset, defaultSide='LONG', onChangeDefaultSide, defaultTPLevel='tp2', onChangeDefaultTPLevel, defaultAmount=20, onChangeDefaultAmount, defaultLeverage=15, onChangeDefaultLeverage, onCopyRawAll, rawLoading=false, rawCopied=false, onAutoCopyRawToggle, serverNextAt=null, onToggleAiPayloads, onTogglePrompts }) => {
+export const HeaderBar: React.FC<Props> = ({ running, onRun, onExportSnapshot, onExportFeatures, onToggleSettings, onToggleReport, showingReport, defaultPreset='conservative', onChangeDefaultPreset, defaultSide='SHORT', onChangeDefaultSide, defaultTPLevel='tp2', onChangeDefaultTPLevel, defaultAmount=20, onChangeDefaultAmount, defaultLeverage=15, onChangeDefaultLeverage, selectedUniverses=['losers'], onChangeSelectedUniverses, currentStrategy='losers', onCopyRawAll, rawLoading=false, rawCopied=false, onAutoCopyRawToggle, serverNextAt=null, onToggleAiPayloads, onTogglePrompts, onToggleAiOverview }) => {
   // Auto Copy RAW – jednoduchý interval s odpočtem
   const [autoCopyEnabled, setAutoCopyEnabled] = useState<boolean>(() => {
     try { return localStorage.getItem('auto_copy_enabled') === '1' } catch { return false }
@@ -165,7 +168,6 @@ export const HeaderBar: React.FC<Props> = ({ running, onRun, onExportSnapshot, o
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
             Side:
             <select value={defaultSide} onChange={(e)=>onChangeDefaultSide && onChangeDefaultSide(e.target.value as any)}>
-              <option value="LONG">LONG</option>
               <option value="SHORT">SHORT</option>
             </select>
           </label>
@@ -186,6 +188,70 @@ export const HeaderBar: React.FC<Props> = ({ running, onRun, onExportSnapshot, o
             <input type="number" min={1} step={1} value={Number.isFinite(defaultLeverage as any) ? defaultLeverage : 1} onChange={(e)=>onChangeDefaultLeverage && onChangeDefaultLeverage(Number(e.target.value))} style={{ width: 70 }} />
             <span style={{ opacity: .7 }}>x</span>
           </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+            <span>Universe:</span>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input 
+                type="checkbox" 
+                checked={selectedUniverses.includes('losers')}
+                onChange={(e) => {
+                  const checked = e.target.checked
+                  const newSelection = checked 
+                    ? [...selectedUniverses, 'losers']
+                    : selectedUniverses.filter(s => s !== 'losers')
+                  onChangeSelectedUniverses && onChangeSelectedUniverses(newSelection)
+                }}
+              />
+              Losers 24h
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input 
+                type="checkbox" 
+                checked={selectedUniverses.includes('gainers')}
+                onChange={(e) => {
+                  const checked = e.target.checked
+                  const newSelection = checked 
+                    ? [...selectedUniverses, 'gainers']
+                    : selectedUniverses.filter(s => s !== 'gainers')
+                  onChangeSelectedUniverses && onChangeSelectedUniverses(newSelection)
+                }}
+              />
+              Gainers 24h
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input 
+                type="checkbox" 
+                checked={selectedUniverses.includes('volume')}
+                onChange={(e) => {
+                  const checked = e.target.checked
+                  const newSelection = checked 
+                    ? [...selectedUniverses, 'volume']
+                    : selectedUniverses.filter(s => s !== 'volume')
+                  onChangeSelectedUniverses && onChangeSelectedUniverses(newSelection)
+                }}
+              />
+              Volume
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input 
+                type="checkbox" 
+                checked={selectedUniverses.includes('overheat')}
+                onChange={(e) => {
+                  const checked = e.target.checked
+                  const newSelection = checked 
+                    ? [...selectedUniverses, 'overheat']
+                    : selectedUniverses.filter(s => s !== 'overheat')
+                  onChangeSelectedUniverses && onChangeSelectedUniverses(newSelection)
+                }}
+              />
+              🔥 Overheat
+            </label>
+          </div>
+          {!autoCopyEnabled && selectedUniverses.length > 1 && (
+            <div style={{ fontSize: 11, color: '#dc2626', marginLeft: 8, fontWeight: 500 }}>
+              ⚠️ Pro více strategií zapněte Auto Copy RAW
+            </div>
+          )}
           {/* Auto Copy RAW – vpravo v liště */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 8 }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
@@ -241,15 +307,26 @@ export const HeaderBar: React.FC<Props> = ({ running, onRun, onExportSnapshot, o
                 return null
               }
               return (
-                <button
-                  className="btn"
-                  onClick={() => { try { onTogglePrompts && onTogglePrompts() } catch {} }}
-                  style={{ border: '1px solid #dc2626', background: '#1a0a0a' }}
-                  aria-label="Open Prompts (DEV)"
-                  title="Prompts (DEV)"
-                >
-                  📝 Prompts
-                </button>
+                <>
+                  <button
+                    className="btn"
+                    onClick={() => { try { onToggleAiOverview && onToggleAiOverview() } catch {} }}
+                    style={{ border: '1px solid #444' }}
+                    aria-label="Open AI Overview (DEV)"
+                    title="AI Overview - Real-time AI monitoring"
+                  >
+                    AI Overview
+                  </button>
+                  <button
+                    className="btn"
+                    onClick={() => { try { onTogglePrompts && onTogglePrompts() } catch {} }}
+                    style={{ border: '1px solid #dc2626', background: '#1a0a0a' }}
+                    aria-label="Open Prompts (DEV)"
+                    title="Prompts (DEV)"
+                  >
+                    📝 Prompts
+                  </button>
+                </>
               )
             })()}
           </div>
@@ -260,7 +337,6 @@ export const HeaderBar: React.FC<Props> = ({ running, onRun, onExportSnapshot, o
           <label style={{ display: 'none', alignItems: 'center', gap: 6, fontSize: 12 }}>
             Side:
             <select value={defaultSide} onChange={(e)=>onChangeDefaultSide && onChangeDefaultSide(e.target.value as any)}>
-              <option value="LONG">LONG</option>
               <option value="SHORT">SHORT</option>
             </select>
           </label>

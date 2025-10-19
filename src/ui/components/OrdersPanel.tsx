@@ -6,6 +6,10 @@ import WatcherStatus from './WatcherStatus'
 import TopUpExecutorStatus from './TopUpExecutorStatus'
 import EntryUpdaterControl from './EntryUpdaterControl'
 import EntryUpdaterStatus from './EntryUpdaterStatus'
+import AIProfitTakerControl from './AIProfitTakerControl'
+import { getSoundEnabled, setSoundEnabled, playPriceAlertSound, playPositionOpenSound } from '../utils/sounds'
+import { TradingViewChart } from './TradingViewChart'
+import { PositionChartWithHealth } from './PositionChartWithHealth'
 
 type OpenOrderUI = {
   orderId: number
@@ -49,6 +53,7 @@ type PositionUI = {
   unrealizedPnl: number | null
   leverage: number | null
   updatedAt: string | null
+  isExternal?: boolean
 }
 
 const POLL_MS = 5000
@@ -76,6 +81,9 @@ export const OrdersPanel: React.FC = () => {
   const [pendingCancelAgeMin, setPendingCancelAgeMin] = useState<number>(() => {
     try { const v = localStorage.getItem('pending_cancel_age_min'); const n = v == null ? 0 : Number(v); return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0 } catch { return 0 }
   })
+  // Trading Charts toggle
+  const [showAllCharts, setShowAllCharts] = useState<boolean>(false)
+  const [visibleChartsCount, setVisibleChartsCount] = useState<number>(0)
   const [strategyUpdaterEntries, setStrategyUpdaterEntries] = useState<any[]>([])
   const [strategyUpdaterEnabled, setStrategyUpdaterEnabled] = useState<boolean>(false)
   // Profit Taker removed – replaced by Top-Up Executor
@@ -85,9 +93,76 @@ export const OrdersPanel: React.FC = () => {
   const [topUpExecutorEnabled, setTopUpExecutorEnabled] = useState<boolean>(true)
   const [entryUpdaterEntries, setEntryUpdaterEntries] = useState<any[]>([])
   const [entryUpdaterEnabled, setEntryUpdaterEnabled] = useState<boolean>(false)
+  // AI Profit Taker - manual tool, track last run timestamp
+  const [aiProfitTakerLastRun, setAiProfitTakerLastRun] = useState<string | null>(null)
   // Map symbol -> last planned entry price from last_place.request.orders
   const [lastEntryBySymbol, setLastEntryBySymbol] = useState<Record<string, number>>({})
   const [euLastBySymbol, setEuLastBySymbol] = useState<Record<string, { phase?: string; reason_code?: string }>>({})
+  const [temporalWorkerInfo, setTemporalWorkerInfo] = useState<any>(null)
+  // Health Monitor
+  const [healthMonitorEntries, setHealthMonitorEntries] = useState<any[]>([])
+  const [healthMonitorEnabled, setHealthMonitorEnabled] = useState<boolean>(true)
+  const [healthSyncLoading, setHealthSyncLoading] = useState(false)
+  const [healthSyncFeedback, setHealthSyncFeedback] = useState<string | null>(null)
+  
+  // Sound controls state
+  const [soundEnabled, setSoundEnabledState] = useState<boolean>(() => getSoundEnabled())
+  
+  const handleToggleSound = () => {
+    const newValue = !soundEnabled
+    setSoundEnabledState(newValue)
+    setSoundEnabled(newValue)
+  }
+
+  // Manual Health Monitor Sync
+  const syncHealthMonitor = async () => {
+    if (healthSyncLoading) return
+    setHealthSyncLoading(true)
+    setHealthSyncFeedback(null)
+    try {
+      const res = await fetchJson('/api/health_monitor_sync', { method: 'POST', timeoutMs: 30000 })
+      if (res.ok) {
+        // Update health monitor entries immediately
+        const status = res.json?.status
+        if (status && Array.isArray(status.entries)) {
+          setHealthMonitorEntries(status.entries)
+          setHealthMonitorEnabled(Boolean(status.enabled))
+          
+          // Count positions vs pending orders
+          const positions = status.entries.filter((e: any) => e.type === 'position')
+          const pendingOrders = status.entries.filter((e: any) => e.type === 'pending_order')
+          
+          // Show detailed feedback
+          const feedback = `✓ Sync OK: ${positions.length} pozic${positions.length === 1 ? 'e' : 'í'}, ${pendingOrders.length} SELL entry order${pendingOrders.length === 1 ? '' : 's'}`
+          setHealthSyncFeedback(feedback)
+          
+          console.info('[HEALTH_SYNC_MANUAL]', { 
+            success: true, 
+            positions: positions.length,
+            pendingOrders: pendingOrders.length,
+            total: status.entries.length 
+          })
+          
+          // Clear feedback after 5 seconds
+          setTimeout(() => setHealthSyncFeedback(null), 5000)
+        }
+      } else {
+        throw new Error(res.json?.error || `HTTP ${res.status}`)
+      }
+    } catch (e: any) {
+      console.error('[HEALTH_SYNC_MANUAL_ERR]', e?.message || e)
+      const errorMsg = `✗ Sync error: ${e?.message || 'unknown'}`
+      setHealthSyncFeedback(errorMsg)
+      setTimeout(() => setHealthSyncFeedback(null), 5000)
+    } finally {
+      setHealthSyncLoading(false)
+    }
+  }
+
+  // Cancel Delta % state
+  const [cancelDelta, setCancelDelta] = useState(3.5)
+  const [deltaLoading, setDeltaLoading] = useState(false)
+  const [deltaFeedback, setDeltaFeedback] = useState<string|null>(null)
 
   // Source of truth is the server – sync on mount
   const syncPendingCancelFromServer = async (): Promise<void> => {
@@ -306,6 +381,27 @@ export const OrdersPanel: React.FC = () => {
           }
         })
         .catch(() => { /* ignore */ })
+      
+      // Load health monitor status
+      fetchJson('/api/health_monitor_status', { timeoutMs: 60000 })
+        .then(r => {
+          if (r.ok) {
+            const en = Boolean(r.json?.enabled)
+            const arr = Array.isArray(r.json?.entries) ? r.json.entries : []
+            setHealthMonitorEnabled(en)
+            setHealthMonitorEntries(arr)
+          }
+        })
+        .catch(() => { /* ignore */ })
+      
+      // Load Temporal worker info (100% reliable, no cache)
+      fetchJson('/api/temporal/worker/info', { timeoutMs: 10000 })
+        .then(r => {
+          if (r.ok && r.json) {
+            setTemporalWorkerInfo(r.json)
+          }
+        })
+        .catch(() => { /* ignore */ })
     } catch (e: any) {
       const msg = String(e?.message || 'unknown_error')
       setError(msg)
@@ -465,9 +561,17 @@ export const OrdersPanel: React.FC = () => {
     try {
       const clientId = String(o?.clientOrderId || '')
       if (!/^sv2_eu_/.test(clientId)) return false
-      const sideBuy = String(o?.side || '').toUpperCase() === 'BUY'
-      const isEntry = sideBuy && !(o?.reduceOnly || o?.closePosition)
+      const sideSell = String(o?.side || '').toUpperCase() === 'SELL'
+      const isEntry = sideSell && !(o?.reduceOnly || o?.closePosition)
       return isEntry
+    } catch { return false }
+  }
+
+  // AI Profit Taker: highlight SL/TP orders created by AI Profit Taker (clientOrderId prefix "ai_pt_")
+  const isAIProfitTakerOrder = (o: OpenOrderUI): boolean => {
+    try {
+      const clientId = String(o?.clientOrderId || '')
+      return /^ai_pt_(sl|tp)_/.test(clientId)
     } catch { return false }
   }
 
@@ -492,14 +596,27 @@ export const OrdersPanel: React.FC = () => {
 
   const flattenOne = async (symbol: string, side: string | null | undefined) => {
     try {
-      const s = String(side || 'LONG').toUpperCase()
+      console.log('[FLATTEN_ONE_START]', { symbol, side, sideType: typeof side })
+      
+      // Fallback to 'SHORT' for SHORT-only system
+      const s = side ? String(side).toUpperCase() : 'SHORT'
+      console.log('[FLATTEN_ONE_SENDING]', { symbol, side: s, url: `/__proxy/binance/flatten?symbol=${encodeURIComponent(symbol)}&side=${encodeURIComponent(s)}` })
+      
       const r = await fetch(`/__proxy/binance/flatten?symbol=${encodeURIComponent(symbol)}&side=${encodeURIComponent(s)}`, { method: 'POST' })
+      console.log('[FLATTEN_ONE_RESPONSE]', { symbol, ok: r.ok, status: r.status })
+      
       if (!r.ok) {
         const t = await r.text().catch(()=> '')
+        console.error('[FLATTEN_ONE_ERROR_RESPONSE]', { symbol, status: r.status, text: t })
         throw new Error(t || `HTTP ${r.status}`)
       }
+      
+      const result = await r.json().catch(() => ({}))
+      console.log('[FLATTEN_ONE_SUCCESS]', { symbol, result })
+      
       await load()
     } catch (e:any) {
+      console.error('[FLATTEN_ONE_EXCEPTION]', { symbol, error: e?.message, stack: e?.stack })
       setError(`flatten_failed:${symbol}:${e?.message || 'unknown'}`)
     }
   }
@@ -510,7 +627,7 @@ export const OrdersPanel: React.FC = () => {
       const ok = window.confirm(`Flatten ALL ${positions.length} positions?`)
       if (!ok) return
       await Promise.allSettled(
-        positions.map(p => fetch(`/__proxy/binance/flatten?symbol=${encodeURIComponent(p.symbol)}&side=${encodeURIComponent(String(p.positionSide||'LONG'))}`, { method: 'POST' }))
+        positions.map(p => fetch(`/__proxy/binance/flatten?symbol=${encodeURIComponent(p.symbol)}&side=${encodeURIComponent(String(p.positionSide||'SHORT'))}`, { method: 'POST' }))
       )
       await load()
     } catch (e:any) {
@@ -537,6 +654,16 @@ export const OrdersPanel: React.FC = () => {
 
   // Removed visibilitychange instant refresh to enforce exactly one poll every POLL_MS
   useEffect(() => { /* single interval only – no visibility-based refresh */ }, [])
+
+  // Load Cancel Delta % from server config on mount
+  useEffect(() => {
+    fetch('/api/config/trading')
+      .then(r => r.ok ? r.json() : null)
+      .then(cfg => {
+        if (cfg?.ENTRY_DELTA_CANCEL_PCT) setCancelDelta(Number(cfg.ENTRY_DELTA_CANCEL_PCT))
+      })
+      .catch(() => {})
+  }, [])
 
   const fmtNum = (n: number | null | undefined, dp = 6): string => {
     try { return Number.isFinite(n as any) ? (n as number).toFixed(dp) : '-' } catch { return '-' }
@@ -645,7 +772,9 @@ export const OrdersPanel: React.FC = () => {
     return null
   }
 
+  // Memoize positions view with stable reference to prevent chart re-renders
   const positionsView = useMemo(() => {
+    // Don't recalculate if positions haven't changed structurally
     return positions.map(p => {
       const entry = Number(p.entryPrice)
       // Resolve mark safely: prefer position.markPrice when valid, otherwise fallback to marks map; never coerce null to 0
@@ -727,10 +856,122 @@ export const OrdersPanel: React.FC = () => {
       const markForView = Number.isFinite(mark) ? (mark as number) : (typeof p.markPrice === 'number' ? p.markPrice : null)
       return { ...p, markPrice: markForView, pnlPct, pnlPctLev, pnlUsd, marginUsd, slLevPct, tpLevPct }
     })
-  }, [positions, orders, marks])
+  }, [positions, orders, marks]) // CRITICAL FIX: Must include full arrays to react to markPrice updates
+
+  // Filter positions for charts: only SHORT (our system) positions, exclude LONG (external)
+  const positionsViewForCharts = useMemo(() => {
+    return positionsView.filter(p => !p.isExternal)
+  }, [positionsView])
+
+  // Track previous position count for sound trigger
+  const prevPositionCountRef = useRef<number>(0)
+
+  // Auto-open Charts when first position appears
+  useEffect(() => {
+    if (positionsView.length > 0 && !showAllCharts) {
+      console.log('[AUTO_CHARTS] 🎯 Position detected, auto-opening charts container')
+      setShowAllCharts(true)
+    }
+  }, [positionsView.length, showAllCharts])
+
+  // Play sound when new position opens
+  useEffect(() => {
+    const currentCount = positionsView.length
+    const previousCount = prevPositionCountRef.current
+    
+    // Trigger sound only when position count increases (new position opened)
+    if (currentCount > previousCount && previousCount >= 0) {
+      console.log('[POSITION_SOUND] 🔔 New position detected, playing sound', { previousCount, currentCount })
+      playPositionOpenSound()
+    }
+    
+    // Update ref for next comparison
+    prevPositionCountRef.current = currentCount
+  }, [positionsView.length])
+
+  // Staggered chart loading to prevent UI freezing
+  useEffect(() => {
+    console.log('[CHARTS_LOADER] showAllCharts:', showAllCharts, 'positionsViewForCharts.length:', positionsViewForCharts.length)
+    
+    if (!showAllCharts) {
+      setVisibleChartsCount(0)
+      return
+    }
+    
+    if (positionsViewForCharts.length === 0) {
+      console.warn('[CHARTS_LOADER] No positions to display charts for')
+      return
+    }
+    
+    // Gradually show charts one by one with small delay
+    let count = 0
+    console.log('[CHARTS_LOADER] Starting staggered chart loading...')
+    const interval = setInterval(() => {
+      count++
+      console.log('[CHARTS_LOADER] Showing chart', count, '/', positionsViewForCharts.length)
+      setVisibleChartsCount(count)
+      
+      if (count >= positionsViewForCharts.length) {
+        clearInterval(interval)
+        console.log('[CHARTS_LOADER] All charts loaded')
+      }
+    }, 100) // 100ms delay between each chart
+    
+    return () => {
+      console.log('[CHARTS_LOADER] Cleanup')
+      clearInterval(interval)
+    }
+  }, [showAllCharts, positionsViewForCharts.length])
 
   return (
     <div className="card" style={{ marginTop: 12, padding: 12, position: 'relative' }}>
+      {/* Temporal Worker Connection Badge */}
+      {(() => {
+        const info = temporalWorkerInfo
+        if (!info) return null
+        const workerCount = Number(info?.workerCount ?? 0)
+        const connectedPorts = Array.isArray(info?.connectedPorts) ? info.connectedPorts : []
+        const connectedForbiddenPorts = Array.isArray(info?.connectedForbiddenPorts) ? info.connectedForbiddenPorts : []
+        const taskQueue = String(info?.taskQueue || '')
+        const tradeSide = String(info?.tradeSide || '')
+        const configuredPort = String(info?.configuredPort || '')
+        
+        // CRITICAL: RED if connected to forbidden ports (LONG contamination!)
+        const hasForbiddenConnection = connectedForbiddenPorts.length > 0
+        
+        // Colors: GREEN (1 connection), RED (forbidden or duplicate), GRAY (0 disconnected)
+        let bg = '#6b7280' // gray - disconnected
+        if (workerCount === 1 && !hasForbiddenConnection) bg = '#16a34a' // green - single connection
+        if (workerCount >= 2 || hasForbiddenConnection) bg = '#dc2626' // red - duplicate or forbidden!
+        
+        const portLabel = connectedPorts.length > 0 ? connectedPorts.join(' + ') : (configuredPort || 'n/a')
+        const duplicateWarning = workerCount >= 2 ? ' DUPLICATE!' : ''
+        const forbiddenWarning = hasForbiddenConnection ? ' ⚠️ FORBIDDEN PORT!' : ''
+        const queueShort = taskQueue.replace('entry-', '')
+        
+        const tooltipLines = [
+          'Temporal Worker',
+          `Configured: ${info?.address || 'n/a'}`,
+          `Namespace: ${info?.namespace || 'default'}`,
+          `Queue: ${taskQueue}`,
+          `Side: ${tradeSide}`,
+          `Connected to: ${connectedPorts.length > 0 ? connectedPorts.join(', ') : (configuredPort || 'none')}`,
+          hasForbiddenConnection ? `🚨 FORBIDDEN CONNECTION: ${connectedForbiddenPorts.join(', ')} - POSSIBLE LONG CONTAMINATION!` : '',
+          workerCount === 1 && !hasForbiddenConnection ? '✅ OK - Single connection' : workerCount >= 2 ? '⚠️ DUPLICATE! Connected to multiple Temporal servers!' : '❌ No active connection'
+        ].filter(Boolean)
+        const title = tooltipLines.join('\n')
+        
+        return (
+          <div title={title} style={{ position: 'fixed', top: 6, left: 6, zIndex: 9999, background: bg, color: '#fff', padding: '4px 8px', borderRadius: 6, fontSize: 12, boxShadow: '0 2px 8px rgba(0,0,0,.3)', fontFamily: 'monospace' }}>
+            <span style={{ opacity: .9 }}>Temporal</span>
+            <span style={{ marginLeft: 6, fontWeight: 700 }}>:{portLabel}</span>
+            <span style={{ marginLeft: 6, opacity: .9 }}>{queueShort}</span>
+            <span style={{ marginLeft: 6, fontWeight: 700 }}>{tradeSide}</span>
+            {forbiddenWarning && <span style={{ marginLeft: 6, fontWeight: 900, color: '#fef08a' }}>{forbiddenWarning}</span>}
+            {duplicateWarning && <span style={{ marginLeft: 6, fontWeight: 900, color: '#fef08a' }}>{duplicateWarning}</span>}
+          </div>
+        )
+      })()}
       {/* Mini Binance usage badge – no extra requests; uses orders_console payload */}
       {(() => {
         const u = binanceUsage
@@ -762,6 +1003,41 @@ export const OrdersPanel: React.FC = () => {
             Auto refresh: {Math.round(POLL_MS/1000)}s{(Number.isFinite(backoffUntilMs as any) && (backoffUntilMs as number) > Date.now()) ? ` (backoff ${Math.max(0, Math.ceil(((backoffUntilMs as number) - Date.now())/1000))}s)` : ''}
           </span>
           <button className="btn" onClick={() => load(true)} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button 
+              className="btn" 
+              onClick={syncHealthMonitor} 
+              disabled={healthSyncLoading}
+              title="Manuální synchronizace Health Monitoru pro pozice + SELL entry orders - použij pokud se health nespustil automaticky"
+              style={{ 
+                background: healthSyncLoading ? '#374151' : (healthSyncFeedback?.startsWith('✓') ? '#059669' : '#065f46'), 
+                border: healthSyncFeedback?.startsWith('✓') ? '2px solid #10b981' : '1px solid #10b981',
+                color: '#fff',
+                padding: '4px 10px',
+                fontSize: 12,
+                fontWeight: 600,
+                transition: 'all 0.3s ease'
+              }}
+            >
+              {healthSyncLoading ? '⏳ Syncing...' : '💚 Health Sync'}
+            </button>
+            {healthSyncFeedback && (
+              <span 
+                style={{ 
+                  fontSize: 11, 
+                  color: healthSyncFeedback.startsWith('✓') ? '#10b981' : '#ef4444',
+                  fontWeight: 600,
+                  padding: '4px 8px',
+                  background: healthSyncFeedback.startsWith('✓') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                  borderRadius: 4,
+                  border: `1px solid ${healthSyncFeedback.startsWith('✓') ? '#10b981' : '#ef4444'}`,
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {healthSyncFeedback}
+              </span>
+            )}
+          </div>
           {lastRefresh ? (<span style={{ fontSize: 12, opacity: .7 }}>Last: {new Date(lastRefresh).toLocaleTimeString()}</span>) : null}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: 12, opacity: .8 }}>Pending cancel:</span>
@@ -776,6 +1052,23 @@ export const OrdersPanel: React.FC = () => {
               <option value={120}>120 min</option>
             </select>
           </div>
+          {/* Sound controls */}
+          <button 
+            className="btn"
+            onClick={handleToggleSound}
+            title={soundEnabled ? 'Vypnout zvuky' : 'Zapnout zvuky'}
+            style={{ padding: '2px 8px', fontSize: 16 }}
+          >
+            {soundEnabled ? '🔔' : '🔕'}
+          </button>
+          <button 
+            className="btn"
+            onClick={() => playPriceAlertSound()}
+            title="Test zvuku"
+            style={{ padding: '2px 8px', fontSize: 12 }}
+          >
+            🔊 Test
+          </button>
         </div>
       </div>
       {error ? (
@@ -796,11 +1089,17 @@ export const OrdersPanel: React.FC = () => {
       {/* Entry Updater Control */}
       <div style={{ marginTop: 10, marginBottom: 8, padding: 8, border: '1px solid #333', borderRadius: 4, background: 'rgba(0,0,0,0.2)' }}>
         <EntryUpdaterControl
-          hasOpenEntries={orders.some(o => String(o.side).toUpperCase()==='BUY' && !(o.reduceOnly||o.closePosition))}
+          hasOpenEntries={orders.some(o => String(o.side).toUpperCase()==='SELL' && !(o.reduceOnly||o.closePosition))}
           hasActiveTimers={entryUpdaterEntries.some((e:any)=> e.status === 'waiting' && new Date(e.triggerAt).getTime() > Date.now())}
         />
       </div>
-      {/* Profit Taker removed – Top-Up Executor supersedes it */}
+      {/* AI Profit Taker Control */}
+      <div style={{ marginTop: 10, marginBottom: 8, padding: 8, border: '1px solid #333', borderRadius: 4, background: 'rgba(0,0,0,0.2)' }}>
+        <AIProfitTakerControl
+          hasPositions={positions.length > 0}
+          lastRunTimestamp={aiProfitTakerLastRun}
+        />
+      </div>
       {/* Watcher Control */}
       <div style={{ marginTop: 10, marginBottom: 8, padding: 8, border: '1px solid #333', borderRadius: 4, background: 'rgba(0,0,0,0.2)' }}>
         <WatcherControl
@@ -832,10 +1131,31 @@ export const OrdersPanel: React.FC = () => {
           <strong>Positions</strong>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {lastRefresh ? (<span style={{ fontSize: 12, opacity: .75 }}>Refreshed: {new Date(lastRefresh as string).toLocaleTimeString()}</span>) : null}
+            <button 
+              className="btn" 
+              onClick={() => {
+                console.log('[ORDERS_PANEL] Toggle charts:', !showAllCharts, 'positions:', positionsView.length)
+                setShowAllCharts(!showAllCharts)
+              }}
+              style={{ 
+                background: showAllCharts ? '#1e40af' : '#1e293b',
+                color: '#fff',
+                padding: '4px 12px',
+                fontSize: 12,
+                fontWeight: 600
+              }}
+            >
+              📊 Charts
+            </button>
             <button className="btn" onClick={flattenAllPositions} style={{ background: '#0d3a3a', border: '1px solid #106b6b', color: '#fff', padding: '2px 8px', fontSize: 12 }}>Flatten All</button>
             <span style={{ fontSize: 12, opacity: .8 }}>{positions.length}</span>
           </div>
         </div>
+        {positionsView.some(p => p.isExternal) && (
+          <div style={{ fontSize: 11, opacity: 0.6, marginTop: 4 }}>
+            ⓘ External positions (LONG) are not shown in charts
+          </div>
+        )}
         {positionsView.length === 0 ? (
           <div style={{ fontSize: 12, opacity: .8, marginTop: 6 }}>No open positions</div>
         ) : (
@@ -934,6 +1254,158 @@ export const OrdersPanel: React.FC = () => {
             </table>
           </div>
         )}
+        
+        {/* Trading Charts Grid */}
+        {showAllCharts && positionsViewForCharts.length > 0 && (
+          <>
+            <div style={{ 
+              padding: 12, 
+              background: '#1e293b', 
+              borderRadius: 6, 
+              marginTop: 16,
+              fontSize: 13,
+              color: '#94a3b8'
+            }}>
+              📊 Loading {visibleChartsCount} / {positionsViewForCharts.length} charts...
+            </div>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(550px, 1fr))',
+              gap: 16,
+              marginTop: 16
+            }}>
+            {positionsViewForCharts.map((p, index) => {
+              // Staggered loading: only show charts up to visibleChartsCount
+              if (index >= visibleChartsCount) {
+                return (
+                  <div
+                    key={`placeholder-${p.symbol}`}
+                    style={{
+                      width: 550,
+                      height: 500,
+                      background: '#0f172a',
+                      border: '1px solid #1e293b',
+                      borderRadius: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#64748b'
+                    }}
+                  >
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
+                      <div style={{ fontSize: 14 }}>Loading chart...</div>
+                      <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>{p.symbol}</div>
+                    </div>
+                  </div>
+                )
+              }
+              // Extract SL/TP from orders
+              const getSlTp = (symbol: string): { sl: number | null; tp: number | null } => {
+                let sl = null
+                let tp = null
+                
+                for (const order of orders) {
+                  if (order.symbol !== symbol) continue
+                  const type = String(order.type || '')
+                  const closePos = Boolean(order.closePosition)
+                  
+                  if (type === 'STOP_MARKET' && closePos) {
+                    sl = Number(order.stopPrice) || null
+                  }
+                  if (type.includes('TAKE_PROFIT') && closePos) {
+                    tp = Number(order.stopPrice || order.price) || null
+                  }
+                }
+                
+                return { sl, tp }
+              }
+              
+              const { sl, tp } = getSlTp(p.symbol)
+              
+              // Calculate age in minutes
+              const ageMinutes = (() => {
+                if (!p.updatedAt) return 0
+                try {
+                  const ts = new Date(p.updatedAt).getTime()
+                  if (!Number.isFinite(ts)) return 0
+                  return Math.floor((Date.now() - ts) / 60000)
+                } catch {
+                  return 0
+                }
+              })()
+              
+              // Calculate available balance (mock for now - can be extracted from account info)
+              const availableBalance = 0
+              
+              // Calculate position size in USD
+              const positionSizeUsd = Number.isFinite(p.size) && Number.isFinite(p.entryPrice) 
+                ? (p.size as number) * (p.entryPrice as number)
+                : 0
+              
+              // CRITICAL: Use stable key to prevent unnecessary unmount/remount
+              // CRITICAL: currentPrice MUST update every poll (5s)
+              const currentPrice = (() => {
+                // Priority 1: marks from polling (updates every 5s)
+                const markFromPolling = marks[p.symbol]
+                const now = Date.now()
+                const timestamp = new Date(now).toISOString()
+                const timeMs = new Date(now).getTime()
+                
+                console.log(`[ORDERS_PANEL] 🔄 Price source for ${p.symbol}:`, {
+                  markFromPolling,
+                  positionMarkPrice: p.markPrice,
+                  marksKeys: Object.keys(marks),
+                  timestamp,
+                  timeMs,
+                  positionsViewTimestamp: timestamp // Track memo recalculation
+                })
+                
+                if (Number.isFinite(markFromPolling) && markFromPolling > 0) {
+                  console.log(`[ORDERS_PANEL] ✅ Using markFromPolling: ${markFromPolling} at ${timestamp}`)
+                  return markFromPolling
+                }
+                // Priority 2: position markPrice
+                const positionMark = Number(p.markPrice)
+                if (Number.isFinite(positionMark) && positionMark > 0) {
+                  console.log(`[ORDERS_PANEL] ⚠️ Using positionMark: ${positionMark} at ${timestamp}`)
+                  return positionMark
+                }
+                // Fallback: 0 (chart won't update)
+                console.log(`[ORDERS_PANEL] ❌ NO VALID PRICE - using 0 at ${timestamp}`)
+                return 0
+              })()
+              
+              // Find health monitor entry for this symbol
+              const healthEntry = healthMonitorEntries.find((e: any) => String(e?.symbol || '') === p.symbol)
+              
+              return (
+                <PositionChartWithHealth
+                  key={`chart-${p.symbol}-stable`}
+                  symbol={p.symbol}
+                  entryPrice={Number(p.entryPrice) || 0}
+                  currentPrice={currentPrice}
+                  slPrice={sl}
+                  tpPrice={tp}
+                  pnlUsd={Number(p.pnlUsd) || 0}
+                  pnlPct={Number(p.pnlPct) || 0}
+                  pnlPctLev={Number(p.pnlPctLev) || 0}
+                  slLevPct={Number(p.slLevPct) || 0}
+                  tpLevPct={Number(p.tpLevPct) || 0}
+                  ageMinutes={ageMinutes}
+                  leverage={Number(p.leverage) || 1}
+                  availableBalance={availableBalance}
+                  positionSizeUsd={positionSizeUsd}
+                  positionSide={p.positionSide}
+                  onClosePosition={flattenOne}
+                  healthMonitorEntry={healthEntry}
+                  healthMonitorEnabled={healthMonitorEnabled}
+                />
+              )
+            })}
+            </div>
+          </>
+        )}
       </div>
 
       <div style={{ height: 10 }} />
@@ -1022,6 +1494,55 @@ export const OrdersPanel: React.FC = () => {
       </div>
 
       <div style={{ height: 10 }} />
+      
+      {/* Cancel Delta % inline controls */}
+      <div style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: 4, marginBottom: 10 }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+            <span>Cancel Delta %:</span>
+            <input 
+              type="number" 
+              min={0} 
+              max={10} 
+              step={0.5} 
+              value={cancelDelta}
+              onChange={e => setCancelDelta(Number(e.target.value))}
+              style={{ width: 60, padding: 4, background: '#1a1a1a', border: '1px solid #333', color: '#fff', borderRadius: 3 }}
+              title="Pokud entry cena odchýlí od aktuální mark price o toto %, příkaz se zruší"
+            />
+          </label>
+          <button 
+            className="btn" 
+            disabled={deltaLoading}
+            onClick={async () => {
+              setDeltaLoading(true)
+              setDeltaFeedback(null)
+              try {
+                const res = await fetch('/api/config/trading', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    ENTRY_DELTA_CANCEL_PCT: Math.max(0, Math.min(10, cancelDelta))
+                  })
+                })
+                if (res.ok) {
+                  setDeltaFeedback('✓')
+                  setTimeout(() => setDeltaFeedback(null), 2000)
+                } else throw new Error('Failed')
+              } catch {
+                setDeltaFeedback('✗')
+                setTimeout(() => setDeltaFeedback(null), 2000)
+              } finally {
+                setDeltaLoading(false)
+              }
+            }}
+            style={{ fontSize: 12, padding: '4px 12px' }}
+          >
+            {deltaFeedback || (deltaLoading ? '...' : 'Save Delta Settings')}
+          </button>
+        </div>
+      </div>
+
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <strong>Open Orders</strong>
@@ -1044,6 +1565,7 @@ export const OrdersPanel: React.FC = () => {
                   <th style={{ textAlign: 'left' }}>Pos</th>
                   <th style={{ textAlign: 'left' }}>Type</th>
                   <th style={{ textAlign: 'center' }}>Entry Updater</th>
+                  <th style={{ textAlign: 'center' }}>Health · Success</th>
                   <th style={{ textAlign: 'right' }}>Qty</th>
                   <th style={{ textAlign: 'right' }}>Invested $</th>
                   <th style={{ textAlign: 'right' }}>Lev</th>
@@ -1063,13 +1585,16 @@ export const OrdersPanel: React.FC = () => {
                 {stableOrders.map((o) => {
                   const isStrategyOrder = isStrategyUpdaterOrder(o)
                   const isEntryUpdater = isEntryUpdaterOrder(o)
-                  // External badge only if NOT strategy/entry-updater order
-                  const ext = isExternalOrder(o) && !isStrategyOrder && !isEntryUpdater
+                  const isAIProfitTaker = isAIProfitTakerOrder(o)
+                  // External badge only if NOT strategy/entry-updater/AI-PT order
+                  const ext = isExternalOrder(o) && !isStrategyOrder && !isEntryUpdater && !isAIProfitTaker
                   const rowStyle = isStrategyOrder
                     ? { background: 'rgba(34, 197, 94, 0.15)', border: '1px solid rgba(34, 197, 94, 0.3)' }
                     : (isEntryUpdater
                       ? { background: 'rgba(59, 130, 246, 0.15)', border: '1px solid rgba(59, 130, 246, 0.3)' }
-                      : (ext ? { background: 'rgba(30,41,59,0.35)' } : undefined))
+                      : (isAIProfitTaker
+                        ? { background: 'rgba(236, 72, 153, 0.15)', border: '1px solid rgba(236, 72, 153, 0.3)' }
+                        : (ext ? { background: 'rgba(30,41,59,0.35)' } : undefined)))
                   return (
                   <tr key={o.orderId} style={rowStyle}>
                     <td>{o.orderId}</td>
@@ -1082,6 +1607,8 @@ export const OrdersPanel: React.FC = () => {
                         <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 4px', borderRadius: 4, background: '#22c55e', color: '#fff' }}>🤖 AI</span>
                       ) : isEntryUpdater ? (
                         <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 4px', borderRadius: 4, background: '#3b82f6', color: '#fff' }}>🤖 AI</span>
+                      ) : isAIProfitTaker ? (
+                        <span style={{ marginLeft: 6, fontSize: 10, padding: '1px 4px', borderRadius: 4, background: '#ec4899', color: '#fff' }}>AI PT</span>
                       ) : null}
                     </td>
                     <td style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{(() => {
@@ -1118,9 +1645,85 @@ export const OrdersPanel: React.FC = () => {
                         return <span style={{ fontSize: 10, color: '#60a5fa' }} title={baseTitle}>🔵 {remainingSec>0?fmt(remainingSec):'Due'}</span>
                       })()}
                     </td>
+                    <td style={{ textAlign: 'center' }}>
+                      {(() => {
+                        // Show health/success ONLY for SELL entry orders (pending orders in SHORT system)
+                        const isSellEntry = String(o.side || '').toUpperCase() === 'SELL' 
+                          && !(o.reduceOnly || o.closePosition)
+                        
+                        if (!isSellEntry) {
+                          return <span style={{ fontSize: 10, color: '#6b7280' }}>—</span>
+                        }
+                        
+                        // Match by orderId for pending orders
+                        const healthEntry = healthMonitorEntries.find((e: any) => 
+                          e.type === 'pending_order' && e.orderId === o.orderId
+                        )
+                        
+                        // Debug logging
+                        if (isSellEntry && o.orderId) {
+                          console.log(`[HEALTH_DEBUG] Order ${o.symbol} #${o.orderId}:`, {
+                            healthMonitorEnabled,
+                            totalEntries: healthMonitorEntries.length,
+                            pendingEntries: healthMonitorEntries.filter((e: any) => e.type === 'pending_order').length,
+                            foundEntry: !!healthEntry,
+                            hasLastOutput: healthEntry?.lastOutput ? true : false,
+                            entryDetails: healthEntry ? {
+                              symbol: healthEntry.symbol,
+                              orderId: healthEntry.orderId,
+                              type: healthEntry.type,
+                              status: healthEntry.status,
+                              lastOutput: healthEntry.lastOutput ? 'present' : 'null',
+                              nextRunAt: healthEntry.nextRunAt
+                            } : 'no entry found'
+                          })
+                        }
+                        
+                        if (!healthEntry || !healthMonitorEnabled) {
+                          return <span style={{ fontSize: 10, color: '#6b7280' }}>—</span>
+                        }
+                        
+                        const lastOutput = healthEntry.lastOutput
+                        if (!lastOutput) {
+                          return <span style={{ fontSize: 10, color: '#6b7280' }}>⏳</span>
+                        }
+                        
+                        const health = Number(lastOutput.health_pct)
+                        const success = Number(lastOutput.success_prob_pct)
+                        
+                        // Color coding
+                        const healthColor = health >= 70 ? '#22c55e' : health >= 40 ? '#f59e0b' : '#ef4444'
+                        const successColor = success >= 70 ? '#22c55e' : success >= 50 ? '#f59e0b' : '#ef4444'
+                        
+                        return (
+                          <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                            <div style={{ 
+                              fontSize: '10px', 
+                              background: healthColor,
+                              color: '#fff',
+                              padding: '2px 4px',
+                              borderRadius: '3px',
+                              fontWeight: 600
+                            }} title={`Health: ${health}%`}>
+                              H:{Math.round(health)}%
+                            </div>
+                            <div style={{ 
+                              fontSize: '10px', 
+                              background: successColor,
+                              color: '#fff',
+                              padding: '2px 4px',
+                              borderRadius: '3px',
+                              fontWeight: 600
+                            }} title={`Success Probability: ${success}%`}>
+                              S:{Math.round(success)}%
+                            </div>
+                          </div>
+                        )
+                      })()}
+                    </td>
                     <td style={{ textAlign: 'right' }}>{fmtNum(o.qty, 4)}</td>
                     <td style={{ textAlign: 'right' }}>{(() => {
-                      const isEntry = String(o.side).toUpperCase() === 'BUY' && !(o.reduceOnly || o.closePosition)
+                      const isEntry = String(o.side).toUpperCase() === 'SELL' && !(o.reduceOnly || o.closePosition)
                       if (!isEntry) return '-'
                       // Use investedUsd from backend if available
                       const invested = Number((o as any)?.investedUsd)

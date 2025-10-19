@@ -1,0 +1,89 @@
+version: '3.8'
+
+# Dedicated Temporal cluster for SHORT trading instance
+# NEVER use this for LONG instance - that needs separate compose.long-temporal.yml
+
+networks:
+  trader-short-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+services:
+  temporal-short:
+    image: temporalio/auto-setup:latest
+    container_name: temporal-short-cluster
+    networks:
+      - trader-short-net
+    ports:
+      - "7500:7233"  # Map internal 7233 to external 7500 for SHORT
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal_short
+      - POSTGRES_PWD=temporal_short_pwd
+      - POSTGRES_SEEDS=postgres-short
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+      - ENABLE_ES=false
+      - ES_SEEDS=""
+      - DEFAULT_NAMESPACE=trader-short
+    volumes:
+      - ./temporal-short-config:/etc/temporal/config/dynamicconfig
+    depends_on:
+      - postgres-short
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "tctl", "--namespace", "trader-short", "namespace", "describe"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-short:
+    image: postgres:15-alpine
+    container_name: postgres-short-temporal
+    networks:
+      - trader-short-net
+    environment:
+      POSTGRES_USER: temporal_short
+      POSTGRES_PASSWORD: temporal_short_pwd
+      POSTGRES_DB: temporal_short
+    volumes:
+      - postgres-short-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal_short"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  temporal-short-web:
+    image: temporalio/web:latest
+    container_name: temporal-short-web
+    networks:
+      - trader-short-net
+    ports:
+      - "8501:8080"  # Web UI for SHORT cluster (avoid conflict with LONG on 8080)
+    environment:
+      - TEMPORAL_GRPC_ENDPOINT=temporal-short:7233
+      - TEMPORAL_PERMIT_WRITE_API=true
+    depends_on:
+      - temporal-short
+    restart: unless-stopped
+
+volumes:
+  postgres-short-data:
+    driver: local
+
+# USAGE:
+# docker-compose -f deploy/compose.short-temporal.yml up -d
+# 
+# Access:
+# - Temporal gRPC: localhost:7500
+# - Temporal Web UI: http://localhost:8501
+#
+# .env.local should have:
+# TEMPORAL_ADDRESS=127.0.0.1:7500
+# TEMPORAL_NAMESPACE=trader-short
+# FORBIDDEN_TEMPORAL_PORTS=7234,7600
+

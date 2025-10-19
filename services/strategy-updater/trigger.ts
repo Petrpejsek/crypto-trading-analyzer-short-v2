@@ -110,7 +110,8 @@ export function startStrategyUpdaterForPosition(symbol: string, position: any, o
     }
 
     const ps = String((position as any)?.positionSide || '').toUpperCase()
-    const side: 'LONG' | 'SHORT' = ps === 'LONG' ? 'LONG' : ps === 'SHORT' ? 'SHORT' : (positionAmt > 0 ? 'LONG' : 'SHORT')
+    // SHORT only system - always treat as SHORT
+    const side: 'LONG' | 'SHORT' = ps === 'SHORT' ? 'SHORT' : (positionAmt < 0 ? 'SHORT' : 'SHORT')
     const size = Math.abs(positionAmt)
 
     // Scheduling relies on provided positions argument; no extra WS readiness gate here
@@ -213,19 +214,48 @@ export async function processDueStrategyUpdates(): Promise<void> {
   if (!isStrategyUpdaterEnabled()) return
 
   try {
-    // CRITICAL: First cleanup registry for symbols WITHOUT positions
+    // OPRAVA: Cleanup registry NEBĚŽÍ na začátku - jen když executor zjistí, že pozice neexistuje
+    // Důvod: Cleanup by mohl smazat registry pro symboly s entry orders (ale bez pozice)
     const api = getBinanceAPI()
-    const positions = await api.getPositions().catch(() => [])
-    cleanupExpiredTracking(positions)
 
     // No global WS readiness gate – we validate per-symbol below if needed
 
     const { getDueUpdates } = await import('./registry')
     const { markStrategyUpdateProcessing } = await import('./registry')
     const { rescheduleStrategyUpdate } = await import('./registry')
+    const { cleanupStrategyUpdaterForSymbol } = await import('./registry')
     const { appendAudit, isAuditEnabled } = await import('./audit')
     const { runStrategyUpdate, fetchMarketDataForSymbol } = await import('./strategy_updater_gpt')
     const { executeStrategyUpdate } = await import('./executor')
+    
+    // CRITICAL FIX: Auto-reset stuck 'processing' entries older than 5 minutes
+    try {
+      const { getStrategyUpdaterList } = await import('./registry')
+      const allEntries = getStrategyUpdaterList()
+      const now = Date.now()
+      const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+      
+      for (const entry of allEntries) {
+        if (entry.status === 'processing' && entry.lastCheck) {
+          const lastCheckMs = new Date(entry.lastCheck).getTime()
+          const ageMs = now - lastCheckMs
+          
+          if (ageMs > PROCESSING_TIMEOUT_MS) {
+            console.warn('[STRATEGY_UPDATER_AUTO_RESET]', {
+              symbol: entry.symbol,
+              status: entry.status,
+              lastCheck: entry.lastCheck,
+              ageMs,
+              action: 'reset_to_waiting'
+            })
+            // Reset to waiting so it can be picked up again
+            rescheduleStrategyUpdate(entry.symbol, 0) // Immediate retry
+          }
+        }
+      }
+    } catch (resetError) {
+      console.error('[STRATEGY_UPDATER_AUTO_RESET_ERR]', (resetError as any)?.message || resetError)
+    }
     
     const dueUpdates = getDueUpdates()
     
@@ -235,7 +265,45 @@ export async function processDueStrategyUpdates(): Promise<void> {
 
     for (const entry of dueUpdates) {
       try {
-        // Proceed without hard-skipping; per-symbol validation is handled during execution
+        // KRITICKÁ VALIDACE: Zkontroluj, že pozice SKUTEČNĚ existuje před spuštěním
+        try {
+          const positions = await api.getPositions().catch(() => [])
+          const position = (Array.isArray(positions) ? positions : []).find((p: any) => {
+            const sym = String(p?.symbol || '')
+            const amt = Number(p?.positionAmt || p?.size || 0)
+            return sym === entry.symbol && Math.abs(amt) > 0
+          })
+          
+          if (!position) {
+            console.warn('[STRATEGY_UPDATER_NO_POSITION]', { 
+              symbol: entry.symbol,
+              reason: 'position_not_found_pre_check'
+            })
+            // Smaž registry - pozice už neexistuje
+            cleanupStrategyUpdaterForSymbol(entry.symbol)
+            continue
+          }
+          
+          // Extra validace: Ověř, že pozice má nenulovou velikost
+          const posSize = Math.abs(Number(position?.positionAmt || position?.size || 0))
+          if (posSize <= 0) {
+            console.warn('[STRATEGY_UPDATER_ZERO_POSITION]', { 
+              symbol: entry.symbol,
+              positionSize: posSize
+            })
+            cleanupStrategyUpdaterForSymbol(entry.symbol)
+            continue
+          }
+        } catch (validationError) {
+          console.error('[STRATEGY_UPDATER_VALIDATION_ERR]', {
+            symbol: entry.symbol,
+            error: (validationError as any)?.message || validationError
+          })
+          // CRITICAL FIX: Must reschedule or entry will loop forever
+          const { markStrategyUpdateError } = await import('./registry')
+          markStrategyUpdateError(entry.symbol, (validationError as any)?.message || 'validation_failed')
+          continue
+        }
 
         console.info('[STRATEGY_UPDATER_PROCESS_START]', { symbol: entry.symbol })
         // Persist minimal marker immediately (prevents stale files from other symbols being shown)
@@ -279,7 +347,7 @@ export async function processDueStrategyUpdates(): Promise<void> {
         // 2. Use entry position data directly (avoid fresh REST call inconsistency)
         const currentPosition = {
           symbol: entry.symbol,
-          positionAmt: entry.side === 'LONG' ? entry.positionSize : -entry.positionSize,
+          positionAmt: entry.side === 'SHORT' ? -entry.positionSize : entry.positionSize,
           entryPrice: entry.entryPrice,
           markPrice: 0 // Will be updated from market data
         }
@@ -310,7 +378,7 @@ export async function processDueStrategyUpdates(): Promise<void> {
         } catch {}
 
         // 2a. Read live open orders and derive current TP trio and current SL (no fallbacks)
-        const api = getBinanceAPI()
+        // CRITICAL FIX: Use api from outer scope (line 219) - don't redeclare it here
         const openOrdersRaw = await api.getOpenOrders(entry.symbol).catch(() => [])
         const exitSide = entry.side === 'LONG' ? 'SELL' : 'BUY'
         // Accept project-prefixed IDs (sv2_x_tp_...) and plain x_tp_
@@ -468,6 +536,22 @@ export async function processDueStrategyUpdates(): Promise<void> {
         const pnlDirection = entry.side === 'LONG' ? 1 : -1
         const unrealizedPnlUsd = Number(((currentPrice - entry.entryPrice) * entry.positionSize * pnlDirection).toFixed(4))
 
+        // TRADE CONTEXT: Calculate time since position opened and movement metrics
+        const now = Date.now()
+        const entryTime = new Date(entry.since).getTime()
+        const timeOpenMs = now - entryTime
+        const timeOpenMinutes = Math.floor(timeOpenMs / 60000)
+        
+        // PRICE MOVEMENT: Calculate distance from entry in BPS and ATR units
+        const priceMovementBps = entry.entryPrice > 0 
+          ? Math.abs((currentPrice - entry.entryPrice) / entry.entryPrice * 10000)
+          : 0
+        
+        const atrM15 = marketData?.atr_m15 ?? marketData?.atr_pct_M15 ?? null
+        const priceMovementAtr = (atrM15 != null && atrM15 > 0)
+          ? Math.abs((currentPrice - entry.entryPrice) / atrM15)
+          : null
+
         const aiInput: StrategyUpdateInput = {
           symbol: entry.symbol,
           position: {
@@ -514,8 +598,26 @@ export async function processDueStrategyUpdates(): Promise<void> {
             }
             const realizedPct = entry.positionSize > 0 ? Math.max(0, Math.min(1, realizedQty / entry.positionSize)) : 0
             return { tp_hits_count: hits, last_tp_hit_tag: hits ? 'tp' : null, realized_pct_of_initial: realizedPct }
-          })()
+          })(),
+          // TRADE CONTEXT: Time and cost metrics
+          trade_context: {
+            time_open_minutes: timeOpenMinutes,
+            fees_round_trip_bps: 6.0, // Binance: 0.03% taker * 2 (entry + exit) = 6 bps
+            spread_estimate_bps: marketData?.spread_bps ?? 1.5
+          },
+          // PRICE MOVEMENT: Distance from entry
+          price_movement: {
+            from_entry_bps: priceMovementBps,
+            from_entry_atr: priceMovementAtr
+          }
         }
+        
+        console.info('[STRATEGY_UPDATER_CONTEXT]', {
+          symbol: entry.symbol,
+          time_open_minutes: timeOpenMinutes,
+          price_movement_bps: priceMovementBps.toFixed(1),
+          price_movement_atr: priceMovementAtr != null ? priceMovementAtr.toFixed(2) : null
+        })
 
         const aiResult = await runStrategyUpdate(aiInput)
         
@@ -619,8 +721,18 @@ export async function processDueStrategyUpdates(): Promise<void> {
             urgency: response.urgency
           })
         } else {
-          const { markStrategyUpdateError } = await import('./registry')
-          markStrategyUpdateError(entry.symbol, execResult.error || 'execution_failed')
+          // KRITICKÁ OPRAVA: Pokud pozice neexistuje nebo je entry order otevřený, SMAŽ registry
+          if (execResult.error === 'position_not_found' || execResult.error === 'entry_still_open') {
+            console.warn('[STRATEGY_UPDATER_CLEANUP_TRIGGER]', { 
+              symbol: entry.symbol, 
+              reason: execResult.error 
+            })
+            cleanupStrategyUpdaterForSymbol(entry.symbol)
+          } else {
+            // Jiné chyby: zachovej registry a zkus znovu
+            const { markStrategyUpdateError } = await import('./registry')
+            markStrategyUpdateError(entry.symbol, execResult.error || 'execution_failed')
+          }
           if (isAuditEnabled()) appendAudit({ id: `su_${Date.now()}_${entry.symbol}`, symbol: entry.symbol, phase: 'exec_failed', error: execResult.error })
           console.error('[STRATEGY_UPDATER_EXEC_FAILED]', { 
             symbol: entry.symbol, 

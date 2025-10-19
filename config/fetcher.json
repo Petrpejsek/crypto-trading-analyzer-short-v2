@@ -30,9 +30,9 @@
     "max_spread_bps": 50
   },
   "universe": {
-    "topN": 50,
-    "strategy": "mix",
-    "minListingAgeDays": 7
+    "topN": 70,
+    "strategy": "losers",
+    "minListingAgeDays": 0
   },
   "preferWSAltH1": true,
   "backfillH1Limit": 48,

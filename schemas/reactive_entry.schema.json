@@ -1,0 +1,124 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReactiveEntryDecision",
+  "description": "AI decision output for SHORT entry analysis",
+  "type": "object",
+  "required": ["decision", "confidence", "mode", "class", "size_hint_pct", "reasoning", "diagnostics"],
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": ["entry", "skip"],
+      "description": "Final decision: enter or skip"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Confidence level (0-1)"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["breakdown_retest", "vwap_or_ema_bounce", "sweep_high_with_LH", "resistance_tap_absorption", "none"],
+      "description": "Entry mode detected"
+    },
+    "class": {
+      "type": "string",
+      "enum": ["standard", "scout", "none"],
+      "description": "Entry classification"
+    },
+    "size_hint_pct": {
+      "type": "number",
+      "enum": [0, 5, 10, 20],
+      "description": "Position size hint percentage"
+    },
+    "entry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "price"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["limit"]
+            },
+            "price": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reasoning": {
+      "type": "string",
+      "description": "Human-readable explanation"
+    },
+    "suggestion": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string"
+        },
+        "anchor": {
+          "type": "string",
+          "enum": ["vwap", "ema50_m15", "recent_resistance", "micro_high"]
+        },
+        "min_edge_price": {
+          "type": "number"
+        },
+        "anchor_price": {
+          "type": "number"
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "required": ["edge_from_current_bps", "edge_min_required_bps"],
+      "properties": {
+        "edge_from_current_bps": {
+          "type": "number"
+        },
+        "edge_min_required_bps": {
+          "type": "number"
+        },
+        "used_anchor": {
+          "type": "string"
+        },
+        "dist_to_vwap_bps": {
+          "oneOf": [
+            { "type": "number" },
+            { "type": "null" }
+          ]
+        },
+        "dist_to_ema50_m15_bps": {
+          "oneOf": [
+            { "type": "number" },
+            { "type": "null" }
+          ]
+        },
+        "ticks_from_nearest_resistance": {
+          "oneOf": [
+            { "type": "number" },
+            { "type": "null" }
+          ]
+        },
+        "nearest_resistance_price": {
+          "oneOf": [
+            { "type": "number" },
+            { "type": "null" }
+          ]
+        },
+        "min_edge_price": {
+          "oneOf": [
+            { "type": "number" },
+            { "type": "null" }
+          ]
+        }
+      }
+    }
+  }
+}
+

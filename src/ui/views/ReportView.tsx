@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react'
+import { writeClipboard } from '../utils/clipboard'
 import type { MarketRawSnapshot } from '../../../types/market_raw'
 import type { FeaturesSnapshot } from '../../../types/features'
 import type { MarketDecision } from '../../../services/decider/rules_decider'
@@ -50,7 +51,7 @@ export const ReportView: React.FC<Props> = ({ snapshot, features, decision, sign
     }
     lines.push(`Diagnostics: feeds_ok=${feedsOk ? 'true' : 'false'}, featuresMs=${featuresMs != null ? Math.round(featuresMs) : 'n/a'}, snapshotKB=${sizeKB(snapshot)}, featuresKB=${sizeKB(features)}, warningsN=${warnings.length}`)
     const txt = lines.join('\n')
-    try { await navigator.clipboard.writeText(txt); console.info('Copied summary') } catch { console.info('Clipboard skipped: document not focused') }
+    try { await writeClipboard(txt); console.info('Copied summary') } catch { console.info('Clipboard skipped: document not focused') }
   }
 
   const fp = useMemo(() => {
@@ -155,7 +156,7 @@ export const ReportView: React.FC<Props> = ({ snapshot, features, decision, sign
               </>
             ) } catch { return null } })()}
           </div>
-          <button className="btn mt-8" onClick={() => { try { const raw = localStorage.getItem('m4FinalPicker'); if (raw) navigator.clipboard.writeText(raw) } catch { console.info('Clipboard skipped: document not focused') } }}>Copy Final Picker JSON</button>
+          <button className="btn mt-8" onClick={() => { try { const raw = localStorage.getItem('m4FinalPicker'); if (raw) writeClipboard(raw) } catch { console.info('Clipboard skipped: document not focused') } }}>Copy Final Picker JSON</button>
         </div>
         {diagDrops.length ? (
           <details className="mt-8">

@@ -78,22 +78,28 @@ export async function EntryAssistantWorkflow(input: EntryAssistantInput): Promis
       entryPx = Number((strat as any)?.data?.[input.strategy]?.entry ?? input.entry ?? input.tp)
     }
 
-    const sideBuy = input.side === 'LONG'
+    // SHORT-only project: reject LONG trades
+    if (input.side === 'LONG') throw new Error('LONG trades not allowed in SHORT project')
+    if (input.side !== 'SHORT') throw new Error(`Invalid side: ${input.side} - must be SHORT`)
+    const sideBuy = false  // Always false (SHORT = SELL)
     const qty = await bx.binanceCalculateQuantity(input.symbol, input.amountUsd * input.leverage, Number(entryPx))
 
-    const positionSide = sideBuy ? 'LONG' : 'SHORT'
+    const positionSide = 'SHORT'
     const workingType = 'MARK_PRICE'
 
     const entryParams: any = (() => {
       const ot = String(input.orderType || (input.strategy === 'aggressive' ? 'stop_limit' : 'limit'))
-      if (ot === 'market') return { symbol: input.symbol, side: sideBuy ? 'BUY' : 'SELL', type: 'MARKET', quantity: qty, positionSide }
-      if (ot === 'limit') return { symbol: input.symbol, side: sideBuy ? 'BUY' : 'SELL', type: 'LIMIT', price: String(entryPx), timeInForce: 'GTC', quantity: qty, positionSide }
-      if (ot === 'stop') return { symbol: input.symbol, side: sideBuy ? 'BUY' : 'SELL', type: 'STOP_MARKET', stopPrice: String(entryPx), quantity: qty, positionSide, workingType }
-      return { symbol: input.symbol, side: sideBuy ? 'BUY' : 'SELL', type: 'STOP', price: String(entryPx), stopPrice: String(entryPx), timeInForce: 'GTC', quantity: qty, positionSide, workingType }
+      // SHORT: entry always = SELL
+      if (ot === 'market') return { symbol: input.symbol, side: 'SELL', type: 'MARKET', quantity: qty, positionSide }
+      if (ot === 'limit') return { symbol: input.symbol, side: 'SELL', type: 'LIMIT', price: String(entryPx), timeInForce: 'GTC', quantity: qty, positionSide }
+      // SHORT: entry always = SELL
+      if (ot === 'stop') return { symbol: input.symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(entryPx), quantity: qty, positionSide, workingType }
+      return { symbol: input.symbol, side: 'SELL', type: 'STOP', price: String(entryPx), stopPrice: String(entryPx), timeInForce: 'GTC', quantity: qty, positionSide, workingType }
     })()
 
-    const slParams: any = { symbol: input.symbol, side: sideBuy ? 'SELL' : 'BUY', type: 'STOP_MARKET', stopPrice: String(input.sl), closePosition: true, workingType, positionSide }
-    const tpParams: any = { symbol: input.symbol, side: sideBuy ? 'SELL' : 'BUY', type: 'TAKE_PROFIT_MARKET', stopPrice: String(input.tp), closePosition: true, workingType, positionSide }
+    // SHORT: SL/TP = BUY (closing short position)
+    const slParams: any = { symbol: input.symbol, side: 'BUY', type: 'STOP_MARKET', stopPrice: String(input.sl), closePosition: true, workingType, positionSide }
+    const tpParams: any = { symbol: input.symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET', stopPrice: String(input.tp), closePosition: true, workingType, positionSide }
 
     // Align leverage first (best effort)
     try { await bx.binanceSetLeverage(input.symbol, Math.max(1, Math.floor(Number(input.leverage)))) } catch {}
@@ -102,7 +108,8 @@ export async function EntryAssistantWorkflow(input: EntryAssistantInput): Promis
       step: 'prepare',
       info: 'Preparing orders',
       symbol: input.symbol,
-      planned: { entry: Number(entryPx||0)||null, sl: Number(input.sl||0)||null, tp: Number(input.tp||0)||null, orderType: String(input.orderType || (input.strategy === 'aggressive' ? 'stop_limit' : 'limit')), side: sideBuy ? 'BUY' : 'SELL' }
+      // SHORT: side always = SELL for entry
+      planned: { entry: Number(entryPx||0)||null, sl: Number(input.sl||0)||null, tp: Number(input.tp||0)||null, orderType: String(input.orderType || (input.strategy === 'aggressive' ? 'stop_limit' : 'limit')), side: 'SELL' }
     }
 
     status = { step: 'entry_sent', info: 'Placing entry', symbol: input.symbol, planned: status.planned }

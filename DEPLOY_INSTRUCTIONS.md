@@ -1,257 +1,335 @@
-# 🚀 Deploy Instructions - Prompt Management System
+# 🚀 Deploy Instructions - Trader SHORT V2
 
 ## ✅ Pre-deploy Checklist
 
-- [x] Commit pushed: `8d13982`
-- [x] Lokál testován: http://localhost:4302 ✅
-- [x] Žádné extra Binance API calls ✅
-- [x] Prompt Management API funguje ✅
+- [ ] Všechny změny commitnuty a pushnuty
+- [ ] Lokální testy prošly (`npm run qa:m2`, `npm run locks:check`)
+- [ ] Temporal cluster běží (`./temporal/start-short-cluster.sh`)
+- [ ] `.env.local` nakonfigurován správně
 
 ---
 
-## 📦 Co se deployuje:
+## 📦 Co deploy obsahuje
 
-### Backend změny:
-1. **Prompt Management API** (`/dev/prompts/*`)
-   - GET /dev/prompts - seznam asistentů
-   - GET /dev/prompts/:key - detail promptu
-   - PUT /dev/prompts/:key - save promptu
-   - POST /dev/prompts/export-all - export do registry
-   - GET /dev/prompt-attestation/:key - attestation info
+### Core aplikace
+1. **Backend** (`server/index.ts`)
+   - WebSocket server
+   - API endpointy
+   - Fetcher, Features, Signals
+   - Process Lock systém
 
-2. **Helper modul**: `services/lib/dev_prompts.ts`
-   - `resolveAssistantPrompt()` - overlay/registry resolver
-   - `setOverlayPrompt()` - atomic write + verifikace
-   - `notePromptUsage()` - audit trail
-   - `exportOverlayToRegistry()` - migrace do prod
+2. **Temporal Worker** (`temporal/worker.ts`)
+   - Activities (OpenAI, Binance, validátory)
+   - Workflows (entry pipeline)
+   - Process Lock systém
 
-3. **Integrace** do 4 asistentů:
-   - `strategy_updater` - vrací prompt_sha256 v meta
-   - `entry_updater` - vrací prompt_sha256 v meta
-   - `entry_strategy_conservative` - vrací prompt_hash v meta
-   - `entry_strategy_aggressive` - vrací prompt_hash v meta
+3. **Frontend** (Vite SPA)
+   - Dashboard UI
+   - Pozice, signály, monitoring
+   - Proxy na backend API
 
-### Frontend změny:
-1. **PromptsModal** komponenta
-   - UI editor s SHA-256 verifikací
-   - Save flow s lint kontrolami
-   - Export tlačítko
-   - Tlačítko v HeaderBar (dev-only)
-
-2. **Vite config**:
-   - Proxy pro `/dev` endpointy
-   - Web Crypto API pro SHA-256
-
-### Prompty (aktualizované z dev overlay):
-1. `hot_screener.md` - nová verze
-2. `entry_strategy_conservative.md` - nová verze
-3. `entry_risk_manager.md` - nová verze
-4. `strategy_updater.md` - nová verze
-
-### Cleanup:
-- ❌ Odstraněno 5 nepoužívaných promptů
-- ❌ Background pipeline disabled
-- ✅ 8 asistentů (bylo 12)
-
-### Dependencies:
-- `ulid` - pro revision IDs
-- `stream-browserify`, `buffer` - polyfilly (nakonec nepoužito, ale installed)
+### Infrastruktura
+- **PM2 Process Manager** - production orchestration
+- **Temporal Cluster** - workflow orchestration
+- **Process Lock System** - duplicate prevention
+- **SQLite Databases** - runtime state (temporal_short.db)
 
 ---
 
-## 🎯 Deploy na produkci
+## 🎯 Deploy workflow
 
-### 1. SSH do prod serveru
-
-```bash
-ssh user@prod-server
-cd /path/to/trader-short-v2
-```
-
-### 2. Backup současného stavu
+### 1. Na produkčním serveru - Pull změny
 
 ```bash
-# Vytvoř backup
+ssh user@production-server
+cd /srv/trader-short-v2
+
+# Backup současného stavu
 git stash push -m "pre-deploy-backup-$(date +%Y%m%d-%H%M%S)"
 
-# Nebo bundle backup
-git bundle create backup-$(date +%Y%m%d-%H%M%S).bundle HEAD
-```
-
-### 3. Pull změny
-
-```bash
-# Pull z origin
+# Pull změny
+git fetch origin
+git checkout main
 git pull origin main
 
 # Ověř commit
 git log -1 --oneline
-# Mělo by být: 8d13982 feat: Prompt Management systém...
 ```
 
-### 4. Install dependencies
+### 2. Instalace dependencies
 
 ```bash
-npm install
+npm ci
 ```
 
-### 5. Restart služeb
+### 3. Kontrola locks před restartem
 
-**PM2 způsob** (doporučeno):
 ```bash
-# Restart všech služeb
-pm2 restart all
+# Zkontroluj aktivní locks
+npm run locks:check
 
-# Nebo postupně:
-pm2 restart backend
-pm2 restart frontend  
-pm2 restart worker
+# Pokud jsou aktivní, stop PM2 a vyčisti locks
+pm2 stop all
+npm run locks:clear
 ```
 
-**Nebo dev.sh** (pokud nepoužíváš PM2):
-```bash
-# Stop
-./dev.sh stop
+### 4. Restart služeb (PM2)
 
-# Start (produkční mód)
-NODE_ENV=production ./dev.sh start
+**Doporučený způsob - graceful restart:**
+```bash
+pm2 restart ecosystem.short.config.cjs --update-env
 ```
 
-### 6. Verifikace
+**Nebo jednotlivě:**
+```bash
+pm2 restart trader-short-backend --update-env
+pm2 restart trader-short-worker --update-env
+```
+
+**Hard restart (když máš problémy):**
+```bash
+pm2 delete all
+pm2 start ecosystem.short.config.cjs
+pm2 save
+```
+
+### 5. Verifikace
 
 ```bash
-# Health check
-curl http://localhost:8888/api/health
+# PM2 status
+pm2 status
+pm2 logs --lines 50
+
+# Process locks
+npm run locks:check
+# Očekáváno: backend i worker LOCKED, STATUS: ✅ RUNNING
+
+# Backend health
+curl http://localhost:3081/api/health
 # Očekáváno: {"ok":true}
 
-# Ověř že frontend běží
-curl -I http://localhost:4302/
-# Očekáváno: HTTP 200
-
-# Zkontroluj prompty jsou načtené
-curl http://localhost:8888/api/health
-# V logs: PROMPTS_SIDE=SHORT (N=8, snapshot=..., verified=OK)
+# Temporal worker
+pm2 logs trader-short-worker --lines 20
+# Očekáváno: "Worker state changed { state: 'RUNNING' }"
 ```
 
 ---
 
-## 🔐 Produkční chování
+## 🔧 Troubleshooting
 
-### ✅ Co se POUŽIJE:
-- `prompts/*.md` z registry (VŽDY)
-- Overlay se ignoruje (i kdyby existoval)
-- Žádné /dev/prompts API (404 v production)
+### Problem: "LOCK_CONFLICT" při startu
 
-### ❌ Co se IGNORUJE:
-- `runtime/prompts/dev/` (overlay)
-- /dev/prompts endpointy (disabled v prod)
+**Příčina:** Jiná instance už běží nebo zůstal stale lock
 
----
-
-## 📊 Monitoring po deployu
-
-### 1. Zkontroluj logy
-
+**Řešení:**
 ```bash
-# PM2 logs
-pm2 logs backend --lines 50 | grep PROMPTS
+# 1. Zjisti co běží
+pm2 list
+npm run locks:check
 
-# Nebo tail
-tail -50 runtime/backend*.log | grep PROMPTS
+# 2. Stop vše
+pm2 stop all
+
+# 3. Vyčisti locks
+npm run locks:clear
+
+# 4. Start znovu
+pm2 start ecosystem.short.config.cjs
 ```
 
-**Očekávaný výstup:**
-```
-PROMPTS_SIDE=SHORT (N=8, snapshot=SNAPSHOT_..., verified=OK)
-TRADE_SIDE=SHORT
-[PROMPT] { name: 'hot_screener', version: '...', checksum: '...' }
-[PROMPT] { name: 'strategy_updater', version: '...', checksum: '...' }
-...
-```
+### Problem: Worker se nespustí
 
-### 2. Test asistenta
+**Příčina:** Temporal cluster neběží nebo špatná adresa
 
+**Řešení:**
 ```bash
-# Spusť Strategy Updater
-# Zkontroluj v logu:
-# - Používá prompt z registry (NE overlay)
-# - meta obsahuje prompt_sha256
+# Zkontroluj .env.local
+cat .env.local | grep TEMPORAL
+
+# Očekáváno:
+# TEMPORAL_ADDRESS=127.0.0.1:7500
+# TEMPORAL_NAMESPACE=trader-short
+
+# Zkontroluj že Temporal cluster běží
+nc -z 127.0.0.1 7500 && echo "OK" || echo "FAIL"
+
+# Pokud FAIL, spusť cluster:
+./temporal/start-short-cluster.sh
 ```
 
-### 3. Zkontroluj Binance calls
+### Problem: Duplicitní instance běží
 
+**Příčina:** PM2 instance + dev.sh instance současně
+
+**Řešení:**
 ```bash
-# Počet requestů
-tail -200 runtime/backend*.log | grep -c "BINANCE_REQ"
-# Mělo by být: nízké číslo (< 20)
+# Stop vše
+pm2 stop all
+pkill -f "tsx.*server/index.ts"
+pkill -f "tsx.*temporal/worker.ts"
 
-# Žádné bany
-tail -200 runtime/backend*.log | grep "418\|banned"
-# Mělo by být: prázdné
+# Vyčisti locks
+npm run locks:clear
+
+# Start jen PM2
+pm2 start ecosystem.short.config.cjs
+```
+
+### Problem: Port 3081 je obsazený
+
+**Příčina:** Jiná aplikace nebo zombie proces
+
+**Řešení:**
+```bash
+# Najdi co běží na portu
+lsof -i :3081
+
+# Kill proces
+kill -9 <PID>
+
+# Vyčisti locks
+npm run locks:clear
+
+# Start PM2
+pm2 start ecosystem.short.config.cjs
 ```
 
 ---
 
 ## 🆘 Rollback (pokud něco selže)
 
-### Rychlý rollback:
+### Rychlý rollback z stash
 
 ```bash
-# Vrať na předchozí commit
-git reset --hard cbfb4e7
+# Vrať předchozí stav
+git stash pop
 
 # Restart
 pm2 restart all
 ```
 
-### Nebo použij backup:
+### Rollback na konkrétní commit
 
 ```bash
-# Restore ze stashe
-git stash pop
+# Najdi commit
+git log --oneline -10
 
-# Nebo z bundle
-git pull backup-YYYYMMDD-HHMMSS.bundle
+# Reset na commit
+git reset --hard <COMMIT_SHA>
+
+# Reinstall
+npm ci
+
+# Restart
+pm2 restart all
 ```
 
 ---
 
-## ✅ Post-deploy checklist
+## 📊 Post-deploy monitoring
 
-- [ ] Backend běží (health check OK)
-- [ ] Frontend běží (UI přístupné)
-- [ ] Prompts načteny (N=8, verified=OK v logu)
-- [ ] Strategy Updater funguje
-- [ ] Žádné extra Binance calls
-- [ ] Žádné 418 bany
-- [ ] UI zobrazuje pozice správně
+### 1. PM2 Logy (první 5 minut)
+
+```bash
+# Real-time všechny logy
+pm2 logs
+
+# Pouze backend
+pm2 logs trader-short-backend
+
+# Pouze worker
+pm2 logs trader-short-worker
+```
+
+**Co hledat:**
+- ✅ `[PROCESS_LOCK_ACQUIRED]` - locks OK
+- ✅ `PROMPTS_SIDE=SHORT (N=...)` - prompty načtené
+- ✅ `Worker state changed { state: 'RUNNING' }` - worker OK
+- ✅ `[WS] WebSocket server listening` - WS OK
+- ❌ `[FATAL]`, `[ERROR]` - problém!
+
+### 2. Lock status
+
+```bash
+npm run locks:check
+```
+
+**Očekávaný výstup:**
+```
+[BACKEND] LOCKED
+  PID:         12345
+  Trade Side:  SHORT
+  Process:     trader-short-backend
+  Status:      ✅ RUNNING
+
+[WORKER] LOCKED
+  PID:         12346
+  Trade Side:  SHORT
+  Process:     trader-short-worker
+  Status:      ✅ RUNNING
+```
+
+### 3. Health checks
+
+```bash
+# Backend API
+curl http://localhost:3081/api/health
+
+# Temporal
+temporal workflow list --namespace trader-short
+
+# Frontend (pokud je na serveru)
+curl http://localhost:4302/
+```
 
 ---
 
-## 🎯 Rozdíly dev vs prod
+## 🎯 Rozdíly Development vs Production
 
-| Feature | Dev (NODE_ENV=development) | Prod (NODE_ENV=production) |
-|---------|---------------------------|----------------------------|
-| Prompt source | Overlay (runtime/prompts/dev/) | Registry (prompts/*.md) |
-| Pokud chybí | FAIL HARD (no fallback) | Načte z registry |
-| /dev/prompts API | ✅ Aktivní | ❌ 404 Not Found |
-| UI Prompts tlačítko | ✅ Zobrazeno | ❌ Skryto |
-| Overlay commitován | ❌ Ne (.gitignore) | ❌ Ne |
-| Registry commitován | ✅ Ano (po exportu) | ✅ Používá se |
+| Feature | Development (`./dev.sh`) | Production (`pm2`) |
+|---------|-------------------------|-------------------|
+| Code reload | ✅ Hot reload (tsx watch) | ❌ Manual restart required |
+| Port backend | 8888 | 3081 |
+| Port frontend | 4302 | 4302 (nebo production URL) |
+| NODE_ENV | development | production |
+| Logs | `runtime/*.log` | PM2 logs + `logs/short/*.log` |
+| Process manager | Bash script PIDs | PM2 daemon |
+| Lock files | Auto cleanup on stop | Manual cleanup needed |
+| Restart na změnu | Automatický | `pm2 restart` |
 
----
-
-## 📝 Poznámky
-
-- **Overlay se nedeployuje** - jen registry soubory
-- **Prod ignoruje overlay** - vždy čte z registry
-- **Export je povinný** pro migraci změn
-- **Zero overhead** v produkci
-- **Žádné extra Binance calls** - jen čtení lokálních souborů
+**Důležité:**
+- Pro vývoj **VŽDY** používej `./dev.sh start`
+- Pro produkci **VŽDY** používej `pm2 start ecosystem.short.config.cjs`
+- **NIKDY** nemixtuj oba přístupy současně (lock system to zabrání)
 
 ---
 
-**Autor**: Automated deploy prep  
-**Commit**: 8d13982  
-**Datum**: 2025-09-29  
-**Produkce ready**: ✅ ANO
+## 🔐 Production Best Practices
+
+### ✅ DO:
+- Vždy používej PM2 pro produkci
+- Kontroluj locks před každým restartem
+- Monitoruj logy prvních 5 minut po deployu
+- Backupuj před každým pullnutím změn
+- Používej graceful restart (`pm2 restart`)
+
+### ❌ DON'T:
+- Nespouštěj dev.sh na produkci (kromě emergency debug)
+- Nekombinuj PM2 + dev.sh současně
+- Neignoruj lock konflikty
+- Nepoužívej `pm2 delete` bez důvodu (zabíjí metriky)
+- Nezapomeň na `pm2 save` po změnách
+
+---
+
+## 📚 Související dokumentace
+
+- [docs/PROCESS_LOCK_SYSTEM.md](docs/PROCESS_LOCK_SYSTEM.md) - Detaily lock systému
+- [docs/ops/PRODUCTION.md](docs/ops/PRODUCTION.md) - Production operations
+- [TEMPORAL_ISOLATION.md](TEMPORAL_ISOLATION.md) - Temporal cluster izolace
+- [README.md](README.md) - Quick start guide
+
+---
+
+**Poslední update:** Říjen 2025  
+**Status:** ✅ Production ready s PM2 + Process Lock systémem

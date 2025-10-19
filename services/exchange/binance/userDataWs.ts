@@ -17,6 +17,12 @@ const openOrdersById: Map<number, any> = new Map()
 let hadAccountUpdate = false
 let hadOrderUpdate = false
 
+// Helper function to identify AI-updated orders (for UI highlighting)
+export function isAIOrder(clientOrderId: string | null | undefined): boolean {
+  const cid = String(clientOrderId || '')
+  return cid.includes('_ai_sl_') || cid.includes('_ai_tp_')
+}
+
 export function startBinanceUserDataWs(opts: StartOpts): void {
   const apiKey = opts.apiKey || process.env.BINANCE_API_KEY || ''
   if (!apiKey || apiKey.includes('mock')) return // no real keys, skip
@@ -229,6 +235,18 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
           opts.audit({ type: 'cancel', symbol, orderId, side, otype, source: 'binance_ws', reason: status.toLowerCase(), payload: o })
         } else if (status === 'FILLED' || status === 'TRADE') {
           opts.audit({ type: 'filled', symbol, orderId, side, otype, source: 'binance_ws', reason: null, payload: o })
+          
+          // Capture entry health snapshot when entry order fills
+          const isEntryOrder = side === 'SELL' && !Boolean(o?.R ?? o?.reduceOnly ?? false)
+          if (isEntryOrder) {
+            try {
+              import('../../health-monitor/entry_snapshot').then(({ captureEntrySnapshot }) => {
+                captureEntrySnapshot(symbol, 'SHORT').catch(err => 
+                  console.error('[ENTRY_SNAPSHOT_ERR]', err)
+                )
+              }).catch(() => {})
+            } catch {}
+          }
         }
       }
     } catch {}
@@ -262,6 +280,13 @@ export function startBinanceUserDataWs(opts: StartOpts): void {
       setTimeout(() => {
         rehydratePositionsOnce().catch(()=>{})
         rehydrateOpenOrdersOnce().catch(()=>{})
+        
+        // Health monitor sync po rehydraci
+        import('../../services/health-monitor/worker').then(({ syncWithOpenPositions }) => {
+          syncWithOpenPositions('rehydrate').catch(err => 
+            console.error('[HEALTH_SYNC_REHYDRATE_ERR]', err)
+          )
+        }).catch(()=>{})
       }, 100)
     })
     ws.on('close', (code: any) => { try { console.warn('[USERDATA_WS_CLOSE]', { code }) } catch {}; reconnect() })

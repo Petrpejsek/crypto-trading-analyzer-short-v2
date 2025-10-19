@@ -1,94 +1,80 @@
-import { Agent, setGlobalDispatcher } from 'undici'
+import { Agent, setGlobalDispatcher, request as undiciRequest } from 'undici'
 import fs from 'node:fs'
 import path from 'node:path'
 import dotenv from 'dotenv'
 import { buildMarketRawSnapshot } from './fetcher/binance'
-import assert from 'node:assert'
-import { PROMPTS_SIDE } from '../services/prompts/guard'
-import { loadShortRegistry, verifyShortRegistry } from '../services/prompts/registry'
 import { performance } from 'node:perf_hooks'
 import http from 'node:http'
-// import { decideMarketStrict } from '../services/decider/market_decider_gpt' // REMOVED
-import { ema as emaShared, rsi as rsiShared, atrPctFromBars } from '../services/lib/indicators'
-// import { runFinalPicker as runFinalPickerServer } from '../services/decider/final_picker_gpt' // REMOVED
+import { decideMarketStrict } from '../services/decider/market_decider_gpt'
+import { runFinalPicker as runFinalPickerServer } from '../services/decider/final_picker_gpt'
 import { runHotScreener } from '../services/decider/hot_screener_gpt'
-import { request as undiciRequest } from 'undici'
 import { runEntryStrategy } from '../services/decider/entry_strategy_gpt'
 import { runEntryRisk } from '../services/decider/entry_risk_gpt'
-import { executeHotTradingOrders, type PlaceOrdersRequest, fetchMarkPrice, fetchLastTradePrice, fetchAllOpenOrders, fetchPositions, cancelOrder, getBinanceAPI, getWaitingTpList, cleanupWaitingTpForSymbol, waitingTpProcessPassFromPositions, rehydrateWaitingFromDiskOnce, makeId } from '../services/trading/binance_futures'
+import { executeHotTradingOrders, type PlaceOrdersRequest, fetchMarkPrice, fetchLastTradePrice, fetchAllOpenOrders, fetchPositions, cancelOrder, getBinanceAPI, getWaitingTpList, cleanupWaitingTpForSymbol, waitingTpProcessPassFromPositions, rehydrateWaitingFromDiskOnce } from '../services/trading/binance_futures'
 import { ttlGet, ttlSet, makeKey } from './lib/ttlCache'
 import { preflightCompact } from '../services/decider/market_compact'
 import deciderCfg from '../config/decider.json'
 import tradingCfg from '../config/trading.json'
 import { calculateKlineChangePercent, calculateRegime } from './lib/calculations'
-import { startBinanceUserDataWs, getPositionsInMemory, getOpenOrdersInMemory, isUserDataReady } from '../services/exchange/binance/userDataWs'
-import { initCooldownsFromDisk, isCooldownActive, notePositionClosedFromIncomes, notePositionOpened, getActiveCooldowns, clearCooldown } from '../services/risk/cooldown'
+import { startBinanceUserDataWs, getPositionsInMemory, getOpenOrdersInMemory, isUserDataReady, rehydrateOpenOrdersFromRest, forgetUnknownOrdersUsingRest } from '../services/exchange/binance/userDataWs'
 import { getLimitsSnapshot, setBanUntilMs } from './lib/rateLimits'
-import { startTopUpWatcher, syncWatcherEnabledFromEnv, setWatcherEnabled } from '../services/top-up-watcher/watchdog'
-import { listWatchers, getWatcher, removeWatcher } from '../services/top-up-watcher/registry'
-import { readLatestEvent, readAuditEntries } from '../services/top-up-watcher/events'
-import { scheduleTopUpWatchers } from '../services/top-up-watcher/utils'
-import { processDueTopUpExecutors, enqueueFromWatcher, getTopUpExecutorStatus } from '../services/top-up-executor/trigger'
+import { binanceCache } from './lib/apiCache'
+import { requestCoalescer } from './lib/requestCoalescer'
+import { startHealthMonitorWorker, isHealthMonitorEnabled, syncWithOpenPositions as healthSyncPositions } from '../services/health-monitor/worker'
+import { getLatestHealth } from '../services/health-monitor/store'
+import { getAllWorkerEntries as getHealthWorkerEntries } from '../services/health-monitor/store'
+import { runReactiveEntryDecision } from '../services/reactive-entry/decision'
+import { getHealthStatus } from '../services/reactive-entry/health'
+import { checkRateLimit } from '../services/reactive-entry/rate_limiter'
+import { roundToTick, edgeFromCurrentBps, findNearestResistance, round } from '../services/reactive-entry/utils'
+import { ema, rsi, atrPctFromBars, vwapFromBars } from '../services/lib/indicators'
+import type { ReactiveEntryInput } from '../services/reactive-entry/types'
+import { loadConfig as loadReactiveConfig } from '../services/reactive-entry/config'
+import { acquireLock } from './lib/processLock'
+import { initCooldownsFromDisk, isCooldownActive, notePositionClosedFromIncomes, notePositionOpened, getActiveCooldowns, clearCooldown } from '../services/risk/cooldown'
+ 
 
 // Load env from .env.local and .env even in production
 try {
   const tryLoad = (p: string) => { if (fs.existsSync(p)) dotenv.config({ path: p }) }
   tryLoad(path.resolve(process.cwd(), '.env.local'))
   tryLoad(path.resolve(process.cwd(), '.env'))
+  // Explicit SHORT v2 env files (development/production)
+  const shortEnv = process.env.NODE_ENV === 'production'
+    ? '.env.production.short.v2'
+    : '.env.development.short.v2'
+  tryLoad(path.resolve(process.cwd(), shortEnv))
 } catch {}
 
-// Boot banner: PROMPTS side and verification
-try {
-  const { items, version, snapshot } = loadShortRegistry()
-  const v = verifyShortRegistry(items)
-  const ok = v.ok
-  console.error(`PROMPTS_SIDE=${PROMPTS_SIDE} (N=${items.length}, snapshot=${snapshot || 'NA'}, verified=${ok ? 'OK' : 'FAIL'})`)
-  try { console.error(`TRADE_SIDE=${String(process.env.TRADE_SIDE || '').toUpperCase()}`) } catch {}
-  try {
-    for (const it of items) {
-      console.info('[PROMPT]', { name: it.name, version: it.version, checksum: it.checksum_sha256.slice(0, 16) })
-    }
-  } catch {}
-  if (!ok) {
-    console.error('[PROMPTS_REGISTRY_MISMATCH]', v.invalid.slice(0, 5))
-  }
-} catch (e) {
-  console.error('PROMPTS registry load/verify failed', e)
+// ========================================
+// CRITICAL: STRICT BAN on port 7800 (LONG instance)
+// ========================================
+const TEMPORAL_ADDRESS = process.env.TEMPORAL_ADDRESS || ''
+if (TEMPORAL_ADDRESS.includes(':7800')) {
+  console.error('')
+  console.error('🚨🚨🚨 FATAL ERROR 🚨🚨🚨')
+  console.error('')
+  console.error('❌ PORT 7800 IS STRICTLY FORBIDDEN!')
+  console.error('   Port 7800 is reserved for LONG trading instance')
+  console.error('   This is SHORT instance - MUST use port 7500')
+  console.error('')
+  console.error(`   Current: TEMPORAL_ADDRESS=${TEMPORAL_ADDRESS}`)
+  console.error('   Required: TEMPORAL_ADDRESS=127.0.0.1:7500')
+  console.error('')
+  console.error('🚨 Fix .env.local and restart!')
+  console.error('')
   process.exit(1)
 }
 
-// Ensure Strategy Updater loop aligns with toggle
-async function ensureStrategyUpdaterLoop(enabled: boolean): Promise<{ started?: boolean; terminated?: boolean; id?: string }> {
-  try {
-    const address = process.env.TEMPORAL_ADDRESS
-    const taskQueue = process.env.TASK_QUEUE
-    if (!address || !taskQueue) return {}
-    const { Connection, Client } = await import('@temporalio/client')
-    const connection = await Connection.connect({ address })
-    const client = new Client({ connection })
-    const wfId = 'strategy-updater-loop'
-    if (enabled) {
-      try {
-        await client.workflow.start('StrategyUpdaterWorkflow', {
-          taskQueue,
-          workflowId: wfId,
-          args: [{ runOnce: false }],
-          workflowIdReusePolicy: 'WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE'
-        })
-        return { started: true, id: wfId }
-      } catch {
-        return { started: false, id: wfId }
-      }
-    } else {
-      try { const h = client.workflow.getHandle(wfId); await h.terminate('disabled'); return { terminated: true, id: wfId } } catch { return { terminated: false, id: wfId } }
-    }
-  } catch { return {} }
+// ========================================
+// PROCESS LOCK: Prevent duplicate instances
+// ========================================
+try {
+  acquireLock('backend')
+} catch (e: any) {
+  console.error('[FATAL]', e?.message || e)
+  process.exit(1)
 }
-
-// Autostart loop on boot when enabled
-try { if (process.env.STRATEGY_UPDATER_ENABLED === '1' || String(process.env.STRATEGY_UPDATER_ENABLED).toLowerCase() === 'true') setTimeout(()=>{ ensureStrategyUpdaterLoop(true).catch(()=>{}) }, 0) } catch {}
-
-// Temporal env se načítá primárně z .env.local; fallback není žádoucí
 
 setGlobalDispatcher(new Agent({ keepAliveTimeout: 60_000, keepAliveMaxTimeout: 60_000, pipelining: 10 }))
 
@@ -100,26 +86,48 @@ try {
   }
 } catch {}
 
-const PORT = process.env.PORT ? Number(process.env.PORT) : 8888
-// Fail-fast side/port policy: SHORT must use 8888 in dev, 3081 in production
+// Global log prefix wrapper to distinguish SHORT instances in logs
 try {
-  const side = String(process.env.TRADE_SIDE || '').toUpperCase()
-  const nodeEnv = String(process.env.NODE_ENV || '')
-  assert(side === 'SHORT', 'TRADE_SIDE must be SHORT for this instance')
-  const isProd = nodeEnv === 'production'
-  if (isProd && PORT !== 3081) {
-    throw new Error(`Invalid PORT for SHORT in production: ${PORT} (expected 3081)`) 
+  const SIDE = (process.env.TRADE_SIDE || 'SHORT').toUpperCase()
+  const NAME = process.env.PM2_NAME || 'trader-short-v2'
+  const ENV = process.env.NODE_ENV || 'development'
+  const P = process.env.PORT || '8789'
+  const prefix = `[${SIDE}] [${NAME}] [PORT:${P}] [NODE_ENV:${ENV}]`
+  const wrap = <T extends (...args: any[]) => any>(fn: T): T => ((...args: any[]) => fn(prefix, ...args)) as T
+  console.log = wrap(console.log)
+  console.info = wrap(console.info)
+  console.warn = wrap(console.warn)
+  console.error = wrap(console.error)
+} catch {}
+
+// Enforce explicit SHORT environment marker in this clone
+try {
+  const TRADE_SIDE = String(process.env.TRADE_SIDE || '')
+  if (TRADE_SIDE !== 'SHORT') {
+    // eslint-disable-next-line no-console
+    console.error('[CONFIG_WARNING] Expected TRADE_SIDE=SHORT for short-v2 environment')
   }
-} catch (e) {
-  console.error('[CONFIG_GUARD_FAIL]', (e as any)?.message || e)
-  process.exit(1)
-}
+  if (process.env.PM2_NAME) {
+    // eslint-disable-next-line no-console
+    console.error('[PM2_NAME]', process.env.PM2_NAME)
+  }
+} catch {}
+
+const PORT = process.env.PORT ? Number(process.env.PORT) : 8789
 // WS market collector disabled – REST-only mode for klines
+
+// Helper: Parse JSON body from HTTP request
+async function parseJsonBody(req: http.IncomingMessage): Promise<any> {
+  const chunks: Buffer[] = []
+  for await (const ch of req) chunks.push(ch as Buffer)
+  const bodyStr = Buffer.concat(chunks).toString('utf8')
+  return bodyStr ? JSON.parse(bodyStr) : null
+}
 
 // Ephemeral in-memory store of last place_orders request/response for diagnostics
 let __lastPlaceOrders: { request: any; result: any } | null = null
-// In-memory hints per symbol: last requested amount/leverage/sl/tp (survives across UI polls)
-const __lastPlannedBySymbol: Record<string, { amount?: number | null; leverage?: number | null; sl?: number | null; tp?: number | null; ts: string }> = {}
+// In-memory hints per symbol: last requested amount/leverage (survives across UI polls)
+const __lastPlannedBySymbol: Record<string, { amount?: number | null; leverage?: number | null; ts: string }> = {}
 const __lastEntryBySymbol: Record<string, { input: any; output: any }> = {}
 // Simple batch mutex to ensure /api/place_orders do not overlap
 let __batchBusy: boolean = false
@@ -173,10 +181,6 @@ function pushAudit(evt: AuditEvent): void {
 }
 let __sweeperRunning = false
 let __sweeperTimer: NodeJS.Timeout | null = null
-// Strict threshold: cancel entry orders when their target deviates from mark by ≥ this percent
-const ENTRY_DELTA_CANCEL_PCT = 7
-// Grace window for cancelling orphan SL orders (no position, no entry)
-const ORPHAN_SL_GRACE_MS = Number((process as any)?.env?.ORPHAN_SL_GRACE_MS ?? 5000)
 // Global backoff when Binance returns -1003 (temporary ban)
 let __binanceBackoffUntilMs: number = 0
 
@@ -193,23 +197,17 @@ function hasRealBinanceKeysGlobal(): boolean {
 async function sweepStaleOrdersOnce(): Promise<number> {
   if (__sweeperRunning) return
   if (!hasRealBinanceKeysGlobal()) return
+  if (!Number.isFinite(__pendingCancelAgeMin) || __pendingCancelAgeMin <= 0) return
   // During Binance backoff window, do not hit REST at all
   if (Number(__binanceBackoffUntilMs) > Date.now()) return
   __sweeperRunning = true
   try {
     const now = Date.now()
-    const ageEnabled = Number.isFinite(__pendingCancelAgeMin) && __pendingCancelAgeMin > 0
-    const ageMs = ageEnabled ? (__pendingCancelAgeMin * 60 * 1000) : 0
+    const ageMs = __pendingCancelAgeMin * 60 * 1000
     const raw = await fetchAllOpenOrders()
     // Positions snapshot pro bezpečnou detekci osiřelých exitů
     let positionsForSweep: any[] = []
-    try { 
-      positionsForSweep = await fetchPositions() 
-    } catch {
-      // Skip sweeper during rate limits - don't use fallbacks
-      console.info('[SWEEPER_SKIP_RATE_LIMIT]')
-      return
-    }
+    try { positionsForSweep = await fetchPositions() } catch {}
     const posSizeBySym = new Map<string, number>()
     try {
       for (const p of (Array.isArray(positionsForSweep) ? positionsForSweep : [])) {
@@ -223,7 +221,53 @@ async function sweepStaleOrdersOnce(): Promise<number> {
         }
       }
     } catch {}
-    // Strict: mazat pouze ENTRY BUY (LIMIT/STOP/STOP_MARKET) bez reduceOnly/closePosition; nikdy ne EXITy (SL/TP)
+    // Strict: mazat pouze ENTRY BUY LIMIT bez reduceOnly/closePosition; nikdy ne EXITy (STOP/TP)
+    // Age-based entry cancellation
+    const entryCandidates = (Array.isArray(raw) ? raw : [])
+      .filter((o: any) => {
+        try {
+          const side = String(o?.side || '').toUpperCase()
+          const type = String(o?.type || '').toUpperCase()
+          const reduceOnly = Boolean(o?.reduceOnly)
+          const closePosition = Boolean(o?.closePosition)
+          return side === 'SELL' && type === 'LIMIT' && !reduceOnly && !closePosition
+        } catch { return false }
+      })
+      .map((o: any) => ({
+        symbol: String(o?.symbol || ''),
+        orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0,
+        createdAtMs: (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? t : null })()
+      }))
+      .filter(o => o.symbol && o.orderId && Number.isFinite(o.createdAtMs as any))
+      .filter(o => (now - (o.createdAtMs as number)) > ageMs)
+
+    // Delta-based entry cancellation: Δ% ≥ 7% (price moved too far from entry)
+    let markBySymbol: Record<string, number> = {}
+    try {
+      const markPrices = await Promise.all(
+        Array.from(new Set((Array.isArray(raw) ? raw : []).map((o: any) => String(o?.symbol || '')).filter(Boolean)))
+          .map(async (sym: string) => {
+            try {
+              const mark = await fetchMarkPrice(sym)
+              return { sym, mark: Number(mark) }
+            } catch { return { sym, mark: NaN } }
+          })
+      )
+      for (const { sym, mark } of markPrices) {
+        if (Number.isFinite(mark) && mark > 0) markBySymbol[sym] = mark
+      }
+    } catch {}
+
+    const ENTRY_DELTA_CANCEL_PCT = await (async () => {
+      try {
+        const cfg = JSON.parse(await fs.promises.readFile(
+          path.join(process.cwd(), 'config/trading.json'), 'utf8'
+        ))
+        return Number(cfg.ENTRY_DELTA_CANCEL_PCT) || 3.5
+      } catch { 
+        return 3.5 
+      }
+    })()
     const entryOrders = (Array.isArray(raw) ? raw : [])
       .filter((o: any) => {
         try {
@@ -231,91 +275,35 @@ async function sweepStaleOrdersOnce(): Promise<number> {
           const type = String(o?.type || '').toUpperCase()
           const reduceOnly = Boolean(o?.reduceOnly)
           const closePosition = Boolean(o?.closePosition)
-          const isEntryType = (type === 'LIMIT' || type === 'STOP' || type === 'STOP_MARKET')
-          return side === 'BUY' && isEntryType && !reduceOnly && !closePosition
+          return side === 'SELL' && type === 'LIMIT' && !reduceOnly && !closePosition
         } catch { return false }
       })
-    const entryCandidates = entryOrders
-      .map((o: any) => ({
-        symbol: String(o?.symbol || ''),
-        orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0,
-        createdAtMs: (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? t : null })()
-      }))
-      .filter(o => o.symbol && o.orderId && Number.isFinite(o.createdAtMs as any))
-      .filter(o => (ageEnabled) && (now - (o.createdAtMs as number)) > ageMs)
 
-    // Δ% based cleanup: if entry target deviates from current mark by ≥ ENTRY_DELTA_CANCEL_PCT
-    // Compute mark per symbol once
-    const uniqueEntrySymbols = Array.from(new Set(entryOrders.map((o: any) => String(o?.symbol || '')).filter(Boolean)))
-    const markBySymbol: Record<string, number> = {}
-    try {
-      const chunkSize = 6
-      for (let i = 0; i < uniqueEntrySymbols.length; i += chunkSize) {
-        const chunk = uniqueEntrySymbols.slice(i, i + chunkSize)
-        const res = await Promise.allSettled(chunk.map(sym => fetchMarkPrice(sym)))
-        res.forEach((r, idx) => {
-          const sym = chunk[idx]
-          if (r.status === 'fulfilled') {
-            const v = Number(r.value)
-            if (Number.isFinite(v) && v > 0) markBySymbol[sym] = v
-          }
-        })
-      }
-    } catch {}
-
-    const entryDeltaCandidates = (Array.isArray(entryOrders) ? entryOrders : [])
+    const entryDeltaCandidates = entryOrders
       .map((o: any) => {
         try {
           const sym = String(o?.symbol || '')
-          const type = String(o?.type || '').toUpperCase()
           const price = Number(o?.price)
-          const stopPrice = Number((o as any)?.stopPrice)
-          const tgt = type === 'LIMIT' ? price : (type === 'STOP' || type === 'STOP_MARKET' || type === 'STOP_LIMIT' ? stopPrice : NaN)
           const mark = Number(markBySymbol[sym])
-          const pct = (Number.isFinite(tgt) && tgt > 0 && Number.isFinite(mark) && mark > 0)
-            ? Math.abs((tgt - mark) / mark) * 100
+          const pct = (Number.isFinite(price) && price > 0 && Number.isFinite(mark) && mark > 0)
+            ? Math.abs((price - mark) / mark) * 100
             : null
-          return { symbol: sym, orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0, deltaPct: pct }
-        } catch { return { symbol: '', orderId: 0, deltaPct: null as any } }
+          return { symbol: sym, orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0, deltaPct: pct, price, mark }
+        } catch { return { symbol: '', orderId: 0, deltaPct: null as any, price: 0, mark: 0 } }
       })
       .filter(o => o.symbol && o.orderId)
       .filter(o => Number.isFinite(o.deltaPct as any) && (o.deltaPct as number) >= ENTRY_DELTA_CANCEL_PCT)
 
-    // Age-based cancellation for ALL orders except: exits (SL/TP) for symbols with an open position
-    const ageAllCandidates = (Array.isArray(raw) ? raw : [])
-      .map((o: any) => {
-        try {
-          const sym = String(o?.symbol || '')
-          const orderId = Number(o?.orderId ?? o?.orderID ?? 0) || 0
-          const createdAtMs = (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? t : null })()
-          const side = String(o?.side || '').toUpperCase()
-          const type = String(o?.type || '').toUpperCase()
-          const reduceOnly = Boolean(o?.reduceOnly)
-          const closePosition = Boolean(o?.closePosition)
-          const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-          const hasPos = Number(posSizeBySym.get(sym) || 0) > 0
-          const isStopOrTp = type.includes('STOP') || type.includes('TAKE_PROFIT')
-          const isInternalExit = cid ? (/^x_tp_|^x_sl_/.test(cid)) : false
-          const isExitForPosition = hasPos && isStopOrTp && (reduceOnly || closePosition || isInternalExit)
-          return { sym, orderId, createdAtMs, isExitForPosition }
-        } catch { return { sym: '', orderId: 0, createdAtMs: null as any, isExitForPosition: false } }
-      })
-      .filter(o => o.sym && o.orderId && Number.isFinite(o.createdAtMs as any))
-      .filter(o => ageEnabled && (now - (o.createdAtMs as number)) > ageMs)
-      .filter(o => !o.isExitForPosition)
-      .map(o => ({ symbol: o.sym, orderId: o.orderId }))
+    // Combine age-based and delta-based candidates for cancellation
+    const allEntryCandidates = [...entryCandidates, ...entryDeltaCandidates]
+    const uniqueEntryCandidates = Array.from(new Map(allEntryCandidates.map(c => [c.orderId, c])).values())
 
     // KRITICKÁ OPRAVA: SL ordery NIKDY nesmí být rušeny automaticky!
     // Pouze TP ordery mohou být rušeny jako "orphan exits" 
     const entrySymbols = new Set<string>((Array.isArray(raw) ? raw : [])
       .filter((o: any) => {
         try {
-          const side = String(o?.side||'').toUpperCase()
-          const type = String(o?.type||'').toUpperCase()
-          const reduceOnly = Boolean(o?.reduceOnly)
-          const closePosition = Boolean(o?.closePosition)
-          const isEntryType = (type === 'LIMIT' || type === 'STOP' || type === 'STOP_MARKET')
-          return side === 'BUY' && isEntryType && !(reduceOnly||closePosition)
+          return String(o?.side||'').toUpperCase()==='SELL' && String(o?.type||'').toUpperCase()==='LIMIT' && !(o?.reduceOnly||o?.closePosition)
         } catch { return false }
       })
       .map((o: any) => String(o?.symbol || '')).filter(Boolean))
@@ -336,26 +324,20 @@ async function sweepStaleOrdersOnce(): Promise<number> {
           const isInternalSl = clientId ? /^x_sl_/.test(clientId) : false
           const hasPos = (Number(posSizeBySym.get(sym)||0) > 0)
           const noEntryOpen = !entrySymbols.has(sym)
-
-          // If we have a position, never cancel exits (SL/TP)
-          if (hasPos && (isExitType || isInternalTp || isInternalSl)) {
-            try { console.warn('[SWEEPER_POSITION_PROTECTION]', { symbol: sym, orderId: o?.orderId, type, reason: 'position_exists_never_cancel_exits' }) } catch {}
+          
+          // KRITICKÁ OCHRANA: Pokud máme pozici, NIKDY neruš SL ani TP!
+          if (hasPos && (isExitType || isInternalTp)) {
+            console.warn('[SWEEPER_POSITION_PROTECTION]', { symbol: sym, orderId: o?.orderId, type, reason: 'position_exists_never_cancel_exits' })
             return false
           }
-
-          // If there is no position and no entry, we can cancel:
+          
+          // Pokud není pozice a není otevřen ENTRY, lze bezpečně mazat:
           if (!hasPos && noEntryOpen) {
-            // A) Internal TP (x_tp_*) – always safe
+            // A) Interní TP/SL (x_tp_* / x_sl_*) – i bez reduceOnly/closePosition
             if (isTpType && isInternalTp) return true
-            // B) TP with exit flags
-            if (isTpType && (reduceOnly || closePosition)) return true
-            // C) SL with exit flags or internal id; BUY i SELL (SHORT má BUY SL). Jen po grace window.
-            if (isSlType && (reduceOnly || closePosition || isInternalSl)) {
-              const created = Number((o as any)?.time)
-              const ageOk = Number.isFinite(created) ? ((now - created) > ORPHAN_SL_GRACE_MS) : true
-              return ageOk
-            }
-            return false
+            if (isSlType && isInternalSl) return true
+            // B) Původní pravidlo pro orphan exity se "stop" nebo "take_profit" s exit flagy
+            return side==='SELL' && isExitType && (reduceOnly || closePosition)
           }
           return false
         } catch { return false }
@@ -366,53 +348,149 @@ async function sweepStaleOrdersOnce(): Promise<number> {
         createdAtMs: (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? t : null })()
       }))
       .filter(o => o.symbol && o.orderId && Number.isFinite(o.createdAtMs as any))
-      .filter(o => (ageEnabled) && (now - (o.createdAtMs as number)) > ageMs)
+      .filter(o => (now - (o.createdAtMs as number)) > ageMs)
 
-    // If SL is globally disabled, cancel ALL STOP orders (both with/without position)
-    const slDisableCandidates: Array<{ symbol: string; orderId: number }> = (() => {
-      try {
-        if (!((tradingCfg as any)?.DISABLE_SL === true)) return []
-        return (Array.isArray(raw) ? raw : [])
-          .filter((o: any) => {
-            try {
-              const t = String(o?.type || '').toUpperCase()
-              return t.includes('STOP') && !t.includes('TAKE_PROFIT')
-            } catch { return false }
-          })
-          .map((o: any) => ({ symbol: String(o?.symbol || ''), orderId: Number(o?.orderId ?? o?.orderID ?? 0) || 0 }))
-          .filter(c => c.symbol && c.orderId)
-      } catch { return [] }
-    })()
-
-    // Combine age-based ALL-orders, delta-based entries, orphan exits and global SL disable list. Deduplicate by orderId.
-    const combined: Array<{ symbol: string; orderId: number; reason?: string }> = []
-    const seen = new Set<number>()
-    for (const c of ageAllCandidates) { if (!seen.has(c.orderId)) { combined.push({ symbol: c.symbol, orderId: c.orderId, reason: 'age_based' }); seen.add(c.orderId) } }
-    for (const c of entryCandidates) { if (!seen.has(c.orderId)) { combined.push({ symbol: c.symbol, orderId: c.orderId, reason: 'stale_entry' }); seen.add(c.orderId) } }
-    for (const c of entryDeltaCandidates) { if (!seen.has(c.orderId)) { combined.push({ symbol: c.symbol, orderId: c.orderId, reason: 'delta_ge_7pct' }); seen.add(c.orderId) } }
-    for (const c of orphanExitCandidates) { if (!seen.has(c.orderId)) { combined.push({ symbol: c.symbol, orderId: c.orderId, reason: 'orphan_exit_cleanup' }); seen.add(c.orderId) } }
-    for (const c of slDisableCandidates) { if (!seen.has(c.orderId)) { combined.push({ symbol: c.symbol, orderId: c.orderId, reason: 'disable_sl_global' }); seen.add(c.orderId) } }
-
-    if (combined.length === 0) return 0
+    if (uniqueEntryCandidates.length === 0 && orphanExitCandidates.length === 0) return 0
 
     let cancelled = 0
     const maxParallel = 4
-    for (let i = 0; i < combined.length; i += maxParallel) {
-      const batch = combined.slice(i, i + maxParallel)
-      const res = await Promise.allSettled(batch.map(async (c) => {
+    const all = uniqueEntryCandidates.concat(orphanExitCandidates)
+    
+    // Trackuj úspěšně smazané entry ordery pro cleanup SL/TP
+    const cancelledEntriesBySymbol = new Map<string, number>()
+    
+    for (let i = 0; i < all.length; i += maxParallel) {
+      const batch = all.slice(i, i + maxParallel)
+      const res = await Promise.allSettled(batch.map(async (c: any) => {
+        const reason = (c.deltaPct !== undefined && Number.isFinite(c.deltaPct)) 
+          ? `delta_${c.deltaPct.toFixed(2)}%_exceeds_7%`
+          : 'stale_auto_cancel'
+        
+        if (c.deltaPct !== undefined) {
+          console.info('[SWEEPER_DELTA_CANCEL]', { 
+            symbol: c.symbol, 
+            orderId: c.orderId, 
+            deltaPct: c.deltaPct.toFixed(2), 
+            price: c.price, 
+            mark: c.mark 
+          })
+        }
+        
         const r = await cancelOrder(c.symbol, c.orderId)
-        pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'sweeper', symbol: c.symbol, orderId: c.orderId, reason: c.reason || 'stale_auto_cancel' })
-        return r
+        pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'sweeper', symbol: c.symbol, orderId: c.orderId, reason })
+        return { success: true, symbol: c.symbol }
       }))
-      for (const r of res) {
-        if (r.status === 'fulfilled') cancelled++
+      for (let j = 0; j < res.length; j++) {
+        if (res[j].status === 'fulfilled') {
+          cancelled++
+          // Trackuj pouze entry ordery (ne orphan exits)
+          const batchIndex = i + j
+          if (batchIndex < uniqueEntryCandidates.length) {
+            const symbol = batch[j].symbol
+            cancelledEntriesBySymbol.set(symbol, (cancelledEntriesBySymbol.get(symbol) || 0) + 1)
+          }
+        }
       }
     }
     if (cancelled > 0) {
       __sweeperDidAutoCancel = true
       try { ttlSet(makeKey('/api/open_orders'), null as any, 1) } catch {}
     }
-    try { console.error('[SWEEPER_PASS]', { age_min: __pendingCancelAgeMin, threshold_delta_pct: ENTRY_DELTA_CANCEL_PCT, cancelled, age_all: ageAllCandidates.length, entries_age: entryCandidates.length, entries_delta: entryDeltaCandidates.length, orphan_exits: orphanExitCandidates.length }) } catch {}
+
+    // KRITICKÁ OPRAVA: Po smazání entry orderů okamžitě smazat i přidružené SL/TP ordery
+    // (pokud není pozice) - nemůžeme čekat na age-based orphan cleanup
+    let cleanupCancelled = 0
+    try {
+      // Shromáždi symboly, kde byly smazány entry ordery
+      const entryCancelledSymbols = Array.from(cancelledEntriesBySymbol.keys())
+
+      if (entryCancelledSymbols.length > 0) {
+        console.info('[SWEEPER_CLEANUP_SL_START]', { 
+          symbols: entryCancelledSymbols 
+        })
+
+        // Pro každý symbol zkontroluj pozici a smaž SL/TP pokud není pozice
+        for (const symbol of entryCancelledSymbols) {
+          try {
+            const hasPosition = Number(posSizeBySym.get(symbol) || 0) > 0
+            
+            if (hasPosition) {
+              console.warn('[SWEEPER_CLEANUP_SKIP_HAS_POSITION]', { symbol })
+              continue
+            }
+
+            // Najdi všechny SL/TP ordery pro tento symbol
+            const slTpOrders = (Array.isArray(raw) ? raw : [])
+              .filter((o: any) => {
+                try {
+                  const sym = String(o?.symbol || '')
+                  const type = String(o?.type || '').toUpperCase()
+                  const clientId = String(o?.clientOrderId || '')
+                  const isExitType = type.includes('STOP') || type.includes('TAKE_PROFIT')
+                  const isInternalExit = /^x_(sl_|tp_)/.test(clientId)
+                  return sym === symbol && (isExitType || isInternalExit)
+                } catch { return false }
+              })
+              .map((o: any) => ({
+                symbol: String(o?.symbol || ''),
+                orderId: Number(o?.orderId || 0),
+                type: String(o?.type || ''),
+                clientOrderId: String(o?.clientOrderId || '')
+              }))
+              .filter(o => o.orderId > 0)
+
+            // Smaž všechny SL/TP ordery pro tento symbol
+            for (const order of slTpOrders) {
+              try {
+                await cancelOrder(order.symbol, order.orderId)
+                pushAudit({ 
+                  ts: new Date().toISOString(), 
+                  type: 'cancel', 
+                  source: 'sweeper_cleanup', 
+                  symbol: order.symbol, 
+                  orderId: order.orderId, 
+                  reason: 'entry_cancelled_cleanup_sl_tp' 
+                })
+                cleanupCancelled++
+                console.info('[SWEEPER_CLEANUP_SL_SUCCESS]', { 
+                  symbol: order.symbol, 
+                  orderId: order.orderId,
+                  type: order.type 
+                })
+              } catch (cleanupErr: any) {
+                console.error('[SWEEPER_CLEANUP_SL_ERROR]', {
+                  symbol: order.symbol,
+                  orderId: order.orderId,
+                  error: cleanupErr?.message || cleanupErr
+                })
+              }
+            }
+
+            // Vyčisti waiting TP registry
+            try { cleanupWaitingTpForSymbol(symbol) } catch {}
+
+          } catch (symErr: any) {
+            console.error('[SWEEPER_CLEANUP_SYMBOL_ERROR]', {
+              symbol,
+              error: symErr?.message || symErr
+            })
+          }
+        }
+      }
+    } catch (cleanupErr: any) {
+      console.error('[SWEEPER_CLEANUP_ERROR]', {
+        error: cleanupErr?.message || cleanupErr
+      })
+    }
+
+    try { console.error('[SWEEPER_PASS]', { 
+      age_min: __pendingCancelAgeMin, 
+      cancelled, 
+      cleanup_sl_tp: cleanupCancelled,
+      entries_age: entryCandidates.length, 
+      entries_delta: entryDeltaCandidates.length,
+      orphan_exits: orphanExitCandidates.length 
+    }) } catch {}
     return cancelled
   } catch (e) {
     try { console.error('[SWEEPER_ERROR]', (e as any)?.message || e) } catch {}
@@ -430,116 +508,36 @@ function startOrderSweeper(): void {
 
 // KRITICKÁ OCHRANA: Continuous SL monitoring
 let __slMonitorTimer: NodeJS.Timeout | null = null
-// ANTI-DUPLICATE: Track pending emergency SL operations per symbol
-const __pendingEmergencySL = new Set<string>()
 async function slProtectionMonitor(): Promise<void> {
   try {
-    // Skip emergency SL if globally blocked
-    if (((tradingCfg as any)?.BLOCK_EMERGENCY_SL === true)) {
-      console.info('[SL_MONITOR_SKIP_EMERGENCY_BLOCKED]')
-      return
-    }
     if (!hasRealBinanceKeysGlobal()) return
     console.info('[SL_MONITOR_PASS]')
     
-    let positions: any[] = []
-    let orders: any[] = []
-    try {
-      [positions, orders] = await Promise.all([fetchPositions(), fetchAllOpenOrders()])
-    } catch (e) {
-      console.error('[SL_MONITOR_API_ERR]', (e as any)?.message)
-      // Skip SL monitor during rate limits - don't use fallbacks
-      console.info('[SL_MONITOR_SKIP_RATE_LIMIT]')
-      return
-    }
+    const [positions, orders] = await Promise.all([fetchPositions(), fetchAllOpenOrders()])
     const posList = Array.isArray(positions) ? positions : []
     const ordersList = Array.isArray(orders) ? orders : []
-    const api = getBinanceAPI() as any
-    // Detect account mode once per pass
-    let isHedgeMode = false
-    try { isHedgeMode = Boolean(await api.getHedgeMode()) } catch {}
-    const workingType = String((tradingCfg as any)?.EXIT_WORKING_TYPE || 'MARK_PRICE') as 'MARK_PRICE' | 'CONTRACT_PRICE'
-    const emergencyPct = ((): number => {
-      const v = Number((process as any)?.env?.EMERGENCY_SL_PCT)
-      if (Number.isFinite(v) && v > 0 && v < 0.5) return v
-      return 0.05
-    })()
-    const quantize = (value: number, step: number): number => {
-      const s = String(step)
-      const idx = s.indexOf('.')
-      const decimals = idx >= 0 ? (s.length - idx - 1) : 0
-      const factor = Math.pow(10, decimals)
-      return Math.round(value * factor) / factor
-    }
     
     for (const pos of posList) {
       try {
         const symbol = String(pos?.symbol || '')
-        const amtRaw = Number((pos as any)?.positionAmt ?? (pos as any)?.size ?? 0)
-        const size = Math.abs(amtRaw)
+        const size = Math.abs(Number(pos?.positionAmt || 0))
         if (!symbol || size === 0) continue
-        const exitSide = amtRaw > 0 ? 'SELL' : 'BUY'
         
         const slOrders = ordersList.filter(o => 
           String(o?.symbol) === symbol && 
-          String(o?.side || '').toUpperCase() === exitSide && 
-          String(o?.type || '').toUpperCase().includes('STOP')
+          String(o?.side) === 'SELL' && 
+          String(o?.type).includes('STOP')
         )
         
         if (slOrders.length === 0) {
-          if (((tradingCfg as any)?.DISABLE_SL === true)) {
-            // SL disabled globally – do not create emergency SL
-            continue
-          }
-          
-          // ANTI-DUPLICATE: Skip if emergency SL already pending for this symbol
-          if (__pendingEmergencySL.has(symbol)) {
-            console.info('[SKIP_DUPLICATE_EMERGENCY_SL]', { symbol })
-            continue
-          }
-          
           console.error('[CRITICAL_NO_SL_FOR_POSITION]', { 
             symbol, 
             positionSize: size, 
             entryPrice: pos?.entryPrice,
             unrealizedPnl: pos?.unRealizedProfit 
           })
-          // Emergency SL: create STOP_MARKET immediately based on entry price +/- emergencyPct
-          __pendingEmergencySL.add(symbol)
-          try {
-            const entryPriceNum = Number((pos as any)?.entryPrice)
-            if (!Number.isFinite(entryPriceNum) || entryPriceNum <= 0) { throw new Error('bad_entry_price') }
-            let emergencyPx = amtRaw > 0
-              ? entryPriceNum * (1 - emergencyPct) // LONG: SL below entry
-              : entryPriceNum * (1 + emergencyPct) // SHORT: SL above entry
-            // Quantize to tick size
-            try {
-              const info = await api.getSymbolInfo(symbol)
-              const pf = (info?.filters || []).find((f: any) => f?.filterType === 'PRICE_FILTER')
-              const tickSize = pf ? Number(pf.tickSize) : null
-              if (Number.isFinite(tickSize as any) && (tickSize as number) > 0) {
-                emergencyPx = quantize(emergencyPx, tickSize as number)
-              }
-            } catch {}
-            const base: any = {
-              symbol,
-              side: exitSide,
-              type: 'STOP_MARKET',
-              stopPrice: String(emergencyPx),
-              closePosition: true,
-              workingType,
-              newClientOrderId: makeId('x_sl_em'),
-              newOrderRespType: 'RESULT'
-            }
-            if (isHedgeMode) base.positionSide = amtRaw > 0 ? 'LONG' : 'SHORT'
-            const r = await api.placeOrder(base)
-            try { console.warn('[EMERGENCY_SL_CREATED]', { symbol, orderId: r?.orderId ?? null, stopPrice: emergencyPx, side: exitSide }) } catch {}
-          } catch (emErr: any) {
-            try { console.error('[EMERGENCY_SL_FAILED]', { symbol, error: emErr?.message || emErr }) } catch {}
-          } finally {
-            // ANTI-DUPLICATE: Remove from pending set regardless of success/failure
-            __pendingEmergencySL.delete(symbol)
-          }
+          // TODO: Auto-create emergency SL based on position entry price - 5%
+          // Pro NMR: pokud entry ~19, emergency SL na 18.05 (5% ztráta)
         }
       } catch (e: any) {
         console.error('[SL_MONITOR_ERR]', { symbol: pos?.symbol, error: e?.message })
@@ -552,14 +550,7 @@ async function slProtectionMonitor(): Promise<void> {
 
 function startSlProtectionMonitor(): void {
   if (__slMonitorTimer) return
-  // If emergency SL is blocked, do not start the SL monitor at all
-  try {
-    if (((tradingCfg as any)?.BLOCK_EMERGENCY_SL === true)) {
-      console.warn('[SL_MONITOR_EMERGENCY_BLOCKED_GLOBAL]')
-      return
-    }
-  } catch {}
-  __slMonitorTimer = setInterval(() => { slProtectionMonitor().catch(()=>{}) }, 60_000) // every 60s (reduced from 30s to prevent race conditions)
+  __slMonitorTimer = setInterval(() => { slProtectionMonitor().catch(()=>{}) }, 30_000) // every 30s
 }
 
 // BACKGROUND AUTOPILOT - běží identicky jako UI pipeline podle posledních UI kritérií
@@ -608,158 +599,13 @@ function loadBackgroundCriteria(): void {
     }
   } catch {}
 }
+
 async function backgroundTradingCycle(): Promise<void> {
   try {
     if (!hasRealBinanceKeysGlobal()) return
     const criteria = __lastSnapshotCriteria
     if (!criteria) {
       console.info('[BACKGROUND_PIPELINE_SKIP]', { reason: 'no_criteria' })
-      return
-    }
-
-    // Emergency: create TP MARKET immediately for a symbol (closePosition)
-    if (url.pathname === '/api/exits/tp_market' && req.method === 'POST') {
-      try {
-        const body = await new Promise<string>((resolve) => {
-          let data = ''
-          req.on('data', chunk => data += chunk)
-          req.on('end', () => resolve(data))
-        })
-        const payload = (() => { try { return JSON.parse(body || '{}') } catch { return {} } })()
-        const symbol = String(payload?.symbol || '')
-        const tp = Number(payload?.tp)
-        if (!symbol || !Number.isFinite(tp)) {
-          res.statusCode = 400
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'symbol,tp required' }))
-          return
-        }
-        const api = getBinanceAPI()
-        const isHedge = await api.getHedgeMode().catch(()=>false)
-        const workingType = String(process.env.EXIT_WORKING_TYPE || 'MARK_PRICE')
-        const params: any = isHedge
-          ? { symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET', stopPrice: String(tp), closePosition: true, workingType, positionSide: 'SHORT', newClientOrderId: makeId('x_tp_tm'), newOrderRespType: 'RESULT' }
-          : { symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET', stopPrice: String(tp), closePosition: true, workingType, newClientOrderId: makeId('x_tp_tm'), newOrderRespType: 'RESULT' }
-        const r = await api.placeOrder(params)
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, orderId: r?.orderId || null }))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: String(error?.message || error) }))
-      }
-      return
-    }
-
-    // Strategy Updater dry-run: return assistant proposal (newSL, tp_levels) without placing orders
-    if (url.pathname === '/api/su/dry_run' && req.method === 'GET') {
-      try {
-        const symbol = String(url.searchParams.get('symbol') || '')
-        if (!symbol) {
-          res.statusCode = 400
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'symbol required' }))
-          return
-        }
-
-        // Use only in-memory WS snapshots
-        const positions = getPositionsInMemory()
-        const orders = getOpenOrdersInMemory()
-        const position = positions.find((pos: any) => String(pos?.symbol) === symbol)
-        if (!position || Math.abs(Number(position?.positionAmt || 0)) <= 0) {
-          res.statusCode = 404
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'position not found' }))
-          return
-        }
-
-        const amt = Number(position?.positionAmt || 0)
-        const side: 'LONG' | 'SHORT' = amt > 0 ? 'LONG' : 'SHORT'
-        const size = Math.abs(amt)
-        const entryPrice = Number(position?.entryPrice || position?.averagePrice || 0)
-
-        const { runStrategyUpdate, fetchMarketDataForSymbol } = await import('../services/strategy-updater/strategy_updater_gpt')
-        const marketData = await fetchMarketDataForSymbol(symbol)
-        const currentPrice = Number(marketData?.price || position?.markPrice || 0)
-        const unrealizedPnl = Number(position?.unrealizedPnl || 0)
-
-        // Derive current SL/TP from live open orders
-        const exitSide = side === 'LONG' ? 'SELL' : 'BUY'
-        let currentSlLive: number | null = null
-        const tpLevels: Array<{ tag:'tp'; price:number; allocation_pct:number }> = []
-        try {
-          const list = Array.isArray(orders) ? orders : []
-          for (const o of list) {
-            try {
-              if (String(o?.symbol) !== symbol) continue
-              if (String(o?.side) !== exitSide) continue
-              const t = String(o?.type || '').toUpperCase()
-              const price = Number(o?.price || o?.stopPrice || 0)
-              if (!Number.isFinite(price) || price <= 0) continue
-              if (t.includes('TAKE_PROFIT')) tpLevels.push({ tag: 'tp', price, allocation_pct: 1.0 })
-            } catch {}
-          }
-          const stopOrders = list.filter((o: any) => {
-            try {
-              if (String(o?.symbol) !== symbol) return false
-              if (String(o?.side) !== exitSide) return false
-              const t = String(o?.type || '').toUpperCase()
-              return t.includes('STOP') && !t.includes('TAKE_PROFIT')
-            } catch { return false }
-          })
-          let markPx: number | null = null
-          try { markPx = Number(marketData?.price || position?.markPrice || 0) } catch {}
-          const candidates: number[] = []
-          for (const o of stopOrders) {
-            try {
-              const sp = Number(o?.stopPrice || o?.price || 0)
-              if (!Number.isFinite(sp) || sp <= 0) continue
-              if (Number.isFinite(markPx as any)) {
-                if (side === 'LONG') { if (sp < (markPx as number)) candidates.push(sp) }
-                else { if (sp > (markPx as number)) candidates.push(sp) }
-              }
-            } catch {}
-          }
-          if (candidates.length) currentSlLive = side === 'LONG' ? Math.max(...candidates) : Math.min(...candidates)
-        } catch {}
-
-        // Build input
-        const input: any = {
-          symbol,
-          position: {
-            side,
-            size,
-            entryPrice,
-            currentPrice,
-            unrealizedPnl,
-            unrealizedPnlPct: (entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * (side === 'LONG' ? 100 : -100) : 0)
-          },
-          currentSL: currentSlLive ?? null,
-          currentTP: tpLevels.length ? tpLevels : null,
-          posture: 'OK'
-        }
-        try {
-          const v = Number(process.env.MAX_SLIPPAGE_PCT)
-          if (Number.isFinite(v) && v > 0 && v < 1) input.exchange_filters = { maxSlippagePct: v }
-        } catch {}
-
-        const result = await runStrategyUpdate(input)
-        if (!result.ok || !result.data) {
-          res.statusCode = 200
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, code: result.code || 'failed', meta: result.meta || null }))
-          return
-        }
-
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, symbol, proposal: { newSL: result.data.newSL, tp_levels: result.data.tp_levels }, confidence: result.data.confidence, urgency: result.data.urgency }))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: String(error?.message || error) }))
-      }
       return
     }
 
@@ -782,12 +628,7 @@ async function backgroundTradingCycle(): Promise<void> {
 
     // 4) Decision (API stejně jako UI)
     const decisionRes = await fetch(`http://127.0.0.1:${PORT}/api/decide`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(compact) })
-    if (!decisionRes.ok) { 
-      const errorText = await decisionRes.text().catch(() => 'no_body')
-      console.error('[BACKGROUND_DECISION_ERROR]', { status: decisionRes.status, error: errorText })
-      console.info('[BACKGROUND_PIPELINE_SKIP]', { reason: `decision_failed_${decisionRes.status}` })
-      return 
-    }
+    if (!decisionRes.ok) { console.info('[BACKGROUND_PIPELINE_SKIP]', { reason: `decision_failed_${decisionRes.status}` }); return }
     const decision = await decisionRes.json() as any
     if (!decision?.flag || decision.flag === 'NO-TRADE') { console.info('[BACKGROUND_PIPELINE_SKIP]', { reason: decision?.flag || 'no_decision' }); return }
 
@@ -815,180 +656,12 @@ async function backgroundTradingCycle(): Promise<void> {
     const finalResp = await runFinalPickerServer(finalCandidates, decision)
     if (!finalResp?.ok || !Array.isArray(finalResp?.data?.picks) || finalResp.data.picks.length === 0) { console.info('[BACKGROUND_PIPELINE_SKIP]', { reason: 'no_final_picks' }); return }
 
-    // 7) KRITICKÁ OPRAVA: Entry Strategies + Risk Manager pro každý pick
-    const finalOrders = []
-    const failed: string[] = []
-
-    for (const pick of finalResp.data.picks) {
-      try {
-        const symbol = pick.symbol
-        console.info('[BACKGROUND_ENTRY_START]', { symbol })
-        
-        // 7.1) Získat intraday data
-        const intradayRes = await fetch(`http://127.0.0.1:${PORT}/api/intraday_any?symbol=${encodeURIComponent(symbol)}`)
-        if (!intradayRes.ok) { 
-          failed.push(symbol)
-          console.error('[BACKGROUND_INTRADAY_FAILED]', { symbol, status: intradayRes.status })
-          continue 
-        }
-        const intradayData = await intradayRes.json()
-        const assets = Array.isArray(intradayData?.assets) ? intradayData.assets : []
-        const asset = assets.find((a: any) => a?.symbol === symbol)
-        if (!asset) { 
-          failed.push(symbol)
-          console.error('[BACKGROUND_NO_ASSET]', { symbol })
-          continue 
-        }
-
-        // 7.2) Zavolat Entry Strategy
-        const strategyRes = await fetch(`http://127.0.0.1:${PORT}/api/entry_strategy`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbol, asset_data: asset })
-        })
-        if (!strategyRes.ok) { 
-          failed.push(symbol)
-          console.error('[BACKGROUND_STRATEGY_FAILED]', { symbol, status: strategyRes.status })
-          continue 
-        }
-        const strategyResult = await strategyRes.json()
-        if (!strategyResult.ok || !strategyResult.data) { 
-          failed.push(symbol)
-          console.error('[BACKGROUND_STRATEGY_ERROR]', { symbol, result: strategyResult })
-          continue 
-        }
-        const strategy = strategyResult.data
-
-        // 7.3) Připravit payload pro Risk Manager
-        const cons: any = strategy.conservative || null
-        const isPlan = (p: any) => p && typeof p.entry === 'number' && typeof p.sl === 'number' && 
-          typeof p.tp1 === 'number' && typeof p.tp2 === 'number' && typeof p.tp3 === 'number'
-        
-        if (!isPlan(cons)) {
-          failed.push(symbol)
-          console.error('[BACKGROUND_NO_VALID_PLANS]', { symbol })
-          continue
-        }
-
-        const toTp = (p: any) => ([
-          { tag: 'tp1', price: Number(p?.tp1), allocation_pct: 0.33 },
-          { tag: 'tp2', price: Number(p?.tp2), allocation_pct: 0.34 },
-          { tag: 'tp3', price: Number(p?.tp3), allocation_pct: 0.33 }
-        ])
-
-        // 7.4) Zavolat Risk Manager
-        const riskPayload = {
-          symbol,
-          posture: (decision?.flag as any) || 'OK',
-          candidates: [
-            { style: 'conservative', entry: cons.entry, sl: cons.sl, tp_levels: toTp(cons), reasoning: cons.reasoning || '' }
-          ]
-        }
-        try { console.info('[ENTRY_STRATEGY_AGGRESSIVE_SKIPPED] reason:"temporarily disabled"', { context: 'background_pipeline', symbol }) } catch {}
-
-        const riskRes = await fetch(`http://127.0.0.1:${PORT}/api/entry_risk`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(riskPayload)
-        })
-        if (!riskRes.ok) {
-          failed.push(symbol)
-          console.error('[BACKGROUND_RISK_FAILED]', { symbol, status: riskRes.status })
-          continue
-        }
-        const riskResult = await riskRes.json()
-        const riskData = riskResult?.data || riskResult
-        
-        // 7.5) Vyhodnotit Risk Manager rozhodnutí
-        if (riskData?.decision !== 'enter') {
-          console.info('[BACKGROUND_RISK_SKIP]', { symbol, decision: riskData?.decision, reasons: riskData?.reasons })
-          continue
-        }
-
-        const chosenPlan = riskData?.chosen_plan
-        if (!chosenPlan) {
-          failed.push(symbol)
-          console.error('[BACKGROUND_NO_CHOSEN_PLAN]', { symbol })
-          continue
-        }
-
-        const chosenStrategy = String(chosenPlan?.style) as ('conservative' | 'aggressive')
-        if (!chosenStrategy || (chosenStrategy !== 'conservative' && chosenStrategy !== 'aggressive')) {
-          failed.push(symbol)
-          console.error('[BACKGROUND_INVALID_STRATEGY]', { symbol, style: chosenPlan?.style })
-          continue
-        }
-
-        // 7.6) Sestavit objednávku s použitím chosen_plan z risk manageru
-        // Vybrat nejvyšší TP z tp_levels (typicky tp3)
-        let selectedTp = 0
-        let selectedTpTag = 'tp3'
-        if (Array.isArray(chosenPlan?.tp_levels)) {
-          for (const tpLevel of chosenPlan.tp_levels) {
-            const price = Number(tpLevel?.price)
-            if (Number.isFinite(price) && price > selectedTp) {
-              selectedTp = price
-              selectedTpTag = String(tpLevel?.tag || 'tp3')
-            }
-          }
-        }
-
-        // Pokud není TP v chosen_plan, použít fallback z původního plánu
-        if (!selectedTp || selectedTp <= 0) {
-          const plan = cons
-          selectedTp = Number(plan?.tp3) || Number(plan?.tp2) || Number(plan?.tp1) || 0
-        }
-
-        const tradingCfg = await import('../config/trading.json').then(m => (m as any).default ?? m)
-        const defaultAmount = (tradingCfg as any)?.default_amount_usdt || 10
-        const defaultLeverage = (tradingCfg as any)?.default_leverage || 1
-
-        const order = {
-          symbol,
-          side: 'LONG' as const,
-          strategy: chosenStrategy,
-          tpLevel: selectedTpTag,
-          orderType: chosenStrategy === 'conservative' ? 'limit' : 'stop_limit',
-          amount: defaultAmount,
-          leverage: defaultLeverage,
-          risk_label: String(chosenPlan?.risk || ''),
-          entry: Number(chosenPlan.entry),
-          sl: Number(chosenPlan.sl),
-          tp: selectedTp
-        }
-
-        // Validace numerických hodnot
-        if (!Number.isFinite(order.entry) || order.entry <= 0 ||
-            !Number.isFinite(order.sl) || order.sl <= 0 ||
-            !Number.isFinite(order.tp) || order.tp <= 0) {
-          failed.push(symbol)
-          console.error('[BACKGROUND_INVALID_NUMBERS]', { symbol, order })
-          continue
-        }
-
-        finalOrders.push(order)
-        console.info('[BACKGROUND_ORDER_PREPARED]', { symbol, strategy: chosenStrategy, order })
-
-      } catch (e: any) {
-        failed.push(pick.symbol)
-        console.error('[BACKGROUND_ENTRY_ERROR]', { symbol: pick.symbol, error: e?.message || 'unknown' })
-      }
-    }
-
-    if (finalOrders.length === 0) {
-      console.info('[BACKGROUND_PIPELINE_SKIP]', { reason: 'no_valid_orders', failed })
-      return
-    }
-
-    // 8) Odeslat kompletní objednávky
-    console.info('[BACKGROUND_SENDING_ORDERS]', { count: finalOrders.length, failed: failed.length })
-    const orderReq = { orders: finalOrders }
+    // 7) Spuštění objednávek
+    const orderReq = { orders: finalResp.data.picks }
     const tradingResult = await executeHotTradingOrders(orderReq)
     console.info('[BACKGROUND_PIPELINE_SUCCESS]', { 
       decision_flag: decision.flag,
       picks_count: finalResp.data.picks.length,
-      prepared_orders: finalOrders.length,
-      failed_symbols: failed,
       success: (tradingResult as any)?.success,
       executed_orders: (tradingResult as any)?.orders?.length || 0
     })
@@ -1029,6 +702,7 @@ function persistUiSettings(settings: { auto_copy_enabled: boolean; auto_copy_min
     startBackgroundTrading()
   } catch {}
 }
+
 function loadBackgroundSettings(): void {
   try {
     const file = PARAMS_FILE
@@ -1041,6 +715,7 @@ function loadBackgroundSettings(): void {
     }
   } catch {}
 }
+
 // Rehydrate waiting TP list from disk (if any) early during startup
 try { rehydrateWaitingFromDiskOnce().catch(()=>{}) } catch {}
 // Rehydrate strategy updater registry from disk
@@ -1048,27 +723,6 @@ try {
   (async () => {
     const { rehydrateStrategyUpdaterFromDisk } = await import('../services/strategy-updater/registry')
     await rehydrateStrategyUpdaterFromDisk()
-  })().catch(()=>{})
-} catch {}
-  // Rehydrate entry updater registry from disk
-  try {
-    (async () => {
-      const { rehydrateEntryUpdaterFromDisk } = await import('../services/entry-updater/registry')
-      await rehydrateEntryUpdaterFromDisk()
-    })().catch(()=>{})
-  } catch {}
-// Rehydrate profit taker registry from disk
-try {
-  (async () => {
-    const { rehydrateProfitTakerFromDisk } = await import('../services/profit-taker/registry')
-    await rehydrateProfitTakerFromDisk()
-  })().catch(()=>{})
-} catch {}
-// Rehydrate top-up watcher registry from disk
-try {
-  (async () => {
-    const { rehydrateWatchersFromDisk } = await import('../services/top-up-watcher/registry')
-    await rehydrateWatchersFromDisk()
   })().catch(()=>{})
 } catch {}
 // Load persisted settings on startup
@@ -1084,126 +738,12 @@ const startStrategyUpdaterTimer = () => {
       const { processDueStrategyUpdates } = await import('../services/strategy-updater/trigger')
       processDueStrategyUpdates().catch(()=>{})
     } catch {}
-  }, 5000) // Every 5 seconds (faster tick so countdown flips from DUE -> PROCESSING promptly)
+  }, 30000) // Every 30 seconds
 }
 try { startStrategyUpdaterTimer() } catch {}
 
-// Profit Taker separate timer (light scheduler check)
-let __profitTakerTimer: NodeJS.Timeout | null = null
-const startProfitTakerTimer = () => {
-  if (__profitTakerTimer) clearInterval(__profitTakerTimer)
-  __profitTakerTimer = setInterval(async () => {
-    try {
-      const { processDueProfitTakers } = await import('../services/profit-taker/trigger')
-      processDueProfitTakers().catch(()=>{})
-    } catch {}
-  }, 60000)
-}
-try { startProfitTakerTimer() } catch {}
-
-// Top-Up watcher timer (12s jitter handled inside watchdog)
-let __topUpWatcherTimer: NodeJS.Timeout | null = null
-const startTopUpWatcherTimer = () => {
-  if (__topUpWatcherTimer) clearInterval(__topUpWatcherTimer)
-  __topUpWatcherTimer = setInterval(async () => {
-    try {
-      const { syncWatcherEnabledFromEnv } = await import('../services/top-up-watcher/watchdog')
-      syncWatcherEnabledFromEnv()
-    } catch {}
-  }, 15000)
-}
-try {
-  (async () => {
-    const { startTopUpWatcher } = await import('../services/top-up-watcher/watchdog')
-    startTopUpWatcher()
-  })().catch(()=>{})
-} catch {}
-try { startTopUpWatcherTimer() } catch {}
-
-// Top-Up executor timer (mirrors profit taker cadence)
-let __topUpExecutorTimer: NodeJS.Timeout | null = null
-const startTopUpExecutorTimer = () => {
-  if (__topUpExecutorTimer) clearInterval(__topUpExecutorTimer)
-  __topUpExecutorTimer = setInterval(async () => {
-    try {
-      const { processDueTopUpExecutors } = await import('../services/top-up-executor/trigger')
-      processDueTopUpExecutors().catch(()=>{})
-    } catch {}
-  }, 45000)
-}
-try { startTopUpExecutorTimer() } catch {}
-
-// Entry Updater separate timer (every 30 seconds)
-let __entryUpdaterTimer: NodeJS.Timeout | null = null
-const startEntryUpdaterTimer = () => {
-  if (__entryUpdaterTimer) clearInterval(__entryUpdaterTimer)
-  __entryUpdaterTimer = setInterval(async () => {
-    try {
-      const { processDueEntryUpdates } = await import('../services/entry-updater/trigger')
-      processDueEntryUpdates().catch(()=>{})
-    } catch {}
-  }, 5000)
-}
-try { startEntryUpdaterTimer() } catch {}
-
-// Safety watchdog: reset stuck "processing" entries back to waiting after 60s
-try {
-  setInterval(async () => {
-    try {
-      const { listEntryOrders, setEntryStatus } = await import('../services/entry-updater/registry')
-      const list = listEntryOrders()
-      const now = Date.now()
-      for (const e of (Array.isArray(list)?list:[])) {
-        try {
-          if ((e as any)?.status === 'processing') {
-            const trig = Date.parse(String(e.triggerAt || ''))
-            if (Number.isFinite(trig) && (now - trig) > 60000) {
-              setEntryStatus(e.orderId, 'waiting')
-              try { console.warn('[EU_WATCHDOG_RESET]', { orderId: e.orderId }) } catch {}
-            }
-          }
-        } catch {}
-      }
-    } catch {}
-  }, 15000)
-} catch {}
-
-// On boot: backfill Entry Updater tracks for existing internal BUY LIMIT entries
-try {
-  (async () => {
-    const { getBinanceAPI } = await import('../services/trading/binance_futures')
-    const { trackEntryOrder, hasEntryTrack } = await import('../services/entry-updater/registry')
-    const api = getBinanceAPI() as any
-    const allSymbols: string[] = []
-    try {
-      const orders = await api.getAllOpenOrders()
-      for (const o of (Array.isArray(orders)?orders:[])) {
-        try {
-          const sideBuy = String(o?.side || '').toUpperCase() === 'BUY'
-          const t = String(o?.type || '').toUpperCase()
-          const isLimit = t === 'LIMIT'
-          const reduceOnly = Boolean(o?.reduceOnly)
-          const closePosition = Boolean(o?.closePosition)
-          const cid = String((o as any)?.clientOrderId || '')
-          const isInternal = /^e_l_/.test(cid)
-          const id = Number(o?.orderId || o?.orderID || 0)
-          const price = Number(o?.price || 0)
-          const sym = String(o?.symbol || '')
-          if (sym) allSymbols.push(sym)
-          if (sideBuy && isLimit && !reduceOnly && !closePosition && isInternal && id>0 && price>0) {
-            if (!hasEntryTrack(id)) {
-              trackEntryOrder({ symbol: sym, orderId: id, clientOrderId: cid || null, entryPrice: price, sl: null, tpLevels: [] })
-              try { console.info('[EU_BACKFILL_TRACK]', { symbol: sym, orderId: id }) } catch {}
-            }
-          }
-        } catch {}
-      }
-    } catch {}
-  })().catch(()=>{})
-} catch {}
 // Start Binance user-data WS to capture cancel/filled events into audit log
 try {
-  try { initCooldownsFromDisk() } catch {}
   startBinanceUserDataWs({
     audit: async (evt) => {
       try {
@@ -1229,14 +769,6 @@ try {
               ])
               const pos = (Array.isArray(positions) ? positions : []).find((p: any) => String(p?.symbol) === sym)
               const size = (() => { try { const n = Number(pos?.size ?? pos?.positionAmt ?? 0); return Number.isFinite(n) ? Math.abs(n) : 0 } catch { return 0 } })()
-              // Cooldown hook: position open/close
-              try {
-                if (size > 0) {
-                  notePositionOpened(sym)
-                } else {
-                  await notePositionClosedFromIncomes(sym)
-                }
-              } catch {}
               const hasPos = size > 0
               const noEntryOpen = (() => {
                 try {
@@ -1252,80 +784,26 @@ try {
                 } catch { return true }
               })()
 
-              if (!hasPos) {
-                // Double-confirm: recheck position after short delay to avoid race with WS/REST
-                let stillNoPos = true
-                try {
-                  await new Promise((resolve) => setTimeout(resolve, 2200))
-                  const api2 = getBinanceAPI() as any
-                  const [orders2, positions2] = await Promise.all([
-                    api2.getOpenOrders(sym),
-                    api2.getPositions()
-                  ])
-                  const pos2 = (Array.isArray(positions2) ? positions2 : []).find((p: any) => String(p?.symbol) === sym)
-                  const size2 = (() => { try { const n = Number(pos2?.size ?? pos2?.positionAmt ?? 0); return Number.isFinite(n) ? Math.abs(n) : 0 } catch { return 0 } })()
-                  stillNoPos = size2 <= 0
-                  if (!stillNoPos) {
-                    console.info('[SU_CLEANUP_SKIPPED_STILL_OPEN]', { symbol: sym })
-                    return
-                  }
-                  console.info('[SU_CLEANUP_CONFIRM]', { symbol: sym })
-                  // Use the freshest orders snapshot for cleanup
-                  const ordersForCleanup = Array.isArray(orders2) ? orders2 : (Array.isArray(orders) ? orders : [])
-                  // 1) VŽDY zruš Strategy Updater exits (x_tp1_/x_tp2_/x_tp3_/x_sl_upd_) po potvrzeném zavření pozice
-                  const suExits = ordersForCleanup.filter((o: any) => {
-                    try {
-                      const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-                      return String(o?.symbol) === sym && (/^x_tp1_|^x_tp2_|^x_tp3_|^x_sl_upd_/).test(cid)
-                    } catch { return false }
-                  })
-                  for (const o of suExits) {
-                    try {
-                      await cancelOrder(sym, Number(o?.orderId))
-                      try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'server', symbol: sym, orderId: Number(o?.orderId)||undefined, reason: 'cleanup_on_pos_close_su_exit' }) } catch {}
-                    } catch (e) {
-                      try { console.error('[CLEANUP_ON_CLOSE_SU_ERR]', { symbol: sym, orderId: o?.orderId, error: (e as any)?.message || e }) } catch {}
-                    }
-                  }
+              if (!hasPos && noEntryOpen) {
+                // Zruš interní TP/SL (x_tp_* / x_sl_*) pro daný symbol, max 3 kusy, audituj
+                const internalExits = (Array.isArray(orders) ? orders : []).filter((o: any) => {
+                  try {
+                    const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+                    const type = String(o?.type || '').toUpperCase()
+                    const isExit = type.includes('TAKE_PROFIT') || type.includes('STOP')
+                    const isInternal = /^x_tp_|^x_sl_/.test(cid)
+                    return String(o?.symbol) === sym && isExit && isInternal
+                  } catch { return false }
+                }).slice(0, 3)
 
-                  // 2) Pokud zároveň neexistuje interní ENTRY, zruš i ostatní interní exits (x_tp_* / x_sl_)
-                  const noEntryOpen2 = (() => {
-                    try {
-                      return !(Array.isArray(ordersForCleanup) ? ordersForCleanup : []).some((o: any) => {
-                        const side = String(o?.side || '').toUpperCase()
-                        const type = String(o?.type || '').toUpperCase()
-                        const reduceOnly = Boolean(o?.reduceOnly)
-                        const closePosition = Boolean(o?.closePosition)
-                        const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-                        const isInternalEntry = /^e_l_/.test(clientId)
-                        return isInternalEntry && side === 'BUY' && type === 'LIMIT' && !(reduceOnly || closePosition)
-                      })
-                    } catch { return true }
-                  })()
-
-                  if (noEntryOpen2) {
-                    const otherExits = ordersForCleanup.filter((o: any) => {
-                      try {
-                        const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-                        const type = String(o?.type || '').toUpperCase()
-                        const isExit = type.includes('TAKE_PROFIT') || type.includes('STOP')
-                        const isInternal = /^x_tp_|^x_sl_/.test(cid)
-                        // Exclude SU prefixes already handled above
-                        const isSu = /^x_tp1_|^x_tp2_|^x_tp3_|^x_sl_upd_/.test(cid)
-                        return String(o?.symbol) === sym && isExit && isInternal && !isSu
-                      } catch { return false }
-                    }).slice(0, 3)
-
-                    for (const o of otherExits) {
-                      try {
-                        await cancelOrder(sym, Number(o?.orderId))
-                        try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'server', symbol: sym, orderId: Number(o?.orderId)||undefined, reason: 'cleanup_on_pos_close_internal_exit' }) } catch {}
-                      } catch (e) {
-                        try { console.error('[CLEANUP_ON_CLOSE_ERR]', { symbol: sym, orderId: o?.orderId, error: (e as any)?.message || e }) } catch {}
-                      }
-                    }
+                for (const o of internalExits) {
+                  try {
+                    await cancelOrder(sym, Number(o?.orderId))
+                    try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'server', symbol: sym, orderId: Number(o?.orderId)||undefined, reason: 'cleanup_on_pos_close_internal_exit' }) } catch {}
+                  } catch (e) {
+                    try { console.error('[CLEANUP_ON_CLOSE_ERR]', { symbol: sym, orderId: o?.orderId, error: (e as any)?.message || e }) } catch {}
                   }
-                } catch {}
+                }
               }
             } catch {}
           }, 700)
@@ -1334,12 +812,9 @@ try {
       // Trigger immediate waiting TP processing on fill without waiting for HTTP poll
       try {
         if (evt.type === 'filled' && evt.symbol) {
-          const { getPositionsInMemory, isUserDataReady } = await import('../services/exchange/binance/userDataWs')
-          if (!isUserDataReady('positions')) { /* WS not ready – skip without fallback */ }
-          else {
-            const positions = getPositionsInMemory()
-            waitingTpProcessPassFromPositions(positions).catch(()=>{})
-          }
+          const api = getBinanceAPI() as any
+          const positions = await api.getPositions()
+          waitingTpProcessPassFromPositions(positions).catch(()=>{})
         }
       } catch {}
       // Strategy updater: trigger pouze na WebSocket filled events (izolovaně od waiting TP systému)
@@ -1348,54 +823,34 @@ try {
           // Malé zpoždění aby se WebSocket data mohla aktualizovat
           setTimeout(async () => {
             try {
-              const { getOpenOrdersInMemory, getPositionsInMemory, isUserDataReady } = await import('../services/exchange/binance/userDataWs')
-              // Require only positions snapshot to schedule SU; orders snapshot is optional for scheduling
-              if (!isUserDataReady('positions')) {
-                // WS snapshot není připraven – nic nespouštěj (bez fallbacku)
-                return
-              }
-              const orders = getOpenOrdersInMemory()
-              const positions = getPositionsInMemory()
+              const api = getBinanceAPI() as any
+              const [orders, positions] = await Promise.all([
+                api.getOpenOrders(),
+                api.getPositions()
+              ])
               const { detectInternalPositionOpened } = await import('../services/strategy-updater/trigger')
               detectInternalPositionOpened(orders, positions, {
                 type: evt.type,
                 symbol: String(evt.symbol || ''),
                 orderId: Number(evt.orderId) || 0
               })
-              // Fresh fill: schedule first SU pass after 2 minutes (default)
-              try {
-                const symbol = String(evt.symbol || '')
-                if (symbol) {
-                  const { getStrategyUpdaterList, rescheduleStrategyUpdate } = await import('../services/strategy-updater/registry')
-                  const exists = (getStrategyUpdaterList() || []).some(e => e.symbol === symbol)
-                  if (!exists) {
-                    // If entry not yet present (race), the schedule call in trigger will create with default 2min
-                  } else {
-                    // If present due to immediate snapshot path, push it to default 2min to respect fresh fill policy
-                    rescheduleStrategyUpdate(symbol, 2 * 60 * 1000)
-                  }
-                }
-              } catch {}
-              // Profit Taker disabled when Top-Up Executor is active
-              try {
-                const { getTopUpExecutorStatus } = await import('../services/top-up-executor/trigger')
-                const st = getTopUpExecutorStatus()
-                if (!st.enabled) {
-                  try {
-                    const { detectPositionForProfitTaker } = await import('../services/profit-taker/trigger')
-                    detectPositionForProfitTaker(orders, positions)
-                  } catch {}
-                }
-              } catch {}
-              try {
-                const { scheduleTopUpWatchers } = await import('../services/top-up-watcher/utils')
-                scheduleTopUpWatchers(positions)
-              } catch {}
-              // SU: No immediate force; first run waits 2 minutes by design
+              // SU: No immediate force; first run waits 1 minute by design
             } catch (triggerError) {
               console.error('[STRATEGY_UPDATER_TRIGGER_ERR]', triggerError)
             }
           }, 1000) // 1 sekunda delay pro stabilitu
+        }
+      } catch {}
+      
+      // Health monitor sync: trigger při order změnách (filled/cancel)
+      try {
+        if (evt.type === 'filled' || evt.type === 'cancel') {
+          // Malé zpoždění pro stabilizaci WebSocket dat
+          setTimeout(() => {
+            healthSyncPositions('websocket').catch(err => {
+              console.error('[HEALTH_SYNC_TRIGGER_ERR]', err)
+            })
+          }, 500)
         }
       } catch {}
     }
@@ -1404,9 +859,20 @@ try {
   try { console.error('[USERDATA_WS_ERROR]', (e as any)?.message || e) } catch {}
 }
 
+// Start Health Monitor Worker (delayed to allow UserDataWS to initialize)
+try {
+  setTimeout(() => {
+    console.info('[SERVER] Starting Health Monitor Worker...')
+    startHealthMonitorWorker()
+  }, 3000) // 3 second delay to allow UserDataWS to load positions
+} catch (e) {
+  try { console.error('[HEALTH_MONITOR_START_ERR]', (e as any)?.message || e) } catch {}
+}
+
 function isDebugApi(): boolean {
   try { const v = String(process.env.DEBUG_API || '').toLowerCase(); return v === 'true' || v === '1' || v === 'yes'; } catch { return false }
 }
+
 const server = http.createServer(async (req, res) => {
   try {
     // Basic CORS for dev/prod – no caching
@@ -1459,6 +925,7 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+    const hasRealBinanceKeys = (): boolean => {
     // Static UI (serve built frontend from dist/)
     try {
       const distDir = path.resolve(process.cwd(), 'dist')
@@ -1493,116 +960,6 @@ const server = http.createServer(async (req, res) => {
       }
     } catch {}
 
-    // === DEV-ONLY PROMPT MANAGEMENT API ===
-    const isDevEnv = process.env.NODE_ENV !== 'production'
-    const checkDevAuth = (authHeader: string | undefined): boolean => {
-      if (!isDevEnv) return false
-      const expected = process.env.DEV_AUTH_TOKEN || 'dev-secret-token'
-      return authHeader === expected
-    }
-    
-    if (url.pathname === '/dev/prompts' && req.method === 'GET') {
-      if (!isDevEnv) { res.statusCode = 404; res.end('Not Found'); return }
-      if (!checkDevAuth(req.headers['x-dev-auth'] as string)) {
-        res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'unauthorized' })); return
-      }
-      try {
-        const { listAssistants } = await import('../services/lib/dev_prompts.js')
-        res.statusCode = 200; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ assistants: listAssistants() }))
-      } catch (e: any) {
-        res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
-      }
-      return
-    }
-    
-    if (url.pathname.startsWith('/dev/prompts/') && req.method === 'GET') {
-      if (!isDevEnv) { res.statusCode = 404; res.end('Not Found'); return }
-      if (!checkDevAuth(req.headers['x-dev-auth'] as string)) {
-        res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'unauthorized' })); return
-      }
-      try {
-        const key = url.pathname.split('/dev/prompts/')[1]
-        if (!key) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_key' })); return }
-        const { getOverlayPrompt } = await import('../services/lib/dev_prompts.js')
-        const overlay = getOverlayPrompt(key)
-        if (!overlay) { res.statusCode = 404; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'not_found' })); return }
-        res.statusCode = 200; res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ text: overlay.text, sha256: overlay.sha256, revision: overlay.revision, updatedAt: overlay.updatedAt }))
-      } catch (e: any) {
-        res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
-      }
-      return
-    }
-    
-    if (url.pathname.startsWith('/dev/prompts/') && req.method === 'PUT') {
-      if (!isDevEnv) { res.statusCode = 404; res.end('Not Found'); return }
-      if (!checkDevAuth(req.headers['x-dev-auth'] as string)) {
-        res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'unauthorized' })); return
-      }
-      try {
-        const key = url.pathname.split('/dev/prompts/')[1]
-        if (!key) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_key' })); return }
-        const chunks: Buffer[] = []; for await (const ch of req) chunks.push(ch as Buffer)
-        const bodyStr = Buffer.concat(chunks).toString('utf8')
-        let parsed: any = null
-        try { parsed = JSON.parse(bodyStr) } catch { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'invalid_json' })); return }
-        const { text, clientSha256, ifMatchRevision } = parsed
-        if (!text || typeof text !== 'string') { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_text' })); return }
-        if (!clientSha256 || typeof clientSha256 !== 'string') { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_clientSha256' })); return }
-        const { setOverlayPrompt } = await import('../services/lib/dev_prompts.js')
-        try {
-          const result = setOverlayPrompt(key, text, clientSha256, ifMatchRevision)
-          res.statusCode = 200; res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: true, storedSha256: result.sha256, revision: result.revision, updatedAt: result.updatedAt }))
-        } catch (e: any) {
-          const msg = e?.message || ''
-          if (msg.includes('Revision conflict')) { res.statusCode = 409; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'revision_conflict', message: msg })); return }
-          if (msg.includes('Lint failed')) { res.statusCode = 422; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'lint_failed', message: msg })); return }
-          if (msg.includes('SHA-256 mismatch')) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'sha256_mismatch', message: msg })); return }
-          throw e
-        }
-      } catch (e: any) {
-        res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
-      }
-      return
-    }
-    
-    if (url.pathname.startsWith('/dev/prompt-attestation/') && req.method === 'GET') {
-      if (!isDevEnv) { res.statusCode = 404; res.end('Not Found'); return }
-      if (!checkDevAuth(req.headers['x-dev-auth'] as string)) {
-        res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'unauthorized' })); return
-      }
-      try {
-        const key = url.pathname.split('/dev/prompt-attestation/')[1]
-        if (!key) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_key' })); return }
-        const { getPromptAttestation } = await import('../services/lib/dev_prompts.js')
-        res.statusCode = 200; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(getPromptAttestation(key)))
-      } catch (e: any) {
-        res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
-      }
-      return
-    }
-    
-    if (url.pathname === '/dev/prompts/export-all' && req.method === 'POST') {
-      if (!isDevEnv) { res.statusCode = 404; res.end('Not Found'); return }
-      if (!checkDevAuth(req.headers['x-dev-auth'] as string)) {
-        res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'unauthorized' })); return
-      }
-      try {
-        const { exportAllOverlaysToRegistry } = await import('../services/lib/dev_prompts.js')
-        const results = exportAllOverlaysToRegistry()
-        const success = results.filter(r => r.exported).length
-        const failed = results.filter(r => !r.exported).length
-        res.statusCode = 200; res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, total: results.length, success, failed, results }))
-      } catch (e: any) {
-        res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
-      }
-      return
-    }
-    // === KONEC DEV-ONLY PROMPT MANAGEMENT API ===
-
-    const hasRealBinanceKeys = (): boolean => {
       try {
         const k = String(process.env.BINANCE_API_KEY || '')
         const s = String(process.env.BINANCE_SECRET_KEY || '')
@@ -1653,6 +1010,137 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+
+    // 🚀 CRITICAL: Ultra-fast position close endpoint
+    if (url.pathname === '/__proxy/binance/flatten' && req.method === 'POST') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        console.log('[FLATTEN_ENDPOINT_HIT]', { method: req.method, url: req.url })
+        
+        if (!hasRealBinanceKeysGlobal()) {
+          console.error('[FLATTEN_ERROR] Missing Binance keys')
+          res.statusCode = 403
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ error: 'missing_binance_keys' }))
+          return
+        }
+
+        const symbolRaw = url.searchParams.get('symbol')
+        const sideRaw = url.searchParams.get('side')
+        
+        console.log('[FLATTEN_PARAMS]', { symbolRaw, sideRaw })
+
+        if (!symbolRaw || !sideRaw) {
+          console.error('[FLATTEN_ERROR] Missing params', { symbolRaw, sideRaw })
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'missing_symbol_or_side' }))
+          return
+        }
+
+        const normalizeSymbol = (s: string): string => {
+          let v = String(s || '').trim().toUpperCase()
+          if (!v) return ''
+          if (v.includes('/')) v = v.replace('/', '')
+          if (!v.endsWith('USDT')) v = `${v}USDT`
+          return v
+        }
+
+        const symbol = normalizeSymbol(symbolRaw)
+        const side = String(sideRaw).toUpperCase() // 'LONG' or 'SHORT'
+
+        if (!symbol) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'invalid_symbol' }))
+          return
+        }
+
+        if (side !== 'LONG' && side !== 'SHORT') {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'invalid_side_must_be_LONG_or_SHORT' }))
+          return
+        }
+
+        // 🚀 ULTRA-FAST: Use WebSocket cache (0ms) instead of REST API (~100ms)
+        const api = getBinanceAPI() as any
+        let positions: any[] = []
+        const wsReady = isUserDataReady()
+        
+        if (wsReady) {
+          positions = getPositionsInMemory() // 0ms - instant WebSocket cache
+          console.log('[FLATTEN_WS_CACHE]', { wsPositions: positions.length, symbols: positions.map(p => p.symbol) })
+        }
+        
+        // If WS cache is empty or not ready, use REST API
+        if (positions.length === 0) {
+          positions = await fetchPositions() // ~100ms - REST API fallback
+          console.log('[FLATTEN_REST_API]', { restPositions: positions.length })
+        }
+        
+        // Find position
+        const position = positions.find((p: any) => 
+          String(p?.symbol || '').toUpperCase() === symbol &&
+          String(p?.positionSide || '').toUpperCase() === side &&
+          Math.abs(Number(p?.positionAmt || 0)) > 0
+        )
+
+        if (!position) throw new Error(`Position not found: ${symbol} ${side}`)
+        
+        const positionSize = Math.abs(Number(position.positionAmt || 0))
+        if (positionSize <= 0) throw new Error(`Invalid position size: ${positionSize}`)
+
+        // For closing: LONG position -> SELL order, SHORT position -> BUY order
+        const orderSide = side === 'LONG' ? 'SELL' : 'BUY'
+
+        const orderParams: any = {
+          symbol,
+          side: orderSide,
+          type: 'MARKET',
+          quantity: String(positionSize),
+          positionSide: side, // SHORT-only = always hedge mode
+          newOrderRespType: 'RESULT',
+          __engine: 'flatten_endpoint'
+        }
+
+        console.log('[FLATTEN_POSITION]', { 
+          symbol, 
+          positionSide: side, 
+          orderSide,
+          quantity: positionSize,
+          wsCache: wsReady
+        })
+
+        // 🚀 Send order immediately to exchange for maximum speed
+        const t0 = performance.now()
+        const result = await api.placeOrder(orderParams)
+        const latencyMs = Math.round(performance.now() - t0)
+
+        console.log('[FLATTEN_SUCCESS]', { 
+          symbol, 
+          latencyMs, 
+          orderId: result?.orderId,
+          executedQty: result?.executedQty 
+        })
+
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ 
+          ok: true, 
+          result, 
+          latencyMs,
+          message: `Position ${symbol} ${side} closed successfully`
+        }))
+
+      } catch (e: any) {
+        console.error('[FLATTEN_ERROR]', { error: e?.message, stack: e?.stack })
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
     
     if (url.pathname === '/api/trading/settings' && req.method === 'PUT') {
       res.setHeader('Cache-Control', 'no-store')
@@ -1678,37 +1166,9 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: true, pending_cancel_age_min: __pendingCancelAgeMin }))
       } catch (e: any) {
-        try {
-          // Attach current Binance usage snapshot even on error so UI can show badge
-          const limits = getLimitsSnapshot()
-          const WEIGHT_LIMIT = (() => {
-            const cfg = Number((tradingCfg as any)?.BINANCE_WEIGHT_LIMIT_1M)
-            if (Number.isFinite(cfg) && cfg > 0) return Math.floor(cfg)
-            const env = Number(process.env.BINANCE_WEIGHT_LIMIT_1M)
-            if (Number.isFinite(env) && env > 0) return Math.floor(env)
-            return 1200
-          })()
-          const wUsedNum = Number(limits?.maxUsedWeight1mLast60s ?? limits?.lastUsedWeight1m)
-          const pct = Number.isFinite(wUsedNum) && wUsedNum >= 0 ? Math.min(999, Math.round((wUsedNum / WEIGHT_LIMIT) * 100)) : null
-          const binance_usage = {
-            weight1m_used: Number.isFinite(wUsedNum) ? wUsedNum : null,
-            weight1m_limit: WEIGHT_LIMIT,
-            orderCount10s: limits?.lastOrderCount10s ?? null,
-            orderCount1m: limits?.lastOrderCount1m ?? null,
-            percent: pct,
-            callRate: limits?.callRate ?? null,
-            risk: limits?.risk ?? 'normal',
-            backoff_active: Boolean(limits?.backoff),
-            backoff_remaining_sec: limits?.backoff?.remainingSec ?? null
-          }
-          res.statusCode = 500
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown', binance_usage }))
-        } catch {
-          res.statusCode = 500
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
-        }
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
       }
       return
     }
@@ -1748,53 +1208,16 @@ const server = http.createServer(async (req, res) => {
         } catch {}
         try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'server', symbol, orderId, reason: 'manual_delete' }) } catch {}
         
-        // Do NOT auto-cleanup waiting TP on manual ENTRY delete
+        // Auto-cleanup waiting TP on manual ENTRY delete (safe housekeeping only)
+        try { const { cleanupWaitingTpForSymbol } = await import('../services/trading/binance_futures'); cleanupWaitingTpForSymbol(symbol) } catch {}
         
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: true, result: r }))
       } catch (e: any) {
-        try {
-          const msg = String(e?.message || 'binance_error')
-          const isRateLimit = /code\":-?1003|too\s+many\s+requests|status:\s*418|banned\s+until/i.test(msg)
-          const limits = getLimitsSnapshot()
-          const WEIGHT_LIMIT = (() => {
-            const cfg = Number((tradingCfg as any)?.BINANCE_WEIGHT_LIMIT_1M)
-            if (Number.isFinite(cfg) && cfg > 0) return Math.floor(cfg)
-            const env = Number(process.env.BINANCE_WEIGHT_LIMIT_1M)
-            if (Number.isFinite(env) && env > 0) return Math.floor(env)
-            return 1200
-          })()
-          const wUsedNum = Number(limits?.maxUsedWeight1mLast60s ?? limits?.lastUsedWeight1m)
-          const pct = Number.isFinite(wUsedNum) && wUsedNum >= 0 ? Math.min(999, Math.round((wUsedNum / WEIGHT_LIMIT) * 100)) : null
-          const binance_usage = {
-            weight1m_used: Number.isFinite(wUsedNum) ? wUsedNum : null,
-            weight1m_limit: WEIGHT_LIMIT,
-            orderCount10s: limits?.lastOrderCount10s ?? null,
-            orderCount1m: limits?.lastOrderCount1m ?? null,
-            percent: pct,
-            callRate: limits?.callRate ?? null,
-            risk: limits?.risk ?? 'normal',
-            backoff_active: Boolean(limits?.backoff),
-            backoff_remaining_sec: limits?.backoff?.remainingSec ?? null
-          }
-          res.statusCode = isRateLimit ? 429 : 500
-          try {
-            if (isRateLimit) {
-              const untilMs = Number(limits?.backoff?.untilMs ?? __binanceBackoffUntilMs)
-              if (Number.isFinite(untilMs) && untilMs > Date.now()) {
-                const waitSec = Math.max(1, Math.ceil((untilMs - Date.now()) / 1000))
-                res.setHeader('Retry-After', String(waitSec))
-              }
-            }
-          } catch {}
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: isRateLimit ? 'rate_limited' : msg, binance_usage }))
-        } catch {
-          res.statusCode = 500
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
-        }
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
       }
       return
     }
@@ -1808,6 +1231,32 @@ const server = http.createServer(async (req, res) => {
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: true, events }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    if (url.pathname === '/api/debug/rehydrate_orders' && req.method === 'POST') {
+      try {
+        const n = await rehydrateOpenOrdersFromRest()
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, count: n }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    if (url.pathname === '/api/debug/forget_unknown_orders' && req.method === 'POST') {
+      try {
+        const r = await forgetUnknownOrdersUsingRest()
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, ...r }))
       } catch (e: any) {
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')
@@ -1850,20 +1299,21 @@ const server = http.createServer(async (req, res) => {
           clientOrderId: ((): string | null => { const id = String((o as any)?.C || (o as any)?.c || (o as any)?.clientOrderId || ''); return id || null })(),
           // Treat any internal client IDs as non-external, including strategy-updater generated ones.
           // Also mark as internal if the orderId is known to be created by the updater.
+          // CRITICAL: SHORT-only system - ALL LONG positions are EXTERNAL (but not BUY exits for SHORT!)
           isExternal: ((): boolean => {
             try {
-              const idStr = String((o as any)?.C || (o as any)?.c || (o as any)?.clientOrderId || '')
+              // SHORT-only system: LONG position orders are automatically external
+              // But BUY orders can be our SHORT exits (TP/SL), so check by positionSide only
               const posSide = String((o as any)?.positionSide || '').toUpperCase()
-              const side = String((o as any)?.side || '').toUpperCase()
-              const reduceOnly = Boolean((o as any)?.reduceOnly)
-              const closePosition = Boolean((o as any)?.closePosition)
-              // SHORT nikdy external
-              if (posSide === 'SHORT') return false
-              // Short entry kontext (SELL bez exit flagů a SHORT posSide, pokud by nebyl vyplněn) – chovej se jako interní
-              if (!posSide && side === 'SELL' && !(reduceOnly || closePosition)) return false
-              // Pravidlo: VŠECHNY naše interní ordery MUSÍ mít prefix 'sv2_'
-              // Cokoliv bez 'sv2_' je external.
-              return !idStr.startsWith('sv2_')
+              if (posSide === 'LONG') return true
+              
+              const idStr = String((o as any)?.C || (o as any)?.c || (o as any)?.clientOrderId || '')
+              const idIsInternal = idStr ? /^(sv2_)?(e_l_|x_sl_|x_tp_)/.test(idStr) : false
+              if (idIsInternal) return false
+              const n = Number(o?.orderId ?? 0)
+              const { isStrategyOrderId } = require('../services/strategy-updater/registry')
+              if (Number.isFinite(n) && isStrategyOrderId(n)) return false
+              return true
             } catch { return true }
           })(),
           createdAt: (() => { const t = Number((o as any)?.time); return Number.isFinite(t) && t > 0 ? new Date(t).toISOString() : null })(),
@@ -1901,6 +1351,65 @@ const server = http.createServer(async (req, res) => {
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    // GET /api/config/trading - vrátí trading config
+    if (url.pathname === '/api/config/trading' && req.method === 'GET') {
+      try {
+        const cfg = JSON.parse(await fs.promises.readFile(
+          path.join(process.cwd(), 'config/trading.json'), 'utf8'
+        ))
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(cfg))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ error: 'Failed to read config' }))
+      }
+      return
+    }
+    // POST /api/config/trading - uloží partial update trading configu
+    if (url.pathname === '/api/config/trading' && req.method === 'POST') {
+      try {
+        let body = ''
+        req.on('data', chunk => body += chunk.toString())
+        await new Promise<void>((resolve, reject) => {
+          req.on('end', async () => {
+            try {
+              const update = JSON.parse(body)
+              const cfgPath = path.join(process.cwd(), 'config/trading.json')
+              const current = JSON.parse(await fs.promises.readFile(cfgPath, 'utf8'))
+              
+              // Validace ENTRY_DELTA_CANCEL_PCT
+              if (update.ENTRY_DELTA_CANCEL_PCT !== undefined) {
+                const val = Number(update.ENTRY_DELTA_CANCEL_PCT)
+                if (!Number.isFinite(val) || val < 0 || val > 10) {
+                  res.statusCode = 400
+                  res.setHeader('content-type', 'application/json')
+                  res.end(JSON.stringify({ error: 'ENTRY_DELTA_CANCEL_PCT must be 0-10' }))
+                  resolve()
+                  return
+                }
+                current.ENTRY_DELTA_CANCEL_PCT = val
+              }
+              
+              await fs.promises.writeFile(cfgPath, JSON.stringify(current, null, 2))
+              res.statusCode = 200
+              res.setHeader('content-type', 'application/json')
+              res.end(JSON.stringify(current))
+              resolve()
+            } catch (e: any) {
+              reject(e)
+            }
+          })
+          req.on('error', reject)
+        })
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ error: 'Failed to update config' }))
       }
       return
     }
@@ -1952,15 +1461,33 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: 'missing_binance_keys' }))
           return
         }
-        // If WS user-data not ready, return 200 with empty positions
-        if (!isUserDataReady('positions')) {
-          const response = { ok: true, positions: [] }
-          res.statusCode = 200
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify(response))
-          return
+        // ALWAYS use REST API (no WebSocket dependency)
+        // WebSocket can be used as cache optimization later, but REST is authoritative
+        let raw: any[] = []
+        const wsReady = isUserDataReady('positions')
+        
+        if (wsReady && getPositionsInMemory().length > 0) {
+          // Use WebSocket cache if available and has data
+          raw = getPositionsInMemory()
+          console.info('[API_POSITIONS_WS_CACHE]', { count: raw.length })
+        } else {
+          // Always fallback to REST API (primary source)
+          console.info('[API_POSITIONS_REST_PRIMARY]', { ws_ready: wsReady })
+          try {
+            const { getBinanceAPI } = await import('../services/trading/binance_futures.js')
+            const api = getBinanceAPI()
+            raw = await api.getPositions()
+            console.info('[API_POSITIONS_REST_OK]', { count: Array.isArray(raw) ? raw.length : 0 })
+          } catch (restErr: any) {
+            console.error('[API_POSITIONS_REST_ERR]', restErr?.message || String(restErr))
+            // If REST fails, return error (no fake data)
+            const response = { ok: false, error: restErr?.message || 'Failed to fetch positions', positions: [] }
+            res.statusCode = 500
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify(response))
+            return
+          }
         }
-        const raw = getPositionsInMemory()
         const positionsRaw = Array.isArray(raw) ? raw : []
         const positions = positionsRaw
           .map((p: any) => {
@@ -2010,6 +1537,160 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify({ ok: true }))
       return
     }
+    
+    // GET /api/system_status - diagnostic endpoint for WebSocket and API health
+    if (url.pathname === '/api/system_status' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store')
+      res.setHeader('content-type', 'application/json')
+      
+      try {
+        const wsReadyPositions = isUserDataReady('positions')
+        const wsReadyOrders = isUserDataReady('orders')
+        const wsReadyAny = isUserDataReady('any')
+        const memoryPositions = getPositionsInMemory()
+        const memoryOrders = getOpenOrdersInMemory()
+        
+        // Try REST API call
+        let restHealthy = false
+        let restError: string | null = null
+        let restPositionsCount = 0
+        try {
+          const { getBinanceAPI } = await import('../services/trading/binance_futures.js')
+          const api = getBinanceAPI()
+          const positions = await api.getPositions()
+          restHealthy = true
+          restPositionsCount = (Array.isArray(positions) ? positions : []).filter((p: any) => {
+            const amt = Number(p?.positionAmt || 0)
+            return Math.abs(amt) > 0
+          }).length
+        } catch (e: any) {
+          restError = e?.message || String(e)
+        }
+        
+        const status = {
+          ok: true,
+          timestamp: new Date().toISOString(),
+          websocket: {
+            positions_ready: wsReadyPositions,
+            orders_ready: wsReadyOrders,
+            any_ready: wsReadyAny,
+            memory_positions_count: memoryPositions.length,
+            memory_orders_count: memoryOrders.length
+          },
+          rest_api: {
+            healthy: restHealthy,
+            error: restError,
+            positions_count: restPositionsCount
+          },
+          diagnosis: (() => {
+            if (!wsReadyPositions && !restHealthy) {
+              return '❌ CRITICAL: WebSocket not ready AND REST API failed - check Binance API keys'
+            }
+            if (!wsReadyPositions && restHealthy) {
+              return '⚠️ WARNING: WebSocket not ready but REST API works - fallback active'
+            }
+            if (wsReadyPositions && !restHealthy) {
+              return '⚠️ WARNING: WebSocket ready but REST API failed - possible rate limit'
+            }
+            if (wsReadyPositions && memoryPositions.length === 0 && restPositionsCount > 0) {
+              return '⚠️ WARNING: WebSocket ready but in-memory positions empty while REST shows positions'
+            }
+            return '✅ OK: WebSocket and REST API both healthy'
+          })()
+        }
+        
+        res.statusCode = 200
+        res.end(JSON.stringify(status, null, 2))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.end(JSON.stringify({ error: e?.message || 'Internal error' }))
+      }
+      return
+    }
+
+    // Temporal worker connection info (used by UI widget). No fallbacks.
+    if (url.pathname === '/api/temporal/worker/info' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        const { execSync } = await import('node:child_process')
+        const address = String(process.env.TEMPORAL_ADDRESS || '')
+        const namespace = String(process.env.TEMPORAL_NAMESPACE || 'default')
+        const taskQueue = String(process.env.TASK_QUEUE || '')
+        const taskQueueOpenai = String(process.env.TASK_QUEUE_OPENAI || '')
+        const taskQueueBinance = String(process.env.TASK_QUEUE_BINANCE || '')
+        const tradeSide = String(process.env.TRADE_SIDE || 'SHORT').toUpperCase()
+        
+        // Extract configured port from TEMPORAL_ADDRESS (no hard-coded defaults)
+        const configuredPort = (() => {
+          try {
+            const match = address.match(/:(\d+)$/);
+            return match ? match[1] : '';
+          } catch {
+            return '';
+          }
+        })()
+
+        // Check connection to configured port only
+        const connectedPorts: string[] = []
+        if (configuredPort) {
+          try {
+            // Find worker process (runs via tsx in dev mode)
+            const findCmd = `ps aux | grep "temporal/worker.ts" | grep "trader-short-v2" | grep -v grep | awk '{print $2}' | head -1 || true`
+            const workerPid = execSync(findCmd, { encoding: 'utf8', timeout: 2000 }).trim()
+            if (workerPid && /^\d+$/.test(workerPid)) {
+              // Check for connection (-P forces numeric ports instead of service names)
+              const cmd = `lsof -P -p ${workerPid} -a -i TCP 2>/dev/null | grep ESTABLISHED | grep ":${configuredPort}" || true`
+              const out = execSync(cmd, { encoding: 'utf8', timeout: 2000 })
+              if (out && out.trim().length > 0) {
+                connectedPorts.push(configuredPort)
+              }
+            }
+          } catch {}
+        }
+
+        // OPTIONAL: Check for connections to forbidden ports (for UI warning)
+        const connectedForbiddenPorts: string[] = []
+        const forbiddenPortsEnv = process.env.FORBIDDEN_TEMPORAL_PORTS;
+        if (forbiddenPortsEnv) {
+          const forbiddenPorts = forbiddenPortsEnv.split(',').map(p => p.trim()).filter(Boolean);
+          for (const port of forbiddenPorts) {
+            try {
+              // Find worker process (runs via tsx in dev mode)
+              const findCmd = `ps aux | grep "temporal/worker.ts" | grep "trader-short-v2" | grep -v grep | awk '{print $2}' | head -1 || true`
+              const workerPid = execSync(findCmd, { encoding: 'utf8', timeout: 2000 }).trim()
+              if (workerPid && /^\d+$/.test(workerPid)) {
+                // Check for connection (-P forces numeric ports instead of service names)
+                const cmd = `lsof -P -p ${workerPid} -a -i TCP 2>/dev/null | grep ESTABLISHED | grep ":${port}" || true`
+                const out = execSync(cmd, { encoding: 'utf8', timeout: 2000 })
+                if (out && out.trim().length > 0) connectedForbiddenPorts.push(port)
+              }
+            } catch {}
+          }
+        }
+
+        const workerCount = connectedPorts.length
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ 
+          ok: true, 
+          address, 
+          namespace, 
+          taskQueue, 
+          taskQueueOpenai, 
+          taskQueueBinance, 
+          tradeSide, 
+          configuredPort, 
+          connectedPorts, 
+          connectedForbiddenPorts,
+          workerCount 
+        }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
     if (url.pathname === '/api/limits' && req.method === 'GET') {
       try {
         const snap = getLimitsSnapshot()
@@ -2029,23 +1710,100 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+    
+    // Cache statistics endpoint
+    if (url.pathname === '/api/cache_stats' && req.method === 'GET') {
+      try {
+        const cacheStats = binanceCache.getStats()
+        const coalescerStats = requestCoalescer.getStats()
+        
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({
+          ok: true,
+          cache: cacheStats,
+          coalescer: coalescerStats,
+          timestamp: new Date().toISOString()
+        }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    
     if (url.pathname === '/api/ws/health') {
       res.statusCode = 200
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({ ok: true, connected: false, streams: 0, lastClosedAgeMsByKey: {}, altH1Subscribed: 0, altH1Ready: 0, includedSymbols: 0, lastBackfillCount: 0, drops_noH1: [] }))
       return
     }
+
+    // Fear & Greed Index (alternative.me) with 20m TTL cache
+    if (url.pathname === '/api/fear_greed' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        const key = makeKey('/api/fear_greed')
+        const cached = ttlGet<any>(key)
+        if (cached) {
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify(cached))
+          return
+        }
+        const r = await undiciRequest('https://api.alternative.me/fng/?limit=1&format=json', { method: 'GET', headers: { 'accept': 'application/json' } })
+        const body = await r.body.text()
+        if (r.statusCode !== 200) throw new Error(`HTTP ${r.statusCode}`)
+        let value: number | null = null
+        let classification: string | null = null
+        let updatedAt: string | null = null
+        try {
+          const j = JSON.parse(body)
+          const d = Array.isArray(j?.data) && j.data.length > 0 ? j.data[0] : null
+          value = Number(d?.value)
+          classification = (d?.value_classification ? String(d.value_classification) : null)
+          updatedAt = (d?.timestamp ? new Date(Number(d.timestamp) * 1000).toISOString() : null)
+        } catch {}
+        const out = { value: Number.isFinite(value) ? value : null, classification, updated_at: updatedAt, fetched_at: new Date().toISOString() }
+        ttlSet(key, out, 20 * 60) // 20 minutes cache
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(out))
+      } catch (e: any) {
+        // On error, return last cached value if present
+        try {
+          const cached = ttlGet<any>(makeKey('/api/fear_greed'))
+          if (cached) {
+            res.statusCode = 200
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify(cached))
+            return
+          }
+        } catch {}
+        res.statusCode = 502
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'fetch_failed' }))
+      }
+      return
+    }
+
     if (url.pathname === '/api/orders_console' && req.method === 'GET') {
       res.setHeader('Cache-Control', 'no-store')
       try {
         if (!hasRealBinanceKeys()) { res.statusCode = 403; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_binance_keys' })); return }
-        // WS-only positions to avoid REST rate limits
+        // PERMANENT FIX: Use REST API for positions (WebSocket unreliable)
+        let positionsRaw: any[] = []
+        let ordersRaw = getOpenOrdersInMemory()
+        try {
+          positionsRaw = await fetchPositions() // Always use REST API
+          console.info('[POSITIONS_REST_API]', { count: positionsRaw.length })
+        } catch (e) {
+          console.error('[POSITIONS_REST_API_ERR]', (e as any)?.message)
+          positionsRaw = [] // Fail safe
+        }
         const ordersReady = isUserDataReady('orders')
         const positionsReady = isUserDataReady('positions')
-        const positionsRaw: any[] = getPositionsInMemory()
-        let ordersRaw = getOpenOrdersInMemory()
-        // Define nowIso early; used by multiple blocks below
-        const nowIso = new Date().toISOString()
         // Strict mode: žádné REST seedování – pouze aktuální WS data
         // Fast-path auto-clean čekajících TP jen pokud jsou WS data READY (jinak hrozí falešné mazání)
         try {
@@ -2103,105 +1861,25 @@ const server = http.createServer(async (req, res) => {
 
         // Spusť waiting TP processing pass na základě pozic (bez dalšího dodatečného REST čtení)
         try { waitingTpProcessPassFromPositions(positionsRaw).catch(()=>{}) } catch {}
-
-        // Cleanup: zruš sirotčí interní EXITy (SL/TP) pokud pro symbol neexistuje ani otevřený ENTRY, ani pozice
-        try {
-          const hasPosition = new Set<string>()
-          for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
-            try {
-              const sym = String(p?.symbol || '')
-              const amt = Number(p?.positionAmt)
-              if (sym && Number.isFinite(amt) && Math.abs(amt) > 0) hasPosition.add(sym)
-            } catch {}
-          }
-
-          const hasEntry = new Set<string>()
-          for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
-            try {
-              const sym = String(o?.symbol || '')
-              const side = String(o?.side || '').toUpperCase()
-              const t = String(o?.type || '').toUpperCase()
-              const isEntryType = (t === 'LIMIT' || t === 'STOP' || t === 'STOP_MARKET' || t === 'MARKET')
-              const reduceOnly = Boolean(o?.reduceOnly)
-              const closePosition = Boolean(o?.closePosition)
-              const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-              const isInternalEntry = /^sv2_/.test(cid) && /^(sv2_)?e_/.test(cid)
-              if (sym && isEntryType && !reduceOnly && !closePosition && (isInternalEntry || /^e_/.test(cid))) {
-                hasEntry.add(sym)
-              }
-            } catch {}
-          }
-
-          const exitOrdersToCancel: Array<{ symbol: string; orderId: number }> = []
-          for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
-            try {
-              const sym = String(o?.symbol || '')
-              if (!sym) continue
-              if (hasPosition.has(sym) || hasEntry.has(sym)) continue
-              const t = String(o?.type || '').toUpperCase()
-              const isExitType = /STOP|TAKE_PROFIT/.test(t)
-              const reduceOnly = Boolean(o?.reduceOnly)
-              const closePosition = Boolean(o?.closePosition)
-              const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-              const isOurExit = /^sv2_/.test(cid) && /(x_sl|x_sl_upd|x_tp_)/.test(cid)
-              if (isExitType && (reduceOnly || closePosition || isOurExit)) {
-                const id = Number(o?.orderId || o?.orderID)
-                if (Number.isFinite(id) && id > 0) exitOrdersToCancel.push({ symbol: sym, orderId: id })
-              }
-            } catch {}
-          }
-
-          if (exitOrdersToCancel.length > 0) {
-            const api = getBinanceAPI()
-            const toCancel = exitOrdersToCancel.slice(0, 20) // rate-limit safety
-            for (const x of toCancel) {
-              try { await cancelOrder(x.symbol, x.orderId); console.info('[ORPHAN_EXIT_CLEANUP]', { symbol: x.symbol, orderId: x.orderId }) } catch {}
-            }
-          }
-        } catch {}
         
         // Strategy updater: Auto-detect missing positions and trigger countdown
         try {
           const { detectInternalPositionOpened } = await import('../services/strategy-updater/trigger')
-          // Only run detection/cleanup when WS snapshots are READY to avoid accidental registry cleanup
-          if (ordersReady && positionsReady) {
-            detectInternalPositionOpened(ordersRaw, positionsRaw)
-          }
-          // Profit Taker disabled when Top-Up Executor is active
-          try {
-            const { getTopUpExecutorStatus } = await import('../services/top-up-executor/trigger')
-            const st = getTopUpExecutorStatus()
-            if (!st.enabled) {
-              try {
-                const { detectPositionForProfitTaker } = await import('../services/profit-taker/trigger')
-                detectPositionForProfitTaker(ordersRaw, positionsRaw)
-              } catch {}
-            }
-          } catch {}
-          try {
-            const { scheduleTopUpWatchers } = await import('../services/top-up-watcher/utils')
-            scheduleTopUpWatchers(positionsRaw)
-          } catch {}
+          detectInternalPositionOpened(ordersRaw, positionsRaw)
         } catch {}
         
         // Build marks map via REST for a SMALL prioritized set to avoid rate limits
         const marks: Record<string, number> = {}
         try {
           if (Number(__binanceBackoffUntilMs) > Date.now()) { throw new Error(`banned until ${__binanceBackoffUntilMs}`) }
-          // 1) ENTRY orders (BUY internal entries, not reduceOnly/closePosition)
+          // 1) ENTRY orders (BUY LIMIT, not reduceOnly/closePosition)
           const entrySymbols: string[] = []
           try {
             for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
               try {
                 const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-                // Internal entry prefixes cover LIMIT/STOP/MARKET variants
-                const internalEntry = /^(e_l_|e_stl_|e_stm_|e_m_)/.test(clientId)
-                const sideUp = String(o?.side || '').toUpperCase()
-                const typeUp = String(o?.type || '').toUpperCase()
-                const isEntryType = (typeUp === 'LIMIT' || typeUp === 'STOP' || typeUp === 'STOP_MARKET' || typeUp === 'MARKET')
-                const reduceOnly = Boolean(o?.reduceOnly)
-                const closePosition = Boolean(o?.closePosition)
-                const isEntry = internalEntry && isEntryType && (sideUp === 'BUY' || sideUp === 'SELL') && !(reduceOnly || closePosition)
+                const internal = /^(e_l_|x_sl_|x_tp_tm_|x_tp_l_)/.test(clientId)
+                const isEntry = internal && String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT' && !(o?.reduceOnly || o?.closePosition)
                 if (isEntry) entrySymbols.push(String(o?.symbol || ''))
               } catch {}
             }
@@ -2226,7 +1904,7 @@ const server = http.createServer(async (req, res) => {
           for (const s of waitingSymbols) pushUniq(s)
           for (const s of entrySymbols) pushUniq(s)
           for (const s of posSymbols) pushUniq(s)
-          const MAX_MARKS = Math.min(120, ordered.length)
+          const MAX_MARKS = 24
           const arr = ordered.slice(0, MAX_MARKS)
           if (arr.length > 0) {
             const limit = 4
@@ -2251,11 +1929,11 @@ const server = http.createServer(async (req, res) => {
           }
         } catch {}
 
-        // Delta-based cleanup: cancel internal ENTRY orders far from mark (Δ% >= 7)
+        // Delta-based cleanup: cancel internal ENTRY orders far from mark (Δ% >= 10)
         // and remove related internal exits (x_tp_*, x_sl_*), including waiting TP.
         // No additional REST reads are performed beyond what's already used above.
         try {
-          const DELTA_THRESHOLD = 7
+          const DELTA_THRESHOLD = 10
           // Build quick map of current position sizes per symbol (>= 0)
           const posSizeBySym: Map<string, number> = new Map()
           try {
@@ -2270,7 +1948,7 @@ const server = http.createServer(async (req, res) => {
             }
           } catch {}
 
-          // Identify symbols whose internal ENTRY (e_l_*) have Δ% >= 7 and no open position
+          // Identify symbols whose internal ENTRY (e_l_*) have Δ% >= 10 and no open position
           const qualifiedSymbols: Set<string> = new Set()
           try {
             for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
@@ -2280,9 +1958,7 @@ const server = http.createServer(async (req, res) => {
                 const reduceOnly = Boolean((o as any)?.reduceOnly)
                 const closePosition = Boolean((o as any)?.closePosition)
                 const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-                const internalEntry = /^(e_l_|e_stl_|e_stm_|e_m_)/.test(clientId)
-                const isEntryType = (type === 'LIMIT' || type === 'STOP' || type === 'STOP_MARKET' || type === 'MARKET')
-                const isInternalEntry = internalEntry && (side === 'BUY' || side === 'SELL') && isEntryType && !reduceOnly && !closePosition
+                const isInternalEntry = /^e_l_/.test(clientId) && side === 'BUY' && type === 'LIMIT' && !reduceOnly && !closePosition
                 if (!isInternalEntry) continue
                 const sym = String((o as any)?.symbol || '')
                 if (!sym) continue
@@ -2316,12 +1992,10 @@ const server = http.createServer(async (req, res) => {
                   const reduceOnly = Boolean((o as any)?.reduceOnly)
                   const closePosition = Boolean((o as any)?.closePosition)
                   const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-                  const isEntryPrefix = /^(e_l_|e_stl_|e_stm_|e_m_)/.test(clientId)
-                  const isEntryType = (type === 'LIMIT' || type === 'STOP' || type === 'STOP_MARKET' || type === 'MARKET')
-                  const isInternalEntry = isEntryPrefix && (side === 'BUY' || side === 'SELL') && isEntryType && !reduceOnly && !closePosition
+                  const isInternalEntry = /^e_l_/.test(clientId) && side === 'BUY' && type === 'LIMIT' && !reduceOnly && !closePosition
                   const isInternalTp = /^x_tp_/.test(clientId)
-                  // CRITICAL: Never auto-cancel TP orders - only ENTRY orders for delta cleanup
-                  if (isInternalEntry) {
+                  const isInternalSl = /^x_sl_/.test(clientId)
+                  if (isInternalEntry || isInternalTp || isInternalSl) {
                     const key = `${sym}:${orderId}`
                     if (!seen.has(key)) { seen.add(key); toCancel.push({ symbol: sym, orderId }) }
                   }
@@ -2335,26 +2009,30 @@ const server = http.createServer(async (req, res) => {
                 const batch = toCancel.slice(i, i + maxParallel)
                 const settled = await Promise.allSettled(batch.map(async (c) => {
                   const r = await cancelOrder(c.symbol, c.orderId)
-                  try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'sweeper', symbol: c.symbol, orderId: c.orderId, reason: 'delta7_auto_cancel' }) } catch {}
+                  try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'sweeper', symbol: c.symbol, orderId: c.orderId, reason: 'delta10_auto_cancel' }) } catch {}
                   return r
                 }))
                 void settled
               }
             }
 
-            // DO NOT touch waiting TP registry here. Cleanup happens only on explicit entry failure.
+            // Clean waiting TP registry for affected symbols
+            try {
+              for (const sym of Array.from(qualifiedSymbols)) {
+                try { cleanupWaitingTpForSymbol(sym) } catch {}
+              }
+            } catch {}
 
-            try { console.error('[SWEEPER_DELTA7]', { symbols: Array.from(qualifiedSymbols), cancelled: toCancel.length }) } catch {}
+            try { console.error('[SWEEPER_DELTA10]', { symbols: Array.from(qualifiedSymbols), cancelled: toCancel.length }) } catch {}
           }
         } catch {}
 
         // No-entry cleanup: remove internal exits if no ENTRY and no position (create-then-clean)
         try {
-          // Require ordersReady (WS), positions may come from REST snapshot
-          if (ordersReady) {
+          if (ordersReady && positionsReady) {
             const nowMs = Date.now()
             const graceMsRaw = Number((process as any)?.env?.NO_ENTRY_CLEANUP_GRACE_MS)
-            const graceMs = (Number.isFinite(graceMsRaw) && graceMsRaw >= 0) ? graceMsRaw : 5000 // default 5s: remove orphan exits fast
+            const graceMs = (Number.isFinite(graceMsRaw) && graceMsRaw >= 0) ? graceMsRaw : 60000 // default 1 minute
             const hasInternalEntry = (o: any): boolean => {
               try {
                 const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
@@ -2362,23 +2040,13 @@ const server = http.createServer(async (req, res) => {
                 const type = String((o as any)?.type || '').toUpperCase()
                 const reduceOnly = Boolean((o as any)?.reduceOnly)
                 const closePosition = Boolean((o as any)?.closePosition)
-                const isEntryType = (type === 'LIMIT' || type === 'STOP' || type === 'STOP_MARKET' || type === 'MARKET')
-                const isEntryPrefix = /^(e_l_|e_stl_|e_stm_|e_m_)/.test(clientId)
-                const isSideOk = (side === 'BUY' || side === 'SELL')
-                return isEntryPrefix && isSideOk && isEntryType && !reduceOnly && !closePosition
+                return /^e_l_/.test(clientId) && side === 'BUY' && type === 'LIMIT' && !reduceOnly && !closePosition
               } catch { return false }
             }
             const isInternalExit = (o: any): boolean => {
               try {
                 const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-                const sideUp = String((o as any)?.side || '').toUpperCase()
-                const typeUp = String((o as any)?.type || '').toUpperCase()
-                const reduceOnly = Boolean((o as any)?.reduceOnly)
-                const closePosition = Boolean((o as any)?.closePosition)
-                const isTp = /^x_tp_/.test(cid)
-                const isSlInternal = /^x_sl_/.test(cid)
-                const isSlExit = sideUp === 'SELL' && typeUp.includes('STOP') && (reduceOnly || closePosition || isSlInternal)
-                return isTp || isSlInternal || isSlExit
+                return /^x_sl_/.test(cid) || /^x_tp_/.test(cid)
               } catch { return false }
             }
 
@@ -2437,74 +2105,19 @@ const server = http.createServer(async (req, res) => {
                 }))
                 void settled
               }
-              // DO NOT purge waiting TP registry here; keep waiting TP to be promoted once position opens.
+              // Clean waiting TP registry for affected symbols
+              try {
+                for (const sym of Array.from(affectedSymbols)) {
+                  try { cleanupWaitingTpForSymbol(sym) } catch {}
+                }
+              } catch {}
               try { console.error('[NO_ENTRY_CLEANUP]', { symbols: Array.from(affectedSymbols), cancelled: toCancel.length, grace_ms: graceMs }) } catch {}
-            }
-          }
-        } catch {}
-        // AGE-BASED CLEANUP (UI PASS): platí na VŠECHNY objednávky, kromě SL/TP u otevřených pozic
-        try {
-          const ageMin = Number(__pendingCancelAgeMin)
-          if (Number.isFinite(ageMin) && ageMin > 0) {
-            const limitMs = ageMin * 60 * 1000
-            const nowMs = Date.now()
-            const posSizeBySym: Map<string, number> = new Map()
-            try {
-              for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
-                try {
-                  const sym = String((p as any)?.symbol || '')
-                  if (!sym) continue
-                  const amt = Number((p as any)?.positionAmt ?? (p as any)?.size ?? 0)
-                  const size = Number.isFinite(amt) ? Math.abs(amt) : 0
-                  posSizeBySym.set(sym, size)
-                } catch {}
-              }
-            } catch {}
-            const toCancel: Array<{ symbol: string; orderId: number }> = []
-            try {
-              for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
-                try {
-                  const sym = String((o as any)?.symbol || '')
-                  const orderId = Number((o as any)?.orderId ?? (o as any)?.orderID ?? 0) || 0
-                  if (!sym || !orderId) continue
-                  const t = Number((o as any)?.time)
-                  if (!Number.isFinite(t) || t <= 0) continue
-                  const ageOk = (nowMs - t) > limitMs
-                  if (!ageOk) continue
-                  const typeUp = String((o as any)?.type || '').toUpperCase()
-                  const sideUp = String((o as any)?.side || '').toUpperCase()
-                  const reduceOnly = Boolean((o as any)?.reduceOnly)
-                  const closePosition = Boolean((o as any)?.closePosition)
-                  const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-                  const hasPos = (Number(posSizeBySym.get(sym) || 0) > 0)
-                  const isStopOrTp = typeUp.includes('STOP') || typeUp.includes('TAKE_PROFIT')
-                  const isInternalExit = cid ? (/^x_tp_|^x_sl_/.test(cid)) : false
-                  const isProtectedExit = hasPos && isStopOrTp && (reduceOnly || closePosition || isInternalExit)
-                  if (isProtectedExit) continue
-                  toCancel.push({ symbol: sym, orderId })
-                } catch {}
-              }
-            } catch {}
-            if (toCancel.length > 0) {
-              const maxParallel = 4
-              for (let i = 0; i < toCancel.length; i += maxParallel) {
-                const batch = toCancel.slice(i, i + maxParallel)
-                const settled = await Promise.allSettled(batch.map(async (c) => {
-                  const r = await cancelOrder(c.symbol, c.orderId)
-                  try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'sweeper', symbol: c.symbol, orderId: c.orderId, reason: 'age_all_ui' }) } catch {}
-                  return r
-                }))
-                void settled
-              }
-              try { console.error('[AGE_ALL_UI]', { cancelled: toCancel.length, limit_min: ageMin }) } catch {}
             }
           }
         } catch {}
 
         const waiting = getWaitingTpList()
         const last = __lastPlaceOrders ? { request: __lastPlaceOrders.request, result: __lastPlaceOrders.result } : null
-        // Plan map for exits per symbol (used for safe SL auto-create)
-        const plannedExitBySymbol: Record<string, { sl?: number|null; tp?: number|null }> = {}
         // Augment last_planned_by_symbol from last place_orders request if available (no extra calls)
         try {
           const reqOrders = (last?.request && Array.isArray((last as any).request?.orders)) ? (last as any).request.orders : []
@@ -2514,8 +2127,6 @@ const server = http.createServer(async (req, res) => {
               if (!sym) continue
               const amt = Number((o as any)?.amount)
               const lev = Number((o as any)?.leverage)
-              const slPlanned = Number((o as any)?.sl)
-              const tpPlanned = Number((o as any)?.tp)
               if (!__lastPlannedBySymbol[sym]) {
                 __lastPlannedBySymbol[sym] = {
                   amount: Number.isFinite(amt) && amt > 0 ? amt : null,
@@ -2523,219 +2134,7 @@ const server = http.createServer(async (req, res) => {
                   ts: nowIso
                 }
               }
-              plannedExitBySymbol[sym] = {
-                sl: Number.isFinite(slPlanned) && slPlanned > 0 ? slPlanned : null,
-                tp: Number.isFinite(tpPlanned) && tpPlanned > 0 ? tpPlanned : null
-              }
             } catch {}
-          }
-        } catch {}
-        
-        // Merge planned exits with persistent per-symbol memory so symbols from older batches are covered too
-        try {
-          for (const k of Object.keys(__lastPlannedBySymbol)) {
-            const sym = String(k)
-            if (!sym) continue
-            const mem = (__lastPlannedBySymbol as any)[sym] || {}
-            const slMem = Number(mem.sl)
-            const tpMem = Number(mem.tp)
-            if (!plannedExitBySymbol[sym]) plannedExitBySymbol[sym] = { sl: null, tp: null }
-            if (!Number.isFinite(Number((plannedExitBySymbol as any)[sym]?.sl)) && Number.isFinite(slMem) && slMem > 0) {
-              plannedExitBySymbol[sym].sl = slMem
-            }
-            if (!Number.isFinite(Number((plannedExitBySymbol as any)[sym]?.tp)) && Number.isFinite(tpMem) && tpMem > 0) {
-              plannedExitBySymbol[sym].tp = tpMem
-            }
-          }
-        } catch {}
-
-        // Ensure protective SL exists for ENTRY symbols when safe (mark > planned SL)
-        try {
-          // Respect global DISABLE_SL: never auto-create SL
-          if (((tradingCfg as any)?.DISABLE_SL === true)) { throw new Error('sl_disabled_global') }
-          const existingOrders = Array.isArray(ordersRaw) ? ordersRaw : []
-          // Robustní detekce jakéhokoli existujícího SL (CP nebo RO), aby nedocházelo k duplicitám
-          const hasAnySl = (sym: string): boolean => {
-            try {
-              return existingOrders.some((o: any) => {
-                const sameSymbol = String(o?.symbol||'') === sym
-                if (!sameSymbol) return false
-                const sideUp = String(o?.side||'').toUpperCase()
-                const typeUp = String(o?.type||'').toUpperCase()
-                const isStop = typeUp.includes('STOP') && !typeUp.includes('TAKE_PROFIT')
-                if (!isStop) return false
-                const cp = Boolean((o as any)?.closePosition)
-                const ro = Boolean((o as any)?.reduceOnly)
-                const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-                const isInternal = /^x_sl_/.test(cid)
-                // BUY i SELL, protože u SHORT pozice je SL BUY
-                const sideOk = (sideUp === 'SELL' || sideUp === 'BUY')
-                return sideOk && (cp || ro || isInternal)
-              })
-            } catch { return false }
-          }
-          const entrySyms: string[] = []
-          const entryOrderSideBySymbol: Record<string, 'BUY' | 'SELL'> = {}
-          for (const o of existingOrders) {
-            try {
-              const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-              const side = String((o as any)?.side||'').toUpperCase()
-              const type = String((o as any)?.type||'').toUpperCase()
-              const reduceOnly = Boolean((o as any)?.reduceOnly)
-              const closePosition = Boolean((o as any)?.closePosition)
-              const isInternalPrefix = /^(sv2_e_l_|sv2_e_stl_|sv2_e_stm_|e_l_|e_stl_|e_stm_)/.test(cid)
-              const isEntryType = (type==='LIMIT'||type==='STOP'||type==='STOP_MARKET')
-              const isInternalEntry = isInternalPrefix && isEntryType && !reduceOnly && !closePosition
-              if (isInternalEntry) {
-                const sym = String((o as any)?.symbol||'')
-                if (sym) {
-                  entrySyms.push(sym)
-                  entryOrderSideBySymbol[sym] = (side === 'SELL' ? 'SELL' : 'BUY')
-                }
-              }
-            } catch {}
-          }
-          const toCreate: Array<{ symbol: string; stopPrice: number }> = []
-          const toCreateExits: Array<{ symbol: string; stopPrice: number; exitSide: 'BUY'|'SELL'; entrySide: 'BUY'|'SELL' }> = []
-          for (const sym of Array.from(new Set(entrySyms)).filter(Boolean)) {
-            try {
-              if (hasAnySl(sym)) continue
-              const plan = plannedExitBySymbol[sym]
-              const slWanted = Number(plan?.sl)
-              const mark = Number((marks as any)?.[sym])
-              const entrySide = (String(entryOrderSideBySymbol[sym] || 'BUY').toUpperCase() === 'SELL' ? 'SELL' : 'BUY') as 'BUY'|'SELL'
-              const exitSide = (entrySide === 'BUY' ? 'SELL' : 'BUY') as 'BUY'|'SELL'
-              const cond = Number.isFinite(slWanted) && slWanted > 0 && Number.isFinite(mark) && (
-                (exitSide === 'SELL' && mark > slWanted) ||
-                (exitSide === 'BUY' && mark < slWanted)
-              )
-              if (cond) {
-                toCreateExits.push({ symbol: sym, stopPrice: slWanted, exitSide, entrySide })
-              }
-            } catch {}
-          }
-          if (toCreateExits.length > 0) {
-            const api = getBinanceAPI() as any
-            let isHedgeMode = false
-            try { isHedgeMode = Boolean(await api.getHedgeMode()) } catch {}
-            const maxParallel = 3
-            for (let i = 0; i < toCreateExits.length; i += maxParallel) {
-              const batch = toCreateExits.slice(i, i + maxParallel)
-              await Promise.allSettled(batch.map(async (x) => {
-                const base: any = {
-                  symbol: x.symbol,
-                  side: x.exitSide,
-                  type: 'STOP_MARKET',
-                  stopPrice: String(x.stopPrice),
-                  closePosition: true,
-                  workingType: 'MARK_PRICE',
-                  newClientOrderId: makeId('x_sl_auto'),
-                  newOrderRespType: 'RESULT'
-                }
-                if (isHedgeMode) base.positionSide = x.entrySide === 'BUY' ? 'LONG' : 'SHORT'
-                return api.placeOrder(base)
-              }))
-            }
-          }
-        } catch {}
-
-        // PREENTRY SL DEDUP: pokud je otevřen ENTRY a není pozice, povolit max 1 SL (ponechat nejnovější)
-        try {
-          if (ordersReady) {
-            const nowMs = Date.now()
-            const dedupGraceRaw = Number((process as any)?.env?.PREENTRY_SL_DEDUP_GRACE_MS)
-            const dedupGraceMs = (Number.isFinite(dedupGraceRaw) && dedupGraceRaw >= 0) ? dedupGraceRaw : 5000
-
-            // Připrav mapy entry a pozic (nezávisle na předchozím bloku)
-            const entryBySym = new Set<string>()
-            try {
-              for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
-                try {
-                  const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-                  const side = String((o as any)?.side || '').toUpperCase()
-                  const type = String((o as any)?.type || '').toUpperCase()
-                  const reduceOnly = Boolean((o as any)?.reduceOnly)
-                  const closePosition = Boolean((o as any)?.closePosition)
-                  const isEntryType = (type === 'LIMIT' || type === 'STOP' || type === 'STOP_MARKET')
-                  if (/^e_l_/.test(cid) && side === 'BUY' && isEntryType && !reduceOnly && !closePosition) {
-                    entryBySym.add(String((o as any)?.symbol || ''))
-                  }
-                } catch {}
-              }
-            } catch {}
-
-            const posSizeBySym: Map<string, number> = new Map()
-            try {
-              for (const p of (Array.isArray(positionsRaw) ? positionsRaw : [])) {
-                try {
-                  const sym = String((p as any)?.symbol || '')
-                  if (!sym) continue
-                  const amt = Number((p as any)?.positionAmt ?? (p as any)?.size ?? 0)
-                  const size = Number.isFinite(amt) ? Math.abs(amt) : 0
-                  posSizeBySym.set(sym, size)
-                } catch {}
-              }
-            } catch {}
-
-            // Seznam SL per symbol
-            const slBySym = new Map<string, Array<{ orderId: number; createdAt: number; cp: boolean; ro: boolean; internal: boolean }>>()
-            try {
-              for (const o of (Array.isArray(ordersRaw) ? ordersRaw : [])) {
-                try {
-                  const sym = String((o as any)?.symbol || '')
-                  const side = String((o as any)?.side || '').toUpperCase()
-                  const type = String((o as any)?.type || '').toUpperCase()
-                  // SL mohou být BUY i SELL podle směru pozice (SHORT -> BUY)
-                  if (!sym || !type.includes('STOP')) continue
-                  const cp = Boolean((o as any)?.closePosition)
-                  const ro = Boolean((o as any)?.reduceOnly)
-                  const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-                  const internal = /^x_sl_/.test(cid)
-                  if (!(cp || ro || internal)) continue
-                  const id = Number((o as any)?.orderId ?? (o as any)?.orderID ?? 0) || 0
-                  if (!id) continue
-                  const t = Number((o as any)?.time)
-                  const createdAt = Number.isFinite(t) && t > 0 ? t : 0
-                  const list = slBySym.get(sym) || []
-                  list.push({ orderId: id, createdAt, cp, ro, internal })
-                  slBySym.set(sym, list)
-                } catch {}
-              }
-            } catch {}
-
-            const toCancel: Array<{ symbol: string; orderId: number }> = []
-            for (const [sym, slListRaw] of slBySym.entries()) {
-              try {
-                const hasEntry = entryBySym.has(sym)
-                const hasPos = (Number(posSizeBySym.get(sym) || 0) > 0)
-                if (!hasEntry || hasPos) continue
-                const slList = (slListRaw || []).slice().sort((a, b) => (a.createdAt - b.createdAt))
-                if (slList.length <= 1) continue
-                // ponechat nejnovější, starší zrušit po grace
-                const latest = slList[slList.length - 1]
-                for (let i = 0; i < slList.length - 1; i += 1) {
-                  const it = slList[i]
-                  const ageOk = (nowMs - it.createdAt) > dedupGraceMs
-                  if (ageOk && it.orderId !== latest.orderId) {
-                    toCancel.push({ symbol: sym, orderId: it.orderId })
-                  }
-                }
-              } catch {}
-            }
-
-            if (toCancel.length > 0) {
-              const maxParallel = 4
-              for (let i = 0; i < toCancel.length; i += maxParallel) {
-                const batch = toCancel.slice(i, i + maxParallel)
-                const settled = await Promise.allSettled(batch.map(async (c) => {
-                  const r = await cancelOrder(c.symbol, c.orderId)
-                  try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'sweeper', symbol: c.symbol, orderId: c.orderId, reason: 'preentry_sl_dedup' }) } catch {}
-                  return r
-                }))
-                void settled
-              }
-              try { console.error('[PREENTRY_SL_DEDUP]', { cancelled: toCancel.length, grace_ms: dedupGraceMs }) } catch {}
-            }
           }
         } catch {}
         // Build leverage map for ALL symbols (even zero-size) from raw positions (fallback for UI)
@@ -2749,21 +2148,6 @@ const server = http.createServer(async (req, res) => {
             } catch {}
           }
         } catch {}
-        // Build quick map of last planned ENTRY per symbol from last place_orders request (for Δ% fallback)
-        const plannedEntryBySymbol: Record<string, number> = (() => {
-          const map: Record<string, number> = {}
-          try {
-            const ords = (last?.request && Array.isArray((last as any).request?.orders)) ? (last as any).request.orders : []
-            for (const o of ords) {
-              try {
-                const sym = String((o as any)?.symbol || '')
-                const e = Number((o as any)?.entry)
-                if (sym && Number.isFinite(e) && e > 0) map[sym] = e
-              } catch {}
-            }
-          } catch {}
-          return map
-        })()
 
         // Normalize open orders to UI shape (consistent with /api/open_orders)
         let openOrdersUi = (Array.isArray(ordersRaw) ? ordersRaw : []).map((o: any) => ({
@@ -2779,37 +2163,31 @@ const server = http.createServer(async (req, res) => {
           closePosition: Boolean(o?.closePosition ?? false),
           positionSide: (typeof o?.positionSide === 'string' && o.positionSide) ? String(o.positionSide) : null,
           clientOrderId: ((): string | null => { const id = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || ''); return id || null })(),
-          // Strategy Updater marker: authoritative registry only (no prefix heuristics)
-          isStrategyUpdater: ((): boolean => {
-            try {
-              // Clear require cache to get fresh registry state
-              const registryPath = require.resolve('../services/strategy-updater/registry')
-              delete require.cache[registryPath]
-              const { isStrategyOrderId } = require('../services/strategy-updater/registry') as { isStrategyOrderId: (id: number | string | null | undefined) => boolean }
-              const oid = Number(o?.orderId ?? o?.orderID ?? 0) || 0
-              const resultRegistry = isStrategyOrderId(oid)
-              if (resultRegistry) {
-                console.log('[DEBUG_SERVER_STRATEGY_FLAG]', { orderId: oid, clientOrderId: String((o as any)?.clientOrderId || ''), source: 'registry', isStrategyUpdater: true })
-              }
-              return resultRegistry
-            } catch { return false }
-          })(),
-          // Mark strategy-updater TP/SL (x_tp_*/x_sl_*) and internal entries (e_l_/e_stl_/e_stm_/e_m_) as internal or by known orderId set
+          // Mark strategy-updater TP/SL (x_tp_*/x_sl_*) and internal entries (e_l_) as internal or by known orderId set
+          // CRITICAL: SHORT-only system - ALL LONG positions are EXTERNAL (but not BUY exits for SHORT!)
           isExternal: ((): boolean => {
             try {
-              const idStr = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+              // SHORT-only system: LONG position orders are automatically external
+              // But BUY orders can be our SHORT exits (TP/SL), so check by positionSide only
               const posSide = String((o as any)?.positionSide || '').toUpperCase()
-              const side = String((o as any)?.side || '').toUpperCase()
-              const reduceOnly = Boolean((o as any)?.reduceOnly)
-              const closePosition = Boolean((o as any)?.closePosition)
-              // SHORT nikdy external
-              if (posSide === 'SHORT') return false
-              // Short entry kontext (SELL bez exit flagů a SHORT posSide neznámý) – chovej se jako interní
-              if (!posSide && side === 'SELL' && !(reduceOnly || closePosition)) return false
-              // Consider known internal prefixes only; avoid dynamic requires in hot path
-              // Treat strategy-updater immediate exit as internal too (sv2_x_exit_now)
-              return idStr ? !/^(e_l_|e_stl_|e_stm_|e_m_|x_sl_|x_tp_|sv2_x_exit_now)/.test(idStr) : true
+              if (posSide === 'LONG') return true
+              
+              const idStr = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
+              const idIsInternal = idStr ? /^(sv2_)?(e_l_|x_sl_|x_tp_)/.test(idStr) : false
+              if (idIsInternal) return false
+              const n = Number(o?.orderId ?? 0)
+              const { isStrategyOrderId } = require('../services/strategy-updater/registry')
+              if (Number.isFinite(n) && isStrategyOrderId(n)) return false
+              return true
             } catch { return true }
+          })(),
+          // Mark orders created by Strategy Updater for green highlight
+          isStrategyUpdater: ((): boolean => {
+            try {
+              const n = Number(o?.orderId ?? 0)
+              const { isStrategyOrderId } = require('../services/strategy-updater/registry')
+              return Number.isFinite(n) && isStrategyOrderId(n)
+            } catch { return false }
           })(),
           createdAt: (() => {
             if (typeof (o as any)?.createdAt === 'string') return String((o as any).createdAt)
@@ -2824,7 +2202,7 @@ const server = http.createServer(async (req, res) => {
             return Number.isFinite(tt) && tt > 0 ? new Date(tt).toISOString() : null
           })()
         }))
-        // Attach leverage, investedUsd and precomputed deltaPctEntry per order for complete UI rendering (no extra calls)
+        // Attach leverage and investedUsd per order for complete UI rendering (no extra calls)
         try {
           openOrdersUi = openOrdersUi.map((o: any) => {
             const planned = __lastPlannedBySymbol[o.symbol]
@@ -2835,9 +2213,7 @@ const server = http.createServer(async (req, res) => {
               : (Number.isFinite(levFromPlanned) && levFromPlanned > 0 ? Math.floor(levFromPlanned) : null)
             let investedUsd: number | null = null
             try {
-              const typeUp = String(o.type || '').toUpperCase()
-              const isEntryType = (typeUp === 'LIMIT' || typeUp === 'STOP' || typeUp === 'STOP_MARKET' || typeUp === 'MARKET')
-              const isEntry = isEntryType && !(o.reduceOnly || o.closePosition)
+              const isEntry = String(o.side || '').toUpperCase() === 'BUY' && !(o.reduceOnly || o.closePosition)
               // Compute investedUsd only for internal entries
               const internal = /^(e_l_|x_sl_|x_tp_tm_|x_tp_l_)/.test(String(o.clientOrderId || ''))
               if (isEntry && internal) {
@@ -2853,49 +2229,16 @@ const server = http.createServer(async (req, res) => {
                 }
               }
             } catch {}
-            // Precompute Δ% to entry target for ENTRY orders
-            let deltaPctEntry: number | null = null
-            try {
-              const typeUp = String(o.type || '').toUpperCase()
-              const isEntryType = (typeUp === 'LIMIT' || typeUp === 'STOP' || typeUp === 'STOP_MARKET' || typeUp === 'MARKET')
-              const isEntry = isEntryType && !(o.reduceOnly || o.closePosition)
-              if (isEntry) {
-                const priceNum = Number(o.price)
-                const stopNum = Number(o.stopPrice)
-                const hasPrice = Number.isFinite(priceNum) && priceNum > 0
-                const hasStop = Number.isFinite(stopNum) && stopNum > 0
-                const target = (() => {
-                  if (typeUp === 'LIMIT') return hasPrice ? priceNum : (hasStop ? stopNum : null)
-                  if (typeUp === 'STOP' || typeUp === 'STOP_MARKET') return hasStop ? stopNum : (hasPrice ? priceNum : null)
-                  return hasStop ? stopNum : (hasPrice ? priceNum : null)
-                })()
-                const plannedE = Number(plannedEntryBySymbol[o.symbol])
-                const tgt = Number.isFinite(target as any) && (target as number) > 0 ? (target as number) : (Number.isFinite(plannedE) && plannedE > 0 ? plannedE : null)
-                const mark = Number((marks as any)?.[o.symbol])
-                if (Number.isFinite(mark) && mark > 0 && Number.isFinite(tgt as any) && (tgt as number) > 0) {
-                  deltaPctEntry = Math.abs(((tgt as number) - mark) / mark) * 100
-                }
-              }
-            } catch {}
             const isExternal = (() => {
-              try {
-                const id = String(o.clientOrderId || '')
-                const side = String(o.side || '').toUpperCase()
-                const reduceOnly = Boolean(o.reduceOnly || o.closePosition)
-                const posSide = String((o as any)?.positionSide || '').toUpperCase()
-                // Hard rule: SHORT orders are never external
-                if (posSide === 'SHORT') return false
-                // Internal only if our project prefix 'sv2_' is present
-                const isOur = id.startsWith('sv2_')
-                if (!isOur) return true
-                const isExitInternal = /^(sv2_x_sl_|sv2_x_tp_)/.test(id)
-                const hasEntryPrefix = /^(sv2_e_l_|sv2_e_stl_|sv2_e_stm_|sv2_e_m_)/.test(id)
-                const isShortContext = posSide ? (posSide === 'SHORT') : true
-                const isShortEntry = hasEntryPrefix && isShortContext && side === 'SELL' && !reduceOnly
-                return !(isExitInternal || isShortEntry)
-              } catch { return true }
+              // SHORT-only system: LONG position orders are automatically external
+              // But BUY orders can be our SHORT exits (TP/SL), so check by positionSide only
+              const posSide = String(o?.positionSide || '').toUpperCase()
+              if (posSide === 'LONG') return true
+              
+              const id = String(o.clientOrderId || '')
+              return id ? !/^(sv2_)?(e_l_|x_sl_|x_tp_tm_|x_tp_l_)/.test(id) : true
             })()
-            return { ...o, leverage, investedUsd, isExternal, deltaPctEntry }
+            return { ...o, leverage, investedUsd, isExternal }
           })
         } catch {}
         // Normalize positions and filter zero-size entries (match /api/positions)
@@ -2920,6 +2263,8 @@ const server = http.createServer(async (req, res) => {
             } catch {}
             const side = (typeof p?.positionSide === 'string' && p.positionSide) ? String(p.positionSide) : (Number.isFinite(amt) ? (amt >= 0 ? 'LONG' : 'SHORT') : '')
             const upd = Number(p?.updateTime)
+            // SHORT-only system: LONG positions are external
+            const isExternal = side === 'LONG'
             return {
               symbol: String(p?.symbol || ''),
               positionSide: side || null,
@@ -2928,11 +2273,13 @@ const server = http.createServer(async (req, res) => {
               markPrice: mark,
               unrealizedPnl: Number.isFinite(pnl) ? pnl : null,
               leverage: lev,
-              updatedAt: Number.isFinite(upd) && upd > 0 ? new Date(upd).toISOString() : (Number.isFinite((p as any)?.updatedAt) ? new Date((p as any).updatedAt).toISOString() : null)
+              updatedAt: Number.isFinite(upd) && upd > 0 ? new Date(upd).toISOString() : (Number.isFinite((p as any)?.updatedAt) ? new Date((p as any).updatedAt).toISOString() : null),
+              isExternal
             }
           })
           .filter((p: any) => Number.isFinite(p.size) && p.size > 0)
         // Timestamps overview for UI (diagnostic and clarity)
+        const nowIso = new Date().toISOString()
         const maxIso = (arr: any[], key: string): string | null => {
           try {
             let best: number = 0
@@ -2985,15 +2332,16 @@ const server = http.createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store')
       const t0 = performance.now()
       try {
-        const universeParam = url.searchParams.get('universe')
-        const universeStrategy = (universeParam || 'short_simple') as any
+        // universeStrategy: volume (default) | gainers via query ?universe=gainers
+        const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
+        const universeStrategy = (['gainers', 'losers', 'volume', 'overheat'].includes(uniParam) ? uniParam : 'losers') as 'gainers'|'losers'|'volume'|'overheat'
         const fresh = String(url.searchParams.get('fresh') || '1') === '1'
-        const topN = Number(url.searchParams.get('topN') || '50') || 50
+        const topN = Number(url.searchParams.get('topN') || '')
         // Persist poslední UI snapshot kritéria pro background autopilot
         try {
           persistBackgroundCriteria({ universe: universeStrategy as any, topN: Number.isFinite(topN) ? topN : null, fresh })
         } catch {}
-        const snapshot = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: topN, fresh, allowPartial: true })
+        const snapshot = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh, allowPartial: true })
         ;(snapshot as any).duration_ms = Math.round(performance.now() - t0)
         delete (snapshot as any).latency_ms
         const body = JSON.stringify(snapshot)
@@ -3026,14 +2374,15 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+
     if (url.pathname === '/api/snapshot_light' || url.pathname === '/api/snapshot_pro') {
       res.setHeader('Cache-Control', 'no-store')
       const pro = url.pathname === '/api/snapshot_pro'
       try {
-        const universeParam = url.searchParams.get('universe')
-        const universeStrategy = (universeParam || 'short_simple') as any
+        const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
+        const universeStrategy = (['gainers', 'losers', 'volume', 'overheat'].includes(uniParam) ? uniParam : 'losers') as 'gainers'|'losers'|'volume'|'overheat'
         const fresh = String(url.searchParams.get('fresh') || '1') === '1'
-        const topN = Number(url.searchParams.get('topN') || '50') || 50
+        const topN = Number(url.searchParams.get('topN') || '')
         // If a symbol is requested, force-include it in the universe build so it can't be dropped
         const includeSymbols = (() => {
           const s = url.searchParams.get('symbol')
@@ -3041,58 +2390,28 @@ const server = http.createServer(async (req, res) => {
           const v = String(s).toUpperCase()
           return [v]
         })()
-        const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: topN, includeSymbols, fresh, allowPartial: true })
-        type K = { time: string; open: number; high: number; low: number; close: number }
+        const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, includeSymbols, fresh, allowPartial: true })
+        type K = { time: string; open: number; high: number; low: number; close: number; volume: number }
         const toBars = (arr: any[], keep: number): K[] => {
           if (!Array.isArray(arr)) return []
-          const base = arr.map((k: any) => ({
-            t: Date.parse(String(k.openTime)),
-            open: Number(k.open), high: Number(k.high), low: Number(k.low), close: Number(k.close), volume: Number(k.volume)
-          })).filter(k => Number.isFinite(k.t) && Number.isFinite(k.open) && Number.isFinite(k.close))
-          if (base.length === 0) return []
-          // Determine step from last two bars (ms)
-          const step = base.length >= 2 ? Math.max(1, base[base.length-1].t - base[base.length-2].t) : 60 * 1000
-          const aligned: typeof base = [base[0]]
-          for (let i = 1; i < base.length; i++) {
-            const prev = aligned[aligned.length-1]
-            const cur = base[i]
-            let expected = prev.t + step
-            while (cur.t - expected >= step) {
-              // fill missing candle with previous close (flat bar, zero volume)
-              aligned.push({ t: expected, open: prev.close, high: prev.close, low: prev.close, close: prev.close, volume: 0 })
-              expected += step
-            }
-            aligned.push(cur)
-          }
-          const out = aligned.slice(-keep)
-          return out.map(k => ({ time: toIsoNoMs(new Date(k.t).toISOString()), open: k.open, high: k.high, low: k.low, close: k.close, volume: k.volume }))
+          const sliced = arr.slice(-keep)
+          // ensure ascending (Binance returns ascending already)
+          return sliced.map((k: any) => ({ time: String(k.openTime), open: Number(k.open), high: Number(k.high), low: Number(k.low), close: Number(k.close), volume: Number(k.volume) }))
         }
-          const symbols = (snap.universe || []).map((u: any) => {
+        const symbols = (snap.universe || []).map((u: any) => {
           const H1 = toBars(u.klines?.H1 || [], 24)
           const M15 = toBars(u.klines?.M15 || [], 96)
-          const h1Close = H1.map(b => b.close)
-          const m15Close = M15.map(b => b.close)
-            const atr_h1_pct = atrPctFromBars(H1 as any)
-            const atr_m15_pct = atrPctFromBars(M15 as any)
-            const h1Last = h1Close.length ? h1Close[h1Close.length - 1] : null
-            const m15Last = m15Close.length ? m15Close[m15Close.length - 1] : null
-            const atr_h1_abs = (atr_h1_pct != null && h1Last != null) ? (atr_h1_pct / 100) * h1Last : null
-            const atr_m15_abs = (atr_m15_pct != null && m15Last != null) ? (atr_m15_pct / 100) * m15Last : null
           const base: any = {
             symbol: u.symbol,
             price: Number(u.price ?? (H1.length ? H1[H1.length-1].close : null)),
-            price_origin: (u as any)?.price_origin ?? 'last',
-            price_ts: (u as any)?.price_ts ?? null,
             ohlcv: { h1: H1, m15: M15 },
             indicators: {
-              atr_h1: atr_h1_abs,
-              atr_m15: atr_m15_abs,
-              atr_h1_pct,
-              atr_m15_pct,
-              ema_h1: { 20: emaShared(h1Close, 20), 50: emaShared(h1Close, 50), 200: emaShared(h1Close, 200) },
-              ema_m15: { 20: emaShared(m15Close, 20), 50: emaShared(m15Close, 50), 200: emaShared(m15Close, 200) },
-              rsi_h1: rsiShared(h1Close, 14),
-              rsi_m15: rsiShared(m15Close, 14),
+              atr_h1: u.atr_h1 ?? null,
+              atr_m15: u.atr_m15 ?? null,
+              ema_h1: { 20: u.ema20_H1 ?? null, 50: u.ema50_H1 ?? null, 200: u.ema200_H1 ?? null },
+              ema_m15: { 20: u.ema20_M15 ?? null, 50: u.ema50_M15 ?? null, 200: u.ema200_M15 ?? null },
+              rsi_h1: u.rsi_H1 ?? null,
+              rsi_m15: u.rsi_M15 ?? null,
               vwap_today: u.vwap_today ?? u.vwap_daily ?? null
             },
             levels: {
@@ -3101,7 +2420,8 @@ const server = http.createServer(async (req, res) => {
             },
             market: {
               spread_bps: u.spread_bps ?? null,
-              liquidity_usd: (u.liquidity_usd ?? ((u.liquidity_usd_1pct ? (u.liquidity_usd_1pct.bids + u.liquidity_usd_1pct.asks) : (u.liquidity_usd_0_5pct ? (u.liquidity_usd_0_5pct.bids + u.liquidity_usd_0_5pct.asks) : 0)))) || null,
+              liquidity_usd: (u.liquidity_usd ?? ((u.liquidity_usd_0_5pct?.bids||0)+(u.liquidity_usd_0_5pct?.asks||0)+(u.liquidity_usd_1pct?.bids||0)+(u.liquidity_usd_1pct?.asks||0))) || null,
+              volume_24h: u.volume24h_usd ?? null,
               oi_change_1h_pct: u.oi_change_1h_pct ?? null,
               funding_8h_pct: u.funding_8h_pct ?? null
             }
@@ -3177,7 +2497,7 @@ const server = http.createServer(async (req, res) => {
           }
           throw lastErr
         }
-        const snap = await retry(() => buildMarketRawSnapshot({ universeStrategy: 'volume', desiredTopN: 1, includeSymbols: [symbol], fresh: true, allowPartial: true }))
+        const snap = await retry(() => buildMarketRawSnapshot({ universeStrategy: 'volume', desiredTopN: 1, includeSymbols: [symbol], fresh: true }))
         
         // Find the symbol in universe or btc/eth
         let targetItem: any = null
@@ -3200,46 +2520,66 @@ const server = http.createServer(async (req, res) => {
         }
         const toBars = (arr: any[], keep: number) => {
           if (!Array.isArray(arr)) return []
-          const base = arr.map((k: any) => ({
-            t: Date.parse(String(k.openTime)),
-            open: Number(k.open), high: Number(k.high), low: Number(k.low), close: Number(k.close), volume: Number(k.volume)
-          })).filter(k => Number.isFinite(k.t) && Number.isFinite(k.open) && Number.isFinite(k.close))
-          if (base.length === 0) return []
-          const step = base.length >= 2 ? Math.max(1, base[base.length-1].t - base[base.length-2].t) : 60*1000
-          const aligned: typeof base = [base[0]]
-          for (let i=1;i<base.length;i++) {
-            const prev = aligned[aligned.length-1]
-            const cur = base[i]
-            let expected = prev.t + step
-            while (cur.t - expected >= step) {
-              aligned.push({ t: expected, open: prev.close, high: prev.close, low: prev.close, close: prev.close, volume: 0 })
-              expected += step
-            }
-            aligned.push(cur)
-          }
-          const out = aligned.slice(-keep)
-          return out.map(k => ({ time: toIsoNoMs(new Date(k.t).toISOString()), open: k.open, high: k.high, low: k.low, close: k.close, volume: k.volume }))
+          const slice = arr.slice(-keep)
+          return slice.map((k: any) => ({
+            time: toIsoNoMs(k.openTime),
+            open: Number(k.open),
+            high: Number(k.high),
+            low: Number(k.low),
+            close: Number(k.close),
+            volume: Number(k.volume)
+          }))
         }
         
-          const h1 = toBars(targetItem.klines?.H1 || [], 24)
-          const m15 = toBars(targetItem.klines?.M15 || [], 40)
-        const h1Close = h1.map(b => b.close)
-        const m15Close = m15.map(b => b.close)
-          const asset = {
+        const h1 = toBars(targetItem.klines?.H1 || [], 24)
+        const m15 = toBars(targetItem.klines?.M15 || [], 40)
+        
+        // ENRICHMENT: Add raw klines for pattern recognition (keep more candles for AI analysis)
+        const rawKlines = {
+          M5: Array.isArray(targetItem.klines?.M5) ? targetItem.klines.M5.slice(-60).map((k: any) => ({
+            openTime: toIsoNoMs(k.openTime),
+            open: Number(k.open),
+            high: Number(k.high),
+            low: Number(k.low),
+            close: Number(k.close),
+            volume: Number(k.volume),
+            closeTime: toIsoNoMs(k.closeTime)
+          })) : [],
+          M15: Array.isArray(targetItem.klines?.M15) ? targetItem.klines.M15.slice(-96).map((k: any) => ({
+            openTime: toIsoNoMs(k.openTime),
+            open: Number(k.open),
+            high: Number(k.high),
+            low: Number(k.low),
+            close: Number(k.close),
+            volume: Number(k.volume),
+            closeTime: toIsoNoMs(k.closeTime)
+          })) : [],
+          H1: Array.isArray(targetItem.klines?.H1) ? targetItem.klines.H1.slice(-48).map((k: any) => ({
+            openTime: toIsoNoMs(k.openTime),
+            open: Number(k.open),
+            high: Number(k.high),
+            low: Number(k.low),
+            close: Number(k.close),
+            volume: Number(k.volume),
+            closeTime: toIsoNoMs(k.closeTime)
+          })) : []
+        }
+        
+        const asset = {
           symbol: targetItem.symbol,
-            price: Number(targetItem.price ?? (h1.length ? h1[h1.length-1].close : null)),
-            price_origin: (targetItem as any)?.price_origin ?? 'last',
-            price_ts: (targetItem as any)?.price_ts ?? null,
+          timestamp: toIsoNoMs((snap as any)?.timestamp || new Date().toISOString()),
+          price: Number(targetItem.price ?? (h1.length ? h1[h1.length-1].close : null)),
           ohlcv: { h1, m15 },
+          klines: rawKlines, // NEW: Raw klines for AI pattern recognition
           indicators: {
-            atr_h1: (()=>{ const pct = atrPctFromBars(h1 as any); const last = h1Close.length ? h1Close[h1Close.length-1] : null; return (pct!=null && last!=null) ? (pct/100)*last : null })(),
-            atr_m15: (()=>{ const pct = atrPctFromBars(m15 as any); const last = m15Close.length ? m15Close[m15Close.length-1] : null; return (pct!=null && last!=null) ? (pct/100)*last : null })(),
-            atr_h1_pct: atrPctFromBars(h1 as any),
-            atr_m15_pct: atrPctFromBars(m15 as any),
-            ema_h1: { 20: emaShared(h1Close, 20), 50: emaShared(h1Close, 50), 200: emaShared(h1Close, 200) },
-            ema_m15: { 20: emaShared(m15Close, 20), 50: emaShared(m15Close, 50), 200: emaShared(m15Close, 200) },
-            rsi_h1: rsiShared(h1Close, 14),
-            rsi_m15: rsiShared(m15Close, 14),
+            atr_h1: targetItem.atr_h1 ?? null,
+            atr_m15: targetItem.atr_m15 ?? null,
+            atr_pct_h1: targetItem.atr_pct_H1 ?? null,
+            atr_pct_m15: targetItem.atr_pct_M15 ?? null,
+            ema_h1: { 20: targetItem.ema20_H1 ?? null, 50: targetItem.ema50_H1 ?? null, 200: targetItem.ema200_H1 ?? null },
+            ema_m15: { 20: targetItem.ema20_M15 ?? null, 50: targetItem.ema50_M15 ?? null, 200: targetItem.ema200_M15 ?? null },
+            rsi_h1: targetItem.rsi_H1 ?? null,
+            rsi_m15: targetItem.rsi_M15 ?? null,
             vwap_today: targetItem.vwap_today ?? targetItem.vwap_daily ?? null
           },
           levels: {
@@ -3249,59 +2589,17 @@ const server = http.createServer(async (req, res) => {
           market: {
             spread_bps: targetItem.spread_bps ?? null,
             liquidity_usd: targetItem.liquidity_usd ?? null,
+            volume_24h: targetItem.volume24h_usd ?? null,
             oi_change_1h_pct: targetItem.oi_change_1h_pct ?? null,
             funding_8h_pct: targetItem.funding_8h_pct ?? null
           }
         }
-
-        // Order book snapshot (REST-only): OBI, microprice, walls, slippage
-        try {
-          const { getDepth20, calcObi, findNearestWalls, estimateSlippageBps, calcDepthWithinPctUSD } = await import('./fetcher/binance')
-          const depth = await getDepth20(symbol)
-          if (depth && Array.isArray(depth.bids) && Array.isArray(depth.asks) && depth.bids.length && depth.asks.length) {
-            const bestBidPx = Number(depth.bids[0]?.[0] || 0)
-            const bestBidQty = Number(depth.bids[0]?.[1] || 0)
-            const bestAskPx = Number(depth.asks[0]?.[0] || 0)
-            const bestAskQty = Number(depth.asks[0]?.[1] || 0)
-            const denom = bestBidQty + bestAskQty
-            const microprice = (bestBidPx > 0 && bestAskPx > 0 && denom > 0)
-              ? ((bestBidPx * bestAskQty) + (bestAskPx * bestBidQty)) / denom
-              : null
-            const obi5 = calcObi(depth as any, 5)
-            const obi20 = calcObi(depth as any, 20)
-            const walls = findNearestWalls(depth as any, microprice ?? undefined)
-            // Heuristic tranche for slippage estimate: 1000 USD buy
-            const estSlip = estimateSlippageBps(depth as any, 1000, 'BUY', microprice ?? undefined)
-            // Depth within ±0.5% around mark/microprice for sanity check
-            const depth05 = calcDepthWithinPctUSD(depth.bids as any, depth.asks as any, microprice ?? bestAskPx, 0.005)
-            ;(asset as any).order_book = {
-              microprice: Number.isFinite(microprice as any) ? microprice : null,
-              obi5: (typeof obi5 === 'number' && Number.isFinite(obi5)) ? obi5 : null,
-              obi20: (typeof obi20 === 'number' && Number.isFinite(obi20)) ? obi20 : null,
-              nearestAskWallPrice: Number.isFinite(walls?.nearestAskWallPrice as any) ? walls?.nearestAskWallPrice : null,
-              nearestAskWallDistBps: Number.isFinite(walls?.nearestAskWallDistBps as any) ? walls?.nearestAskWallDistBps : null,
-              nearestBidWallPrice: Number.isFinite(walls?.nearestBidWallPrice as any) ? walls?.nearestBidWallPrice : null,
-              nearestBidWallDistBps: Number.isFinite(walls?.nearestBidWallDistBps as any) ? walls?.nearestBidWallDistBps : null,
-              estSlippageBps: (typeof estSlip === 'number' && Number.isFinite(estSlip)) ? estSlip : null,
-              depth_usd_pm05: depth05 ? { bids: depth05.bids, asks: depth05.asks } : null
-            }
-          } else {
-            ;(asset as any).order_book = null
-          }
-        } catch { (asset as any).order_book = null }
         
         const out = {
           timestamp: toIsoNoMs((snap as any)?.timestamp || new Date().toISOString()),
           exchange: 'Binance',
           market_type: 'perp',
-          assets: [
-            {
-              ...asset,
-              price_ts_utc: (asset as any)?.price_ts ?? null,
-              snapshot_ts_utc: toIsoNoMs((snap as any)?.timestamp || new Date().toISOString()),
-              is_last_candle_closed: (() => { try { const arr = (asset as any)?.ohlcv?.m15 || []; const last = arr[arr.length - 1]; return last ? (Date.parse(String(last.time)) <= Date.now()) : false } catch { return false } })()
-            }
-          ]
+          assets: [asset]
         }
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
@@ -3321,9 +2619,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/intraday') {
       res.setHeader('Cache-Control', 'no-store')
       try {
-        const universeParam = url.searchParams.get('universe')
-        const universeStrategy = (universeParam || 'short_simple') as any
-        const topN = Number(url.searchParams.get('topN') || '50') || 50
+        const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
+        const universeStrategy = (['gainers', 'losers', 'volume', 'overheat'].includes(uniParam) ? uniParam : 'losers') as 'gainers'|'losers'|'volume'|'overheat'
+        const topN = Number(url.searchParams.get('topN') || '')
         const fresh = String(url.searchParams.get('fresh') || '1') === '1'
         const snap = await buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh })
         type Bar = { time: string; open: number; high: number; low: number; close: number; volume: number }
@@ -3357,30 +2655,27 @@ const server = http.createServer(async (req, res) => {
         let assets = (snap.universe || []).map((u: any) => {
           const h1 = toBars(u.klines?.H1 || [], 24)
           const m15 = toBars(u.klines?.M15 || [], 40)
-          const h1Close = h1.map(b => b.close)
-          const m15Close = m15.map(b => b.close)
-          const atr_h1_pct = atrPctFromBars(h1 as any)
-          const atr_m15_pct = atrPctFromBars(m15 as any)
-          const h1Last = h1Close.length ? h1Close[h1Close.length - 1] : null
-          const m15Last = m15Close.length ? m15Close[m15Close.length - 1] : null
-          const atr_h1 = (atr_h1_pct != null && h1Last != null) ? (atr_h1_pct / 100) * h1Last : null
-          const atr_m15 = (atr_m15_pct != null && m15Last != null) ? (atr_m15_pct / 100) * m15Last : null
-          const rsi_h1 = rsiShared(h1Close, 14)
-          const rsi_m15 = rsiShared(m15Close, 14)
-          const ema_h1 = { 20: emaShared(h1Close, 20), 50: emaShared(h1Close, 50), 200: emaShared(h1Close, 200) }
-          const ema_m15 = { 20: emaShared(m15Close, 20), 50: emaShared(m15Close, 50), 200: emaShared(m15Close, 200) }
           return {
             symbol: u.symbol,
             price: Number(u.price ?? (h1.length ? h1[h1.length-1].close : null)),
             ohlcv: { h1, m15 },
-            indicators: { atr_h1, atr_m15, atr_h1_pct, atr_m15_pct, ema_h1, ema_m15, rsi_h1, rsi_m15, vwap_today: u.vwap_today ?? u.vwap_daily ?? null },
+            indicators: {
+              atr_h1: u.atr_h1 ?? null,
+              atr_m15: u.atr_m15 ?? null,
+              ema_h1: { 20: u.ema20_H1 ?? null, 50: u.ema50_H1 ?? null, 200: u.ema200_H1 ?? null },
+              ema_m15: { 20: u.ema20_M15 ?? null, 50: u.ema50_M15 ?? null, 200: u.ema200_M15 ?? null },
+              rsi_h1: u.rsi_H1 ?? null,
+              rsi_m15: u.rsi_M15 ?? null,
+              vwap_today: u.vwap_today ?? u.vwap_daily ?? null
+            },
             levels: {
               support: Array.isArray(u.support) ? u.support.slice(0,4) : [],
               resistance: Array.isArray(u.resistance) ? u.resistance.slice(0,4) : []
             },
             market: {
               spread_bps: u.spread_bps ?? null,
-              liquidity_usd: (u.liquidity_usd ?? ((u.liquidity_usd_1pct ? (u.liquidity_usd_1pct.bids + u.liquidity_usd_1pct.asks) : (u.liquidity_usd_0_5pct ? (u.liquidity_usd_0_5pct.bids + u.liquidity_usd_0_5pct.asks) : 0)))) || null,
+              liquidity_usd: (u.liquidity_usd ?? ((u.liquidity_usd_0_5pct?.bids||0)+(u.liquidity_usd_0_5pct?.asks||0)+(u.liquidity_usd_1pct?.bids||0)+(u.liquidity_usd_1pct?.asks||0))) || null,
+              volume_24h: u.volume24h_usd ?? null,
               oi_change_1h_pct: u.oi_change_1h_pct ?? null,
               funding_8h_pct: u.funding_8h_pct ?? null
             }
@@ -3398,19 +2693,17 @@ const server = http.createServer(async (req, res) => {
               if (expandedAsset) {
                 const h1 = toBars(expandedAsset.klines?.H1 || [], 24)
                 const m15 = toBars(expandedAsset.klines?.M15 || [], 40)
-                const h1Close2 = h1.map(b => b.close)
-                const m15Close2 = m15.map(b => b.close)
                 const generatedAsset = {
                   symbol: expandedAsset.symbol,
                   price: Number(expandedAsset.price ?? (h1.length ? h1[h1.length-1].close : null)),
                   ohlcv: { h1, m15 },
                   indicators: {
-                    atr_h1: atrPctFromBars(h1 as any),
-                    atr_m15: atrPctFromBars(m15 as any),
-                    ema_h1: { 20: emaShared(h1Close2, 20), 50: emaShared(h1Close2, 50), 200: emaShared(h1Close2, 200) },
-                    ema_m15: { 20: emaShared(m15Close2, 20), 50: emaShared(m15Close2, 50), 200: emaShared(m15Close2, 200) },
-                    rsi_h1: rsiShared(h1Close2, 14),
-                    rsi_m15: rsiShared(m15Close2, 14),
+                    atr_h1: expandedAsset.atr_h1 ?? null,
+                    atr_m15: expandedAsset.atr_m15 ?? null,
+                    ema_h1: { 20: expandedAsset.ema20_H1 ?? null, 50: expandedAsset.ema50_H1 ?? null, 200: expandedAsset.ema200_H1 ?? null },
+                    ema_m15: { 20: expandedAsset.ema20_M15 ?? null, 50: expandedAsset.ema50_M15 ?? null, 200: expandedAsset.ema200_M15 ?? null },
+                    rsi_h1: expandedAsset.rsi_H1 ?? null,
+                    rsi_m15: expandedAsset.rsi_M15 ?? null,
                     vwap_today: expandedAsset.vwap_today ?? expandedAsset.vwap_daily ?? null
                   },
                   levels: {
@@ -3420,6 +2713,7 @@ const server = http.createServer(async (req, res) => {
                   market: {
                     spread_bps: expandedAsset.spread_bps ?? null,
                     liquidity_usd: expandedAsset.liquidity_usd ?? null,
+                    volume_24h: expandedAsset.volume24h_usd ?? null,
                     oi_change_1h_pct: expandedAsset.oi_change_1h_pct ?? null,
                     funding_8h_pct: expandedAsset.funding_8h_pct ?? null
                   }
@@ -3472,11 +2766,15 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+    
     if (url.pathname === '/api/metrics') {
       res.setHeader('Cache-Control', 'no-store')
       try {
-        const universeStrategy = 'volume'
+        const uniParam = String(url.searchParams.get('universe') || '').toLowerCase()
+        const universeStrategy = (['gainers', 'losers', 'volume', 'overheat'].includes(uniParam) ? uniParam : 'losers') as 'gainers'|'losers'|'volume'|'overheat'
         const topN = Number(url.searchParams.get('topN') || '')
+        const sideParam = String(url.searchParams.get('side') || url.searchParams.get('bias') || '').toLowerCase()
+        const side: 'short'|'long'|null = sideParam === 'short' ? 'short' : (sideParam === 'long' ? 'long' : null)
         // Retry wrapper pro dočasné chyby (Abort/timeout)
         const retry = async <T>(fn: ()=>Promise<T>, attempts=2): Promise<T> => {
           let lastErr: any
@@ -3491,7 +2789,7 @@ const server = http.createServer(async (req, res) => {
           }
           throw lastErr
         }
-        const snap = await retry(() => buildMarketRawSnapshot({ universeStrategy, desiredTopN: topN, fresh: true, allowPartial: true }))
+        const snap = await retry(() => buildMarketRawSnapshot({ universeStrategy, desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh: true, allowPartial: true }))
         type Bar = { time: string; open: number; high: number; low: number; close: number; volume: number }
         const toIsoNoMs = (isoLike: string): string => {
           const s = String(isoLike || '')
@@ -3505,14 +2803,9 @@ const server = http.createServer(async (req, res) => {
         // OPRAVA: Odstraněn duplicitní changePct - použije se importovaná funkce
         const mapItem = (u: any): any => {
           const h1 = Array.isArray(u.klines?.H1) ? u.klines.H1 : []
-          const m15 = Array.isArray(u.klines?.M15) ? u.klines.M15 : []
-          const lastM15CloseIso = (() => { try { const last = m15[m15.length - 1]; return last ? String(last.closeTime) : null } catch { return null } })()
-          const isClosed = (() => { try { return lastM15CloseIso ? (Date.parse(lastM15CloseIso) <= Date.now()) : false } catch { return false } })()
           return {
             symbol: u.symbol,
             price: Number(u.price ?? lastClose(h1) ?? null),
-            price_ts_utc: (u as any)?.price_ts ?? null,
-            is_last_candle_closed: isClosed,
             volume_24h: u.volume24h_usd ?? null,
             spread_bps: u.spread_bps ?? null,
             liquidity_usd: u.liquidity_usd ?? null,
@@ -3533,8 +2826,18 @@ const server = http.createServer(async (req, res) => {
         let coins: any[] = []
         const universeCoins = (snap.universe || []).map(mapItem)
         
-        // For short_simple MVP: do NOT pin BTC/ETH ahead; apply same gates/ordering as alts
-        coins = universeCoins
+        if (universeStrategy === 'gainers' || universeStrategy === 'overheat') {
+          // Pro gainers a overheat pouze actual gainers z universe, bez vynuceného BTC/ETH
+          coins = universeCoins
+        } else {
+          // Pro volume zachovat původní logiku s BTC/ETH na začátku
+          const coinsCore: any[] = []
+          const btc = (snap as any)?.btc
+          const eth = (snap as any)?.eth
+          if (btc && btc.klines) coinsCore.push(mapItem({ ...btc, symbol: 'BTCUSDT' }))
+          if (eth && eth.klines) coinsCore.push(mapItem({ ...eth, symbol: 'ETHUSDT' }))
+          coins = coinsCore.concat(universeCoins)
+        }
         // OPRAVA: Použití konzistentní výpočetní funkce pro /api/metrics
         const regime = {
           BTCUSDT: { 
@@ -3556,18 +2859,36 @@ const server = http.createServer(async (req, res) => {
           return true
         })
 
+        // No pre-filtering - Hot Screener has its own comprehensive fail-fast filters
+        // Let GPT analyze the full universe and apply its own selection criteria
+        const filteredCoins = dedupCoins
+
+        // STRICT: Validace snapshot metadata - žádné fallbacky
+        const exchange = (snap as any)?.exchange
+        const market_type = (snap as any)?.market_type
+        const timestamp = (snap as any)?.timestamp
+        
+        if (!exchange || typeof exchange !== 'string') {
+          throw new Error('Missing or invalid exchange in snapshot')
+        }
+        if (!market_type || typeof market_type !== 'string') {
+          throw new Error('Missing or invalid market_type in snapshot')
+        }
+        if (!timestamp || typeof timestamp !== 'string') {
+          throw new Error('Missing or invalid timestamp in snapshot')
+        }
+
         const out = {
           policy: {
             max_hold_minutes: (snap as any)?.policy?.max_hold_minutes ?? null,
             risk_per_trade_pct: (snap as any)?.policy?.risk_per_trade_pct_flat ?? null,
             max_leverage: (snap as any)?.policy?.max_leverage ?? null
           },
-          exchange: (snap as any)?.exchange || 'Binance',
-          market_type: (snap as any)?.market_type || 'perp',
+          exchange,
+          market_type,
           regime,
-          timestamp: toIsoNoMs((snap as any)?.timestamp || new Date().toISOString()),
-          snapshot_ts_utc: toIsoNoMs((snap as any)?.timestamp || new Date().toISOString()),
-          coins: dedupCoins
+          timestamp: toIsoNoMs(timestamp),
+          coins: filteredCoins
         }
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
@@ -3581,64 +2902,21 @@ const server = http.createServer(async (req, res) => {
           })
         } catch {}
         const name = String(e?.name||'').toLowerCase()
-        const msgRaw = String(e?.message||'')
-        const msg = msgRaw.toLowerCase()
+        const msg = String(e?.message||'').toLowerCase()
         const abortLike = name.includes('abort') || msg.includes('abort') || msg.includes('timeout')
-        // Normalize known Binance RL signatures including plain HTTP 418 text
-        const isRateLimit = /code\":-?1003|too\s+many\s+requests|status:\s*418|banned\s+until|http\s*418\b/i.test(msgRaw)
-        // For universe incomplete we return 200 with partial: true
-        const isUniverseIncomplete = /universe_incomplete|universe\s*incomplete/i.test(msgRaw) || String((e as any)?.stage||'') === 'universe_incomplete'
-
-        // Attach Binance usage snapshot for rate limit diagnostics
-        let binance_usage: any = undefined
-        try {
-          const limits = getLimitsSnapshot()
-          const WEIGHT_LIMIT = (() => {
-            const cfg = Number((tradingCfg as any)?.BINANCE_WEIGHT_LIMIT_1M)
-            if (Number.isFinite(cfg) && cfg > 0) return Math.floor(cfg)
-            const env = Number(process.env.BINANCE_WEIGHT_LIMIT_1M)
-            if (Number.isFinite(env) && env > 0) return Math.floor(env)
-            return 1200
-          })()
-          const wUsedNum = Number(limits?.maxUsedWeight1mLast60s ?? limits?.lastUsedWeight1m)
-          const pct = Number.isFinite(wUsedNum) && wUsedNum >= 0 ? Math.min(999, Math.round((wUsedNum / WEIGHT_LIMIT) * 100)) : null
-          binance_usage = {
-            weight1m_used: Number.isFinite(wUsedNum) ? wUsedNum : null,
-            weight1m_limit: WEIGHT_LIMIT,
-            orderCount10s: limits?.lastOrderCount10s ?? null,
-            orderCount1m: limits?.lastOrderCount1m ?? null,
-            percent: pct,
-            callRate: limits?.callRate ?? null,
-            risk: limits?.risk ?? 'normal',
-            backoff_active: Boolean(limits?.backoff),
-            backoff_remaining_sec: limits?.backoff?.remainingSec ?? null
-          }
-        } catch {}
-
-        res.statusCode = isUniverseIncomplete ? 200 : (isRateLimit ? 429 : (abortLike ? 503 : 500))
-        if (isRateLimit) {
-          try {
-            const limits = getLimitsSnapshot()
-            const untilMs = Number(limits?.backoff?.untilMs ?? __binanceBackoffUntilMs)
-            if (Number.isFinite(untilMs) && untilMs > Date.now()) {
-              const waitSec = Math.max(1, Math.ceil((untilMs - Date.now()) / 1000))
-              res.setHeader('Retry-After', String(waitSec))
-            }
-          } catch {}
-        } else if (abortLike) {
-          res.setHeader('Retry-After', '1')
-        }
+        const isUniverseIncomplete = /universe_incomplete|universe\s*incomplete/i.test(String(e?.message||'')) || String((e as any)?.stage||'') === 'universe_incomplete'
+        
+        // STRICT: Žádné fallbacky - všechny chyby včetně universe_incomplete vracejí error
+        res.statusCode = abortLike ? 503 : (isUniverseIncomplete ? 503 : 500)
+        if (abortLike) res.setHeader('Retry-After', '1')
         res.setHeader('content-type', 'application/json')
-        if (isUniverseIncomplete) {
-          res.end(JSON.stringify({ ok: true, partial: true, coins: [], policy: { max_hold_minutes: null, risk_per_trade_pct: null, max_leverage: null }, exchange: 'Binance', market_type: 'perp', regime: {}, timestamp: new Date().toISOString(), binance_usage }))
-        } else if (isRateLimit) {
-          res.end(JSON.stringify({ ok: false, error: 'rate_limited', binance_usage }))
-        } else {
-          res.end(JSON.stringify({ error: abortLike ? 'UNAVAILABLE_TEMPORARILY' : (e?.message || 'unknown'), binance_usage }))
-        }
+        
+        const errorCode = isUniverseIncomplete ? 'UNIVERSE_INCOMPLETE' : (abortLike ? 'UNAVAILABLE_TEMPORARILY' : 'INTERNAL_ERROR')
+        res.end(JSON.stringify({ error: errorCode, message: e?.message || 'unknown' }))
       }
       return
     }
+
     if (url.pathname === '/api/place_orders' && req.method === 'POST') {
       res.setHeader('Cache-Control', 'no-store')
       await acquireBatch()
@@ -3679,15 +2957,6 @@ const server = http.createServer(async (req, res) => {
           if (typeof (order as any).tp !== 'number' || !Number.isFinite((order as any).tp) || (order as any).tp <= 0) {
             throw new Error('Missing or invalid TP')
           }
-          // risk_label is optional string; if present, coerce to short allowed set
-          if ((order as any).risk_label != null) {
-            const r = String((order as any).risk_label || '').toLowerCase()
-            const ok = ['nízké','střední','vysoké','nizke','stredni','vysoke','low','medium','high']
-            if (!ok.includes(r)) {
-              // normalize unknowns to passthrough string
-              ;(order as any).risk_label = String((order as any).risk_label)
-            }
-          }
         }
         
         // Deduplicate by symbol – server-side safety
@@ -3698,15 +2967,6 @@ const server = http.createServer(async (req, res) => {
           seen.add(sym)
           return true
         })
-        // Authoritative cooldown guard: remove symbols currently in cooldown
-        try {
-          const before = parsed.orders.length
-          parsed.orders = parsed.orders.filter((o:any) => !isCooldownActive(String(o?.symbol||'')))
-          const removed = before - parsed.orders.length
-          if (removed > 0) {
-            try { console.warn('[COOLDOWN_BLOCKED_ENTRIES]', { removed }) } catch {}
-          }
-        } catch {}
         console.log(`[PLACE_ORDERS] Processing ${parsed.orders.length} orders`)
         try {
           console.info('[PLACE_ORDERS_REQ]', { sample: parsed.orders.slice(0,3) })
@@ -3768,40 +3028,16 @@ const server = http.createServer(async (req, res) => {
             try { isHedge = Boolean(await api.getHedgeMode()) } catch {}
             const tasks = exitsForSkipped.map(async (x) => {
               try {
-                // Deduplicate against currently open exits: avoid sending duplicates
-                let open: any[] = []
-                try { open = await api.getOpenOrders(x.symbol) } catch {}
-                const hasSameSl = (price: number): boolean => {
-                  return (Array.isArray(open) ? open : []).some((o: any) => {
-                    try {
-                      const isSl = String(o?.type || '').toUpperCase() === 'STOP_MARKET'
-                      const cp = Boolean(o?.closePosition)
-                      const sp = Number(o?.stopPrice)
-                      return isSl && cp && Number.isFinite(sp) && Math.abs(sp - price) < 1e-12
-                    } catch { return false }
-                  })
-                }
-                const hasSameTpMkt = (price: number): boolean => {
-                  return (Array.isArray(open) ? open : []).some((o: any) => {
-                    try {
-                      const isTpM = String(o?.type || '').toUpperCase() === 'TAKE_PROFIT_MARKET'
-                      const cp = Boolean(o?.closePosition)
-                      const sp = Number(o?.stopPrice)
-                      return isTpM && cp && Number.isFinite(sp) && Math.abs(sp - price) < 1e-12
-                    } catch { return false }
-                  })
-                }
-
-                if (!((tradingCfg as any)?.DISABLE_SL === true) && Number.isFinite(x.sl) && !(hasSameSl(Number(x.sl)))) {
+                if (Number.isFinite(x.sl)) {
                   const slParams: any = isHedge
-                    ? { symbol: x.symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(x.sl), closePosition: true, workingType, positionSide: 'LONG', newClientOrderId: makeId('x_sl'), newOrderRespType: 'RESULT' }
-                    : { symbol: x.symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(x.sl), closePosition: true, workingType, newClientOrderId: makeId('x_sl'), newOrderRespType: 'RESULT' }
+                    ? { symbol: x.symbol, side: 'BUY', type: 'STOP_MARKET', stopPrice: String(x.sl), closePosition: true, workingType, positionSide: 'SHORT', newOrderRespType: 'RESULT' }
+                    : { symbol: x.symbol, side: 'BUY', type: 'STOP_MARKET', stopPrice: String(x.sl), closePosition: true, workingType, newOrderRespType: 'RESULT' }
                   await api.placeOrder(slParams)
                 }
-                if (Number.isFinite(x.tp) && !(hasSameTpMkt(Number(x.tp)))) {
+                if (Number.isFinite(x.tp)) {
                   const tpParams: any = isHedge
-                    ? { symbol: x.symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: String(x.tp), closePosition: true, workingType, positionSide: 'LONG', newClientOrderId: makeId('x_tp_tm'), newOrderRespType: 'RESULT' }
-                    : { symbol: x.symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: String(x.tp), closePosition: true, workingType, newClientOrderId: makeId('x_tp_tm'), newOrderRespType: 'RESULT' }
+                    ? { symbol: x.symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET', stopPrice: String(x.tp), closePosition: true, workingType, positionSide: 'SHORT', newOrderRespType: 'RESULT' }
+                    : { symbol: x.symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET', stopPrice: String(x.tp), closePosition: true, workingType, newOrderRespType: 'RESULT' }
                   await api.placeOrder(tpParams)
                 }
                 try { console.info('[EXITS_FOR_SKIPPED_SENT]', { symbol: x.symbol }) } catch {}
@@ -3828,17 +3064,6 @@ const server = http.createServer(async (req, res) => {
         try { console.error('[BATCH_START]', { ts: new Date().toISOString(), count: parsed.orders.length }) } catch {}
         const result = await executeHotTradingOrders(parsed)
         try { console.error('[BATCH_DONE]', { ts: new Date().toISOString(), dur_ms: Date.now() - tStart, success: !!(result as any)?.success }) } catch {}
-
-        // Immediately invalidate open orders cache and prime next /api/orders_console with REST snapshot for affected symbols
-        try {
-          const symbols = Array.isArray(parsed?.orders) ? parsed.orders.map((o:any)=>String(o?.symbol||'')).filter(Boolean) : []
-          if (symbols.length > 0) {
-            try { ttlSet(makeKey('/api/open_orders'), null as any, 1) } catch {}
-            // Fire-and-forget: warm the in-memory ws snapshot by fetching REST openOrders once
-            const api = getBinanceAPI()
-            Promise.allSettled(Array.from(new Set(symbols)).map(sym => api.getOpenOrders(sym))).catch(()=>{})
-          }
-        } catch {}
         
         // Po úspěšném volání z UI → uložit pro background repeat
         if (result?.success && Array.isArray(parsed?.orders) && parsed.orders.length > 0) {
@@ -3857,13 +3082,9 @@ const server = http.createServer(async (req, res) => {
               if (!sym) continue
               const amount = Number((o as any)?.amount)
               const leverage = Number((o as any)?.leverage)
-              const slPlanned = Number((o as any)?.sl)
-              const tpPlanned = Number((o as any)?.tp)
               __lastPlannedBySymbol[sym] = {
                 amount: Number.isFinite(amount) && amount > 0 ? amount : null,
                 leverage: Number.isFinite(leverage) && leverage > 0 ? Math.floor(leverage) : null,
-                sl: Number.isFinite(slPlanned) && slPlanned > 0 ? slPlanned : null,
-                tp: Number.isFinite(tpPlanned) && tpPlanned > 0 ? tpPlanned : null,
                 ts: new Date().toISOString()
               }
             }
@@ -3902,11 +3123,11 @@ const server = http.createServer(async (req, res) => {
         const bodyStr = Buffer.concat(chunks).toString('utf8')
         const input = bodyStr ? JSON.parse(bodyStr) : null
         const symbolRaw = String(input?.symbol || '')
-        const sideRaw = String(input?.side || 'BUY').toUpperCase()
+        const sideRaw = String(input?.side || 'SELL').toUpperCase()
         const qtyRaw = input?.quantity
         if (!symbolRaw || !qtyRaw) { res.statusCode = 400; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ ok:false, error:'missing_symbol_or_quantity' })); return }
         const symbol = symbolRaw.toUpperCase().endsWith('USDT') ? symbolRaw.toUpperCase() : `${symbolRaw.toUpperCase()}USDT`
-        const side = sideRaw === 'SELL' ? 'SELL' : 'BUY'
+        const side = sideRaw === 'BUY' ? 'BUY' : 'SELL'
         const api = getBinanceAPI() as any
         // Detect hedge mode and fetch stepSize for qty quantization
         let isHedgeMode = false
@@ -3945,6 +3166,317 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+
+    // Trading Chart System: Klines Batch Endpoint
+    if (url.pathname === '/api/klines_batch' && req.method === 'POST') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        const chunks: Buffer[] = []
+        for await (const ch of req) chunks.push(ch as Buffer)
+        const bodyStr = Buffer.concat(chunks).toString('utf8')
+        const input = bodyStr ? JSON.parse(bodyStr) : null
+        
+        const symbols: string[] = Array.isArray(input?.symbols) ? input.symbols : []
+        const interval = String(input?.interval || '1m')
+        const limit = Number(input?.limit) || 500
+        
+        if (symbols.length === 0) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'symbols array required' }))
+          return
+        }
+        
+        // Validate interval
+        const validIntervals = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d']
+        if (!validIntervals.includes(interval)) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: `invalid interval, must be one of: ${validIntervals.join(', ')}` }))
+          return
+        }
+        
+        // Import getKlines from fetcher
+        const { getKlines } = await import('./fetcher/binance')
+        
+        // Parallel fetch with Promise.allSettled
+        const tasks = symbols.map(async (symbol) => {
+          try {
+            const klines = await getKlines(symbol, interval, limit, false)
+            // Transform to numeric format (Binance returns strings)
+            const transformed = klines.map((k: any) => ({
+              openTime: new Date(k.openTime).getTime(),
+              open: String(k.open),
+              high: String(k.high),
+              low: String(k.low),
+              close: String(k.close),
+              volume: String(k.volume),
+              closeTime: new Date(k.closeTime).getTime()
+            }))
+            return { symbol, ok: true, klines: transformed }
+          } catch (e: any) {
+            return { symbol, ok: false, error: e?.message || 'unknown' }
+          }
+        })
+        
+        const results = await Promise.allSettled(tasks)
+        
+        // Build response object
+        const response: any = { ok: true, results: {} }
+        for (const r of results) {
+          if (r.status === 'fulfilled' && r.value) {
+            response.results[r.value.symbol] = {
+              ok: r.value.ok,
+              klines: r.value.ok ? r.value.klines : undefined,
+              error: r.value.ok ? undefined : r.value.error
+            }
+          }
+        }
+        
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(response))
+      } catch (e: any) {
+        console.error('[KLINES_BATCH_ERROR]', e.message)
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+
+    // Trading Chart System: Manual SL Change
+    if (url.pathname === '/api/manual_sl' && req.method === 'POST') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        if (!hasRealBinanceKeysGlobal()) {
+          res.statusCode = 403
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'missing_binance_keys' }))
+          return
+        }
+        
+        const chunks: Buffer[] = []
+        for await (const ch of req) chunks.push(ch as Buffer)
+        const bodyStr = Buffer.concat(chunks).toString('utf8')
+        const input = bodyStr ? JSON.parse(bodyStr) : null
+        
+        const symbol = String(input?.symbol || '')
+        const slPrice = Number(input?.slPrice)
+        
+        if (!symbol || !Number.isFinite(slPrice) || slPrice <= 0) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'invalid_params: symbol and valid slPrice required' }))
+          return
+        }
+        
+        const api = getBinanceAPI() as any
+        
+        // 1. Validate position exists
+        const positions = await api.getPositions()
+        const position = (Array.isArray(positions) ? positions : []).find((p: any) => String(p?.symbol) === symbol)
+        const positionAmt = Number(position?.positionAmt || 0)
+        
+        if (Math.abs(positionAmt) === 0) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: `no_position: Position for ${symbol} is not open` }))
+          return
+        }
+        
+        // 2. Get tick size for price rounding
+        const symbolInfo = await api.getSymbolInfo(symbol)
+        const priceFilter = (symbolInfo?.filters || []).find((f: any) => f?.filterType === 'PRICE_FILTER')
+        const tickSize = priceFilter ? Number(priceFilter.tickSize) : 0.01
+        
+        // Round to tick size
+        const roundToTick = (price: number, tick: number): number => {
+          const s = String(tick)
+          const idx = s.indexOf('.')
+          const decimals = idx >= 0 ? (s.length - idx - 1) : 0
+          return Number((Math.round(price / tick) * tick).toFixed(decimals))
+        }
+        
+        const slRounded = roundToTick(slPrice, tickSize)
+        
+        // 3. Detect hedge mode
+        const isHedgeMode = await api.getHedgeMode()
+        const workingType = 'MARK_PRICE'
+        
+        // 4. Create NEW SL order (SHORT system: BUY to close)
+        const slParams: any = {
+          symbol,
+          side: 'BUY',
+          type: 'STOP_MARKET',
+          stopPrice: String(slRounded),
+          closePosition: true,
+          workingType,
+          newOrderRespType: 'RESULT',
+          newClientOrderId: `manual_sl_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+        }
+        
+        if (isHedgeMode) {
+          slParams.positionSide = 'SHORT'
+        }
+        
+        console.info('[MANUAL_SL_CREATE]', { symbol, slPrice: slRounded, isHedgeMode })
+        const newOrder = await api.placeOrder(slParams)
+        const newOrderId = Number(newOrder?.orderId || 0)
+        
+        // 5. Cancel all old SL orders EXCEPT the new one
+        const openOrders = await api.getOpenOrders(symbol)
+        const oldSlOrders = (Array.isArray(openOrders) ? openOrders : []).filter((o: any) => {
+          const type = String(o?.type || '')
+          const closePos = Boolean(o?.closePosition)
+          const orderId = Number(o?.orderId || 0)
+          return type === 'STOP_MARKET' && closePos && orderId !== newOrderId
+        })
+        
+        const canceledIds: number[] = []
+        for (const oldOrder of oldSlOrders) {
+          try {
+            await api.cancelOrder(symbol, oldOrder.orderId)
+            canceledIds.push(Number(oldOrder.orderId))
+            console.info('[MANUAL_SL_CANCELED]', { symbol, orderId: oldOrder.orderId })
+          } catch (e: any) {
+            console.warn('[MANUAL_SL_CANCEL_FAILED]', { symbol, orderId: oldOrder.orderId, error: e?.message })
+          }
+        }
+        
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({
+          ok: true,
+          newOrderId,
+          stopPrice: String(slRounded),
+          canceledOrders: canceledIds
+        }))
+      } catch (e: any) {
+        console.error('[MANUAL_SL_ERROR]', e.message)
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+
+    // Trading Chart System: Manual TP Change
+    if (url.pathname === '/api/manual_tp' && req.method === 'POST') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        if (!hasRealBinanceKeysGlobal()) {
+          res.statusCode = 403
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'missing_binance_keys' }))
+          return
+        }
+        
+        const chunks: Buffer[] = []
+        for await (const ch of req) chunks.push(ch as Buffer)
+        const bodyStr = Buffer.concat(chunks).toString('utf8')
+        const input = bodyStr ? JSON.parse(bodyStr) : null
+        
+        const symbol = String(input?.symbol || '')
+        const tpPrice = Number(input?.tpPrice)
+        
+        if (!symbol || !Number.isFinite(tpPrice) || tpPrice <= 0) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'invalid_params: symbol and valid tpPrice required' }))
+          return
+        }
+        
+        const api = getBinanceAPI() as any
+        
+        // 1. Validate position exists
+        const positions = await api.getPositions()
+        const position = (Array.isArray(positions) ? positions : []).find((p: any) => String(p?.symbol) === symbol)
+        const positionAmt = Number(position?.positionAmt || 0)
+        
+        if (Math.abs(positionAmt) === 0) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: `no_position: Position for ${symbol} is not open` }))
+          return
+        }
+        
+        // 2. Get tick size for price rounding
+        const symbolInfo = await api.getSymbolInfo(symbol)
+        const priceFilter = (symbolInfo?.filters || []).find((f: any) => f?.filterType === 'PRICE_FILTER')
+        const tickSize = priceFilter ? Number(priceFilter.tickSize) : 0.01
+        
+        // Round to tick size
+        const roundToTick = (price: number, tick: number): number => {
+          const s = String(tick)
+          const idx = s.indexOf('.')
+          const decimals = idx >= 0 ? (s.length - idx - 1) : 0
+          return Number((Math.round(price / tick) * tick).toFixed(decimals))
+        }
+        
+        const tpRounded = roundToTick(tpPrice, tickSize)
+        
+        // 3. Detect hedge mode
+        const isHedgeMode = await api.getHedgeMode()
+        const workingType = 'MARK_PRICE'
+        
+        // 4. Create NEW TP order (SHORT system: BUY to close)
+        const tpParams: any = {
+          symbol,
+          side: 'BUY',
+          type: 'TAKE_PROFIT_MARKET',
+          stopPrice: String(tpRounded),
+          closePosition: true,
+          workingType,
+          newOrderRespType: 'RESULT',
+          newClientOrderId: `manual_tp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+        }
+        
+        if (isHedgeMode) {
+          tpParams.positionSide = 'SHORT'
+        }
+        
+        console.info('[MANUAL_TP_CREATE]', { symbol, tpPrice: tpRounded, isHedgeMode })
+        const newOrder = await api.placeOrder(tpParams)
+        const newOrderId = Number(newOrder?.orderId || 0)
+        
+        // 5. Cancel all old TP orders EXCEPT the new one
+        const openOrders = await api.getOpenOrders(symbol)
+        const oldTpOrders = (Array.isArray(openOrders) ? openOrders : []).filter((o: any) => {
+          const type = String(o?.type || '')
+          const closePos = Boolean(o?.closePosition)
+          const orderId = Number(o?.orderId || 0)
+          return type.includes('TAKE_PROFIT') && closePos && orderId !== newOrderId
+        })
+        
+        const canceledIds: number[] = []
+        for (const oldOrder of oldTpOrders) {
+          try {
+            await api.cancelOrder(symbol, oldOrder.orderId)
+            canceledIds.push(Number(oldOrder.orderId))
+            console.info('[MANUAL_TP_CANCELED]', { symbol, orderId: oldOrder.orderId })
+          } catch (e: any) {
+            console.warn('[MANUAL_TP_CANCEL_FAILED]', { symbol, orderId: oldOrder.orderId, error: e?.message })
+          }
+        }
+        
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({
+          ok: true,
+          newOrderId,
+          stopPrice: String(tpRounded),
+          canceledOrders: canceledIds
+        }))
+      } catch (e: any) {
+        console.error('[MANUAL_TP_ERROR]', e.message)
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+
     // New: Place only exits (SL/TP) for an existing or soon-to-exist position
     if (url.pathname === '/api/place_exits' && req.method === 'POST') {
       res.setHeader('Cache-Control', 'no-store')
@@ -4045,8 +3577,8 @@ const server = http.createServer(async (req, res) => {
 
         if (Number.isFinite(slRounded as any)) {
           const slParams: any = isHedgeMode
-            ? { symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(slRounded), closePosition: true, workingType, positionSide: 'LONG', newOrderRespType: 'RESULT' }
-            : { symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(slRounded), closePosition: true, workingType, newOrderRespType: 'RESULT' }
+            ? { symbol, side: 'BUY', type: 'STOP_MARKET', stopPrice: String(slRounded), closePosition: true, workingType, positionSide: 'SHORT', newOrderRespType: 'RESULT' }
+            : { symbol, side: 'BUY', type: 'STOP_MARKET', stopPrice: String(slRounded), closePosition: true, workingType, newOrderRespType: 'RESULT' }
           out.sl = await api.placeOrder(slParams)
         }
         if (Number.isFinite(tpRounded as any)) {
@@ -4065,15 +3597,15 @@ const server = http.createServer(async (req, res) => {
             }
             const qtyNum = quantizeFloor(Number(positionQty), stepSize as number)
             const qtyStr = String(qtyNum)
-            const baseLimit = { symbol, side: 'SELL', type: 'TAKE_PROFIT', price: String(tpRounded), stopPrice: String(tpRounded), timeInForce: 'GTC', quantity: qtyStr, workingType, newOrderRespType: 'RESULT' }
-            const tpParams: any = isHedgeMode ? { ...baseLimit, positionSide: 'LONG' } : baseLimit
+            const baseLimit = { symbol, side: 'BUY', type: 'TAKE_PROFIT', price: String(tpRounded), stopPrice: String(tpRounded), timeInForce: 'GTC', quantity: qtyStr, workingType, newOrderRespType: 'RESULT' }
+            const tpParams: any = isHedgeMode ? { ...baseLimit, positionSide: 'SHORT' } : baseLimit
             if (forceTpLimitRO) tpParams.reduceOnly = true
             out.tp = await api.placeOrder(tpParams)
           } else {
             // TP MARKET: v hedge módu musí být uveden positionSide, jinak -4061
             const tpParams: any = isHedgeMode
-              ? { symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: String(tpRounded), closePosition: true, workingType, positionSide: 'LONG', newOrderRespType: 'RESULT' }
-              : { symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: String(tpRounded), closePosition: true, workingType, newOrderRespType: 'RESULT' }
+              ? { symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET', stopPrice: String(tpRounded), closePosition: true, workingType, positionSide: 'SHORT', newOrderRespType: 'RESULT' }
+              : { symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET', stopPrice: String(tpRounded), closePosition: true, workingType, newOrderRespType: 'RESULT' }
             out.tp = await api.placeOrder(tpParams)
           }
         }
@@ -4085,87 +3617,6 @@ const server = http.createServer(async (req, res) => {
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
-      }
-      return
-    }
-    // Admin: trigger immediate emergency SL for a symbol if missing
-    if (url.pathname === '/api/admin/emergency_sl' && req.method === 'POST') {
-      res.setHeader('Cache-Control', 'no-store')
-      try {
-        if (!hasRealBinanceKeysGlobal()) { res.statusCode = 403; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ ok:false, error:'missing_binance_keys' })); return }
-        const chunks: Buffer[] = []
-        for await (const ch of req) chunks.push(ch as Buffer)
-        const bodyStr = Buffer.concat(chunks).toString('utf8')
-        const input = bodyStr ? JSON.parse(bodyStr) : null
-        const symbolRaw = String(input?.symbol || '')
-        const pctRaw = Number(input?.pct)
-        if (!symbolRaw) { res.statusCode = 400; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ ok:false, error:'missing_symbol' })); return }
-        const normalizeSymbol = (s: string): string => {
-          let v = String(s || '').trim().toUpperCase()
-          if (!v) return ''
-          if (v.includes('/')) v = v.replace('/', '')
-          if (!v.endsWith('USDT')) v = `${v}USDT`
-          return v
-        }
-        const symbol = normalizeSymbol(symbolRaw)
-        const emergencyPct = (Number.isFinite(pctRaw) && pctRaw > 0 && pctRaw < 0.5) ? pctRaw : (Number((process as any)?.env?.EMERGENCY_SL_PCT) || 0.05)
-
-        const api = getBinanceAPI() as any
-        let isHedgeMode = false
-        try { isHedgeMode = Boolean(await api.getHedgeMode()) } catch {}
-        const workingType = String((tradingCfg as any)?.EXIT_WORKING_TYPE || 'MARK_PRICE') as 'MARK_PRICE' | 'CONTRACT_PRICE'
-
-        const [positions, orders] = await Promise.all([
-          api.getPositions(),
-          api.getOpenOrders(symbol)
-        ])
-        const pos = (Array.isArray(positions) ? positions : []).find((p: any) => String(p?.symbol) === symbol)
-        const amtRaw = Number((pos as any)?.positionAmt ?? (pos as any)?.size ?? 0)
-        if (!pos || !Number.isFinite(amtRaw) || Math.abs(amtRaw) <= 0) {
-          res.statusCode = 422
-          res.setHeader('content-type','application/json')
-          res.end(JSON.stringify({ ok:false, error:'position_not_found' }))
-          return
-        }
-        const exitSide = amtRaw > 0 ? 'SELL' : 'BUY'
-        const slOrders = (Array.isArray(orders) ? orders : []).filter((o:any)=> String(o?.symbol)===symbol && String(o?.side||'').toUpperCase()===exitSide && String(o?.type||'').toUpperCase().includes('STOP'))
-        if (slOrders.length > 0) {
-          res.statusCode = 200
-          res.setHeader('content-type','application/json')
-          res.end(JSON.stringify({ ok:true, created:false, reason:'already_has_sl' }))
-          return
-        }
-
-        const quantize = (value: number, step: number): number => {
-          const s = String(step)
-          const idx = s.indexOf('.')
-          const decimals = idx >= 0 ? (s.length - idx - 1) : 0
-          const factor = Math.pow(10, decimals)
-          return Math.round(value * factor) / factor
-        }
-        const entryPriceNum = Number((pos as any)?.entryPrice)
-        if (!Number.isFinite(entryPriceNum) || entryPriceNum <= 0) { res.statusCode = 500; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ ok:false, error:'bad_entry_price' })); return }
-        let emergencyPx = amtRaw > 0 ? entryPriceNum * (1 - emergencyPct) : entryPriceNum * (1 + emergencyPct)
-        try {
-          const info = await api.getSymbolInfo(symbol)
-          const pf = (info?.filters || []).find((f: any) => f?.filterType === 'PRICE_FILTER')
-          const tickSize = pf ? Number(pf.tickSize) : null
-          if (Number.isFinite(tickSize as any) && (tickSize as number) > 0) emergencyPx = quantize(emergencyPx, tickSize as number)
-        } catch {}
-        if (((tradingCfg as any)?.DISABLE_SL === true)) {
-          console.warn('[EMERGENCY_SL_SKIPPED_DISABLED]', { symbol })
-          return
-        }
-        const base: any = { symbol, side: exitSide, type: 'STOP_MARKET', stopPrice: String(emergencyPx), closePosition: true, workingType, newClientOrderId: makeId('x_sl_em'), newOrderRespType: 'RESULT' }
-        if (isHedgeMode) base.positionSide = amtRaw > 0 ? 'LONG' : 'SHORT'
-        const r = await api.placeOrder(base)
-        res.statusCode = 200
-        res.setHeader('content-type','application/json')
-        res.end(JSON.stringify({ ok:true, created:true, orderId: r?.orderId ?? null, stopPrice: emergencyPx }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type','application/json')
-        res.end(JSON.stringify({ ok:false, error: e?.message || 'unknown' }))
       }
       return
     }
@@ -4217,7 +3668,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const { default: OpenAI } = await import('openai')
         const o: any = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, organization: process.env.OPENAI_ORG_ID, project: (process as any)?.env?.OPENAI_PROJECT })
-        const model = (deciderCfg as any)?.m3?.model || 'gpt-5'
+        const model = (deciderCfg as any)?.m3?.model || 'gpt-4o'
         const schema = { type: 'object', properties: { ping: { type: 'string' } }, required: ['ping'], additionalProperties: false }
         const r: any = await o.chat.completions.create({
           model,
@@ -4309,37 +3760,7 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ ok: false, error: `invalid_compact:${pf.reason}` }))
           return
         }
-        // Compute features from compact for mock mode
-        const features = (() => {
-          try {
-            // Reconstruct basic features structure needed for decideFromFeatures
-            return {
-              breadth: { pct_above_EMA50_H1: compact.breadth?.pct_above_EMA50_H1 || 0 },
-              btc: {
-                atr_pct_H1: compact.btc?.H1?.atr_pct || 0,
-                flags: {
-                  H1_above_VWAP: (compact.btc?.H1?.vwap_rel || 0) > 1,
-                  H4_ema50_gt_200: compact.btc?.H4?.ema50_gt_200 || false
-                }
-              },
-              eth: {
-                atr_pct_H1: compact.eth?.H1?.atr_pct || 0,
-                flags: {
-                  H1_above_VWAP: (compact.eth?.H1?.vwap_rel || 0) > 1,
-                  H4_ema50_gt_200: compact.eth?.H4?.ema50_gt_200 || false
-                }
-              }
-            }
-          } catch {
-            // Fallback structure
-            return {
-              breadth: { pct_above_EMA50_H1: 0 },
-              btc: { atr_pct_H1: 0, flags: { H1_above_VWAP: false, H4_ema50_gt_200: false } },
-              eth: { atr_pct_H1: 0, flags: { H1_above_VWAP: false, H4_ema50_gt_200: false } }
-            }
-          }
-        })()
-        const decision = await decideMarketStrict({ mode: mode as any, compact, features: features as any, openaiKey: process.env.OPENAI_API_KEY || '', timeoutMs: (deciderCfg as any)?.timeoutMs || 8000 })
+        const decision = await decideMarketStrict({ mode: mode as any, compact, features: {} as any, openaiKey: process.env.OPENAI_API_KEY || '', timeoutMs: (deciderCfg as any)?.timeoutMs || 8000 })
         // Localize reasons to Czech if model returned English
         try {
           const mapReason = (s: string): string => {
@@ -4364,15 +3785,9 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify(decision))
       } catch (e: any) {
-        console.error('[DECIDE_API_ERROR]', { 
-          error: e?.message || e?.toString(), 
-          name: e?.name,
-          code: e?.code,
-          stack: e?.stack?.split('\n').slice(0, 3).join('\n') 
-        })
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: e?.code || e?.name || 'internal_error', message: e?.message }))
+        res.end(JSON.stringify({ ok: false, error: e?.code || e?.name || 'internal_error' }))
       }
       return
     }
@@ -4407,6 +3822,7 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+
     if (url.pathname === '/api/hot_screener' && req.method === 'POST') {
       try {
         const chunks: Buffer[] = []
@@ -4429,31 +3845,6 @@ const server = http.createServer(async (req, res) => {
         // Ensure temperature override via env (default to 0.2)
         try { if (!process.env.HOT_SCREENER_TEMPERATURE) process.env.HOT_SCREENER_TEMPERATURE = '0.2' } catch {}
         const hsRes = await runHotScreener(input)
-
-        // Enforce Futures-only symbols post-processing (no behavior change elsewhere)
-        try {
-          if (hsRes && hsRes.ok && Array.isArray((hsRes as any)?.data?.hot_picks)) {
-            // Robust Futures-only filter using public exchangeInfo
-            const futuresSymbols: Set<string> = new Set()
-            try {
-              const { body, statusCode } = await undiciRequest('https://fapi.binance.com/fapi/v1/exchangeInfo', { method: 'GET' })
-              if (statusCode && statusCode >= 200 && statusCode < 300) {
-                const text = await body.text()
-                const json = JSON.parse(text)
-                const arr = Array.isArray(json?.symbols) ? json.symbols : []
-                for (const s of arr) {
-                  const sym = String(s?.symbol || '')
-                  // Keep only USDT perpetual futures in TRADING status
-                  const ok = sym.endsWith('USDT') && String(s?.status) === 'TRADING' && (String(s?.contractType || '') === '' || String(s?.contractType) === 'PERPETUAL')
-                  if (ok) futuresSymbols.add(sym)
-                }
-              }
-            } catch {}
-            if (futuresSymbols.size > 0) {
-              ;(hsRes as any).data.hot_picks = (hsRes as any).data.hot_picks.filter((p: any) => futuresSymbols.has(String(p?.symbol || '').toUpperCase()))
-            }
-          }
-        } catch {}
 
         // Debug: outbound result summary
         try {
@@ -4491,41 +3882,10 @@ const server = http.createServer(async (req, res) => {
         const bodyStr = Buffer.concat(chunks).toString('utf8')
         const input = bodyStr ? JSON.parse(bodyStr) : null
         
-        // Accept asset_data coming from /api/intraday_any exactly as produced there
-        if (!input || typeof input !== 'object' || typeof input.symbol !== 'string' || typeof input.asset_data !== 'object') {
+        if (!input || typeof input !== 'object' || !input.symbol || !input.asset_data) {
           res.statusCode = 400
           res.setHeader('content-type', 'application/json')
           res.end(JSON.stringify({ ok: false, code: 'bad_request', latencyMs: 0, data: null }))
-          return
-        }
-
-        // Normalize symbol to uppercase USDT form
-        try {
-          const normalizeSymbol = (s: string): string => {
-            let v = String(s||'').trim().toUpperCase()
-            if (!v) return ''
-            if (v.includes('/')) v = v.replace('/', '')
-            if (!v.endsWith('USDT')) v = `${v}USDT`
-            return v
-          }
-          input.symbol = normalizeSymbol(input.symbol)
-        } catch {}
-
-        // Normalize asset_data if client sent full intraday_any wrapper
-        try {
-          const ad = (input as any).asset_data
-          if (ad && typeof ad === 'object' && Array.isArray(ad.assets)) {
-            const first = ad.assets[0]
-            if (first && typeof first === 'object') (input as any).asset_data = first
-          }
-        } catch {}
-        // Minimal asset_data validation: require price or OHLCV arrays
-        const hasPrice = Number.isFinite(Number((input.asset_data as any)?.price))
-        const hasOhlcv = !!(input.asset_data && (input.asset_data as any).ohlcv)
-        if (!hasPrice && !hasOhlcv) {
-          res.statusCode = 400
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, code: 'bad_asset_data', latencyMs: 0, data: null }))
           return
         }
 
@@ -4555,8 +3915,10 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ ok: false, code: 'bad_request', latencyMs: 0, data: null }))
           return
         }
+
         const out = await runEntryRisk(input as any)
         const status = out.ok ? 200 : (out.code === 'schema' || out.code === 'invalid_json' || out.code === 'empty_output' ? 422 : (Number((out as any)?.meta?.http_status) || 500))
+
         // Persist chosen_plan + posture for Strategy Updater ONLY when decision === 'enter'
         try {
           if (out && out.ok && (out as any)?.data?.decision === 'enter') {
@@ -4565,13 +3927,15 @@ const server = http.createServer(async (req, res) => {
             const posture = (typeof input?.posture === 'string' && input.posture) ? String(input.posture) : null
             if (sym && chosen && posture) {
               const { setRiskChosenPlan } = await import('../services/strategy-updater/registry')
-              // Validate style and map tp_levels
               const style = String(chosen?.style) === 'aggressive' ? 'aggressive' : 'conservative'
-              const tps = Array.isArray(chosen?.tp_levels) ? chosen.tp_levels.filter((l:any)=>l && (l.tag==='tp1'||l.tag==='tp2'||l.tag==='tp3')).map((l:any)=>({ tag: l.tag, price: Number(l.price), allocation_pct: Number(l.allocation_pct) })) : []
+              const tps = Array.isArray(chosen?.tp_levels) ? chosen.tp_levels
+                .filter((l:any)=>l && (l.tag==='tp1'||l.tag==='tp2'||l.tag==='tp3'))
+                .map((l:any)=>({ tag: l.tag, price: Number(l.price), allocation_pct: Number(l.allocation_pct) })) : []
               if (tps.length >= 1) setRiskChosenPlan(sym, { style, entry: Number(chosen.entry), sl: Number(chosen.sl), tp_levels: tps, reasoning: String(chosen?.reasoning||'') }, posture as any)
             }
           }
         } catch {}
+
         res.statusCode = status
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify(out))
@@ -4612,144 +3976,6 @@ const server = http.createServer(async (req, res) => {
       return
     }
 
-    // TEMP: Refresh positions from Binance API
-    if (url.pathname === '/api/positions/refresh' && req.method === 'POST') {
-      try {
-        const { fetchPositions } = await import('../services/trading/binance_futures')
-        const { upsertPositionsFromRest } = await import('../services/exchange/binance/userDataWs')
-        const positions = await fetchPositions()
-        upsertPositionsFromRest(positions)
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ success: true, count: positions.length }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ error: e?.message || 'Internal error' }))
-      }
-      return
-    }
-
-    // Entry Updater status (UX aligned with Strategy Updater)
-    if (url.pathname === '/api/entry_updater_status' && req.method === 'GET') {
-      try {
-        const symbol = url.searchParams.get('symbol')
-        const { getEntryUpdaterStatus } = await import('../services/entry-updater/api')
-        const result = await getEntryUpdaterStatus(symbol || undefined)
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify(result))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ enabled: false, entries: [], error: error?.message || 'unknown' }))
-      }
-      return
-    }
-
-    // Entry Updater audit endpoints (read-only)
-    if (url.pathname === '/api/entry_updater_audit' && req.method === 'GET') {
-      try {
-        const { readAuditEntries } = await import('../services/entry-updater/audit')
-        const symbol = url.searchParams.get('symbol') || undefined
-        const limitParam = Number(url.searchParams.get('limit') || 50)
-        const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(500, Math.floor(limitParam)) : 50
-        const entries = await readAuditEntries(symbol, limit)
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ entries }))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ entries: [], error: error?.message || 'unknown' }))
-      }
-      return
-    }
-
-    if (url.pathname === '/api/entry_updater_audit/latest' && req.method === 'GET') {
-      try {
-        const { readAuditLatest } = await import('../services/entry-updater/audit')
-        const symbol = url.searchParams.get('symbol') || undefined
-        const entry = await readAuditLatest(symbol)
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ entry }))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ entry: null, error: error?.message || 'unknown' }))
-      }
-      return
-    }
-
-    // Strategy Updater debug: return last saved input for a symbol (read-only)
-    if (url.pathname === '/api/debug/strategy_updater_last' && req.method === 'GET') {
-      try {
-        const sym = String(url.searchParams.get('symbol') || '')
-        if (!sym) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: false, error: 'missing_symbol' })); return }
-        const fs = await import('node:fs')
-        const path = await import('node:path')
-        const file = path.resolve(process.cwd(), 'runtime/su_debug', `${sym}.json`)
-        if (!fs.existsSync(file)) { res.statusCode = 200; res.setHeader('Cache-Control', 'no-store'); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: false, message: 'none' })); return }
-        const text = fs.readFileSync(file, 'utf8')
-        res.statusCode = 200
-        res.setHeader('Cache-Control', 'no-store')
-        res.setHeader('content-type', 'application/json')
-        res.end(text)
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('Cache-Control', 'no-store')
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
-      }
-      return
-    }
-
-    // Strategy Updater debug: list recent saved inputs (by mtime desc)
-    if (url.pathname === '/api/debug/strategy_updater_recent' && req.method === 'GET') {
-      try {
-        const limitParam = Number(url.searchParams.get('limit') || 10)
-        const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(50, Math.floor(limitParam)) : 10
-        const maxAgeHParam = Number(url.searchParams.get('maxAgeH') || 24)
-        const maxAgeMs = Number.isFinite(maxAgeHParam) && maxAgeHParam > 0 ? maxAgeHParam * 3600 * 1000 : 24 * 3600 * 1000
-        const fs = await import('node:fs')
-        const path = await import('node:path')
-        const dir = path.resolve(process.cwd(), 'runtime/su_debug')
-        let items: Array<{ symbol: string; mtime: number }> = []
-        try {
-          const files = fs.existsSync(dir) ? fs.readdirSync(dir) : []
-          for (const f of files) {
-            if (!/\.json$/i.test(f)) continue
-            const sym = f.replace(/\.json$/i, '')
-            const full = path.join(dir, f)
-            try { const st = fs.statSync(full); items.push({ symbol: sym, mtime: st.mtimeMs }) } catch {}
-          }
-        } catch {}
-        const now = Date.now()
-        items = items.filter(it => (now - it.mtime) <= maxAgeMs)
-        items.sort((a, b) => b.mtime - a.mtime)
-        const top = items.slice(0, limit)
-        const out: Array<{ symbol: string; body: string; mtime: number }> = []
-        for (const it of top) {
-          try {
-            const full = path.join(dir, `${it.symbol}.json`)
-            const txt = fs.readFileSync(full, 'utf8')
-            out.push({ symbol: it.symbol, body: txt, mtime: it.mtime })
-          } catch {}
-        }
-        res.statusCode = 200
-        res.setHeader('Cache-Control', 'no-store')
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ items: out }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('Cache-Control', 'no-store')
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ items: [], error: e?.message || 'unknown' }))
-      }
-      return
-    }
-
     // Strategy updater audit endpoints (read-only)
     if (url.pathname === '/api/strategy_updater_audit' && req.method === 'GET') {
       try {
@@ -4783,6 +4009,7 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+
     if (url.pathname === '/api/strategy_updater_toggle' && (req.method === 'GET' || req.method === 'POST')) {
       try {
         if (req.method === 'POST') {
@@ -4828,10 +4055,9 @@ const server = http.createServer(async (req, res) => {
           
           fs.writeFileSync(envPath, lines.join('\n'), 'utf8')
           
-          const su = await ensureStrategyUpdaterLoop(enabledBool)
           res.statusCode = 200
           res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ enabled: enabledBool, success: true, workflow: su }))
+          res.end(JSON.stringify({ enabled: enabledBool, success: true }))
         } else {
           // GET - return current state
           const enabled = process.env.STRATEGY_UPDATER_ENABLED === '1' || process.env.STRATEGY_UPDATER_ENABLED === 'true'
@@ -4851,6 +4077,59 @@ const server = http.createServer(async (req, res) => {
       return
     }
 
+    // Entry Updater status
+    if (url.pathname === '/api/entry_updater_status' && req.method === 'GET') {
+      try {
+        const symbol = url.searchParams.get('symbol')
+        const { getEntryUpdaterStatus } = await import('../services/entry-updater/api')
+        const result = await getEntryUpdaterStatus(symbol || undefined)
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(result))
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ enabled: false, entries: [], error: error?.message || 'unknown' }))
+      }
+      return
+    }
+
+    // Entry Updater audit endpoints
+    if (url.pathname === '/api/entry_updater_audit' && req.method === 'GET') {
+      try {
+        const { readAuditEntries } = await import('../services/entry-updater/audit')
+        const symbol = url.searchParams.get('symbol') || undefined
+        const limitParam = Number(url.searchParams.get('limit') || 50)
+        const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(500, Math.floor(limitParam)) : 50
+        const entries = await readAuditEntries(symbol, limit)
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ entries }))
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ entries: [], error: error?.message || 'unknown' }))
+      }
+      return
+    }
+
+    if (url.pathname === '/api/entry_updater_audit/latest' && req.method === 'GET') {
+      try {
+        const { readAuditLatest } = await import('../services/entry-updater/audit')
+        const symbol = url.searchParams.get('symbol') || undefined
+        const entry = await readAuditLatest(symbol)
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ entry }))
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ entry: null, error: error?.message || 'unknown' }))
+      }
+      return
+    }
+
+    // Entry Updater toggle
     if (url.pathname === '/api/entry_updater_toggle' && (req.method === 'GET' || req.method === 'POST')) {
       try {
         if (req.method === 'POST') {
@@ -4888,6 +4167,157 @@ const server = http.createServer(async (req, res) => {
       return
     }
 
+    // Top-Up Watcher status
+    if (url.pathname === '/api/topup_watcher_status' && req.method === 'GET') {
+      try {
+        const { listWatchers } = await import('../services/top-up-watcher/registry')
+        const entries = listWatchers()
+        let enabled = false
+        try {
+          const env = String(process.env.TOPUP_WATCHER_ENABLED || '').toLowerCase()
+          if (env) {
+            enabled = env === '1' || env === 'true'
+          } else {
+            const fs = await import('node:fs')
+            const path = await import('node:path')
+            const file = path.resolve('config/top_up_watcher.json')
+            if (fs.existsSync(file)) {
+              const j = JSON.parse(fs.readFileSync(file, 'utf8'))
+              enabled = j?.enabled !== false
+            } else {
+              enabled = true
+            }
+          }
+        } catch {
+          enabled = process.env.TOPUP_WATCHER_ENABLED === '1' || process.env.TOPUP_WATCHER_ENABLED === 'true'
+        }
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ enabled, entries }))
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ enabled: false, entries: [], error: error?.message || 'unknown' }))
+      }
+      return
+    }
+
+    // Top-Up Watcher toggle
+    if (url.pathname === '/api/topup_watcher_toggle' && (req.method === 'GET' || req.method === 'POST')) {
+      try {
+        if (req.method === 'POST') {
+          const body = await new Promise<string>((resolve) => {
+            let data = ''
+            req.on('data', chunk => data += chunk)
+            req.on('end', () => resolve(data))
+          })
+          const { enabled } = JSON.parse(body || '{}')
+          const enabledBool = Boolean(enabled)
+          process.env.TOPUP_WATCHER_ENABLED = enabledBool ? '1' : '0'
+          const fs = await import('node:fs')
+          const path = await import('node:path')
+          const envPath = path.resolve(process.cwd(), '.env.local')
+          let envContent = ''
+          try { if (fs.existsSync(envPath)) envContent = fs.readFileSync(envPath, 'utf8') } catch {}
+          const lines = envContent.split('\n')
+          let found = false
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].startsWith('TOPUP_WATCHER_ENABLED=')) { lines[i] = `TOPUP_WATCHER_ENABLED=${enabledBool ? '1' : '0'}`; found = true; break }
+          }
+          if (!found) lines.push(`TOPUP_WATCHER_ENABLED=${enabledBool ? '1' : '0'}`)
+          fs.writeFileSync(envPath, lines.join('\n'), 'utf8')
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ enabled: enabledBool, success: true }))
+        } else {
+          const envFlag = String(process.env.TOPUP_WATCHER_ENABLED || '').toLowerCase()
+          if (envFlag) {
+            res.statusCode = 200
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify({ enabled: envFlag === '1' || envFlag === 'true' }))
+            return
+          }
+          try {
+            const fs = await import('node:fs')
+            const path = await import('node:path')
+            const file = path.resolve('config/top_up_watcher.json')
+            if (fs.existsSync(file)) {
+              const j = JSON.parse(fs.readFileSync(file, 'utf8'))
+              const enabled = j?.enabled !== false
+              res.statusCode = 200
+              res.setHeader('content-type', 'application/json')
+              res.end(JSON.stringify({ enabled }))
+            } else {
+              res.statusCode = 200
+              res.setHeader('content-type', 'application/json')
+              res.end(JSON.stringify({ enabled: true }))
+            }
+          } catch {
+            res.statusCode = 200
+            res.setHeader('content-type', 'application/json')
+            res.end(JSON.stringify({ enabled: true }))
+          }
+        }
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ enabled: false, error: error?.message || 'unknown' }))
+      }
+      return
+    }
+
+    // Top-Up Executor status
+    if (url.pathname === '/api/top_up_executor_status' && req.method === 'GET') {
+      try {
+        const { getTopUpExecutorStatus } = await import('../services/top-up-executor/trigger')
+        const { enabled, entries } = getTopUpExecutorStatus()
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ enabled, entries }))
+      } catch (error: any) {
+        // CRITICAL FIX: Vrať 200 OK i při chybě, aby UI nespamovalo retry (schema chyba není fatální)
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ enabled: false, entries: [], error: error?.message || 'unknown' }))
+      }
+      return
+    }
+
+    // Cooldown endpoints
+    if (url.pathname === '/api/cooldowns' && req.method === 'GET') {
+      try {
+        const active = getActiveCooldowns()
+        res.statusCode = 200
+        res.setHeader('content-type','application/json')
+        res.end(JSON.stringify({ ok: true, active }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type','application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+
+    if (url.pathname === '/api/cooldowns/clear' && req.method === 'POST') {
+      try {
+        const chunks: Buffer[] = []
+        for await (const ch of req) chunks.push(ch as Buffer)
+        const bodyStr = Buffer.concat(chunks).toString('utf8')
+        const parsed: any = bodyStr ? JSON.parse(bodyStr) : null
+        const symbol = String(parsed?.symbol || '')
+        if (!symbol) { res.statusCode = 400; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ ok:false, error:'missing_symbol' })); return }
+        clearCooldown(symbol)
+        res.statusCode = 200
+        res.setHeader('content-type','application/json')
+        res.end(JSON.stringify({ ok: true }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type','application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+
     if (url.pathname === '/api/strategy_updater_trigger' && req.method === 'POST') {
       try {
         const body = await new Promise<string>((resolve) => {
@@ -4904,9 +4334,12 @@ const server = http.createServer(async (req, res) => {
           return
         }
 
-        // Strict: použij pouze WS snapshoty (žádné fallbacky ani REST)
-        const positions = getPositionsInMemory()
-        const orders = getOpenOrdersInMemory()
+        // Get current positions and orders
+        const api = getBinanceAPI()
+        const [positions, orders] = await Promise.all([
+          api.getPositions(),
+          api.getOpenOrders()
+        ])
 
         // Find the position
         const position = positions.find((pos: any) => String(pos?.symbol) === symbol)
@@ -4917,19 +4350,14 @@ const server = http.createServer(async (req, res) => {
           return
         }
 
-        // Ensure SU entry exists with zero delay, then mark as due and process immediately
+        // Mark existing entry as due now if exists, otherwise run detection
         try {
-          const reg = await import('../services/strategy-updater/registry')
-          const trg = await import('../services/strategy-updater/trigger')
-          let forced = reg.forceDueNow(symbol)
+          const { forceDueNow } = await import('../services/strategy-updater/registry')
+          const forced = forceDueNow(symbol)
           if (!forced) {
-            try { trg.startStrategyUpdaterForPosition(symbol, position, orders, { initialDelayMs: 0 }) } catch {}
-            forced = reg.forceDueNow(symbol)
+            const { detectInternalPositionOpened } = await import('../services/strategy-updater/trigger')
+            detectInternalPositionOpened(orders, positions, { type: 'filled', symbol, orderId: 0 })
           }
-          try {
-            const { processDueStrategyUpdates } = await import('../services/strategy-updater/trigger')
-            await processDueStrategyUpdates()
-          } catch {}
         } catch {}
 
         res.statusCode = 200
@@ -4942,499 +4370,6 @@ const server = http.createServer(async (req, res) => {
           success: false,
           error: error?.message || 'unknown' 
         }))
-      }
-      return
-    }
-    // Temporal: start StrategyUpdater workflow (runOnce or loop)
-    if (url.pathname === '/api/temporal/su/start' && req.method === 'POST') {
-      try {
-        const address = process.env.TEMPORAL_ADDRESS
-        const taskQueue = process.env.TASK_QUEUE
-        if (!address) {
-          res.statusCode = 500
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'TEMPORAL_ADDRESS missing' }))
-          return
-        }
-        if (!taskQueue) {
-          res.statusCode = 500
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'TASK_QUEUE missing' }))
-          return
-        }
-
-        const body = await new Promise<string>((resolve) => {
-          let data = ''
-          req.on('data', chunk => data += chunk)
-          req.on('end', () => resolve(data))
-        })
-        const payload = (() => { try { return JSON.parse(body || '{}') } catch { return {} } })()
-        const runOnce = Boolean(payload?.runOnce !== false)
-
-        const { Connection, Client } = await import('@temporalio/client')
-        const connection = await Connection.connect({ address })
-        const client = new Client({ connection })
-        const wfId = `su_${Date.now()}`
-        const handle = await client.workflow.start('StrategyUpdaterWorkflow', {
-          taskQueue,
-          workflowId: wfId,
-          args: [{ runOnce, openaiQueue: String(process.env.TASK_QUEUE_OPENAI || '') }],
-          workflowIdReusePolicy: 'WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE'
-        })
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, workflowId: handle.workflowId }))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: String(error?.message || error) }))
-      }
-      return
-    }
-    if (url.pathname === '/api/su/execute' && req.method === 'POST') {
-      try {
-        const body = await new Promise<string>((resolve) => {
-          let data = ''
-          req.on('data', chunk => data += chunk)
-          req.on('end', () => resolve(data))
-        })
-        const payload = (() => { try { return JSON.parse(body || '{}') } catch { return {} } })()
-        const symbol = String(payload?.symbol || '')
-        const newSL = Number(payload?.newSL)
-        const tp = Number(payload?.tp)
-        if (!symbol || !Number.isFinite(newSL) || !Number.isFinite(tp)) {
-          res.statusCode = 400
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'symbol,newSL,tp required' }))
-          return
-        }
-        const positions = getPositionsInMemory()
-        const orders = getOpenOrdersInMemory()
-        const pos = positions.find((p: any) => String(p?.symbol) === symbol)
-        const amt = Number(pos?.positionAmt || 0)
-        if (!pos || Math.abs(amt) <= 0) {
-          res.statusCode = 404
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'position not found' }))
-          return
-        }
-        const side: 'LONG'|'SHORT' = amt > 0 ? 'LONG' : 'SHORT'
-        const size = Math.abs(amt)
-        const entryPrice = Number(pos?.entryPrice || pos?.averagePrice || 0)
-        const exitSide = side === 'LONG' ? 'SELL' : 'BUY'
-        // Derive currentSL from live orders
-        let currentSL: number | null = null
-        try {
-          const list = Array.isArray(orders) ? orders : []
-          const stopOrders = list.filter((o: any) => {
-            try { return String(o?.symbol) === symbol && String(o?.side) === exitSide && /STOP/i.test(String(o?.type||'')) && !/TAKE_PROFIT/i.test(String(o?.type||'')) } catch { return false }
-          })
-          const candidates: number[] = []
-          const mark = Number(pos?.markPrice || 0)
-          for (const o of stopOrders) {
-            const sp = Number(o?.stopPrice || o?.price || 0)
-            if (!Number.isFinite(sp) || sp <= 0) continue
-            if (Number.isFinite(mark)) {
-              if (side === 'LONG') { if (sp < mark) candidates.push(sp) } else { if (sp > mark) candidates.push(sp) }
-            } else candidates.push(sp)
-          }
-          if (candidates.length) currentSL = side === 'LONG' ? Math.max(...candidates) : Math.min(...candidates)
-        } catch {}
-
-        const now = new Date()
-        const entry = {
-          symbol,
-          side,
-          entryPrice,
-          positionSize: size,
-          currentSL: currentSL ?? null,
-          currentTP: null,
-          triggerAt: new Date(now.getTime() - 1000).toISOString(),
-          since: new Date(now.getTime() - 1000).toISOString(),
-          lastCheck: null,
-          checks: 0,
-          status: 'waiting' as const,
-          lastError: null,
-          lastErrorAt: null
-        }
-        const response = {
-          symbol,
-          newSL: newSL,
-          tp_levels: [{ tag: 'tp' as const, price: tp, allocation_pct: 1 }],
-          reasoning: 'manual_execute',
-          confidence: 1,
-          urgency: 'high' as const
-        }
-        const { executeStrategyUpdate } = await import('../services/strategy-updater/executor')
-        const exec = await executeStrategyUpdate(symbol, response as any, entry as any)
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: exec.success, created: { sl: exec.newSlOrderId, tps: exec.newTpOrderIds }, cancelled: exec.cancelledOrderIds, error: exec.error || null }))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: String(error?.message || error) }))
-      }
-      return
-    }
-
-    // Temporal: start TradeLifecycle workflow (PoC)
-    if (url.pathname === '/api/temporal/trade/start' && req.method === 'POST') {
-      try {
-        const address = process.env.TEMPORAL_ADDRESS
-        const taskQueue = process.env.TASK_QUEUE
-        if (!address) {
-          res.statusCode = 500
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'TEMPORAL_ADDRESS missing' }))
-          return
-        }
-        if (!taskQueue) {
-          res.statusCode = 500
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'TASK_QUEUE missing' }))
-          return
-        }
-
-        const body = await new Promise<string>((resolve) => {
-          let data = ''
-          req.on('data', chunk => data += chunk)
-          req.on('end', () => resolve(data))
-        })
-        const p = JSON.parse(body || '{}')
-        const symbol = String(p?.symbol || '')
-        const side = String(p?.side || '')
-        const notionalUsd = Number(p?.notionalUsd)
-        const leverage = Number(p?.leverage)
-        const entryType = String(p?.entryType || '')
-        const entryPrice = p?.entryPrice != null ? Number(p.entryPrice) : undefined
-        const sl = Number(p?.sl)
-        const tp = Number(p?.tp)
-        if (!symbol || (side !== 'LONG' && side !== 'SHORT') || !Number.isFinite(notionalUsd) || !Number.isFinite(leverage) || !entryType || !Number.isFinite(sl) || !Number.isFinite(tp)) {
-          res.statusCode = 400
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'bad_params' }))
-          return
-        }
-        const { Connection, Client } = await import('@temporalio/client')
-        const connection = await Connection.connect({ address })
-        const client = new Client({ connection })
-        const wfId = `trade_${symbol}_${Date.now()}`
-        const handle = await client.workflow.start('TradeLifecycleWorkflow', {
-          taskQueue,
-          workflowId: wfId,
-          args: [{ symbol, side, notionalUsd, leverage, entryType, entryPrice, sl, tp, workingType: 'MARK_PRICE', binanceQueue: String(process.env.TASK_QUEUE_BINANCE || '') }],
-          workflowIdReusePolicy: 'WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE'
-        })
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, workflowId: handle.workflowId }))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: String(error?.message || error) }))
-      }
-      return
-    }
-
-    // Temporal: start Entry Assistant workflow (per-coin entry orchestration)
-    if (url.pathname === '/api/temporal/entry/start' && req.method === 'POST') {
-      try {
-        const body = await new Promise<string>((resolve) => {
-          let data = ''
-          req.on('data', chunk => data += chunk)
-          req.on('end', () => resolve(data))
-        })
-        const payload = body ? JSON.parse(body) : {}
-        const address = process.env.TEMPORAL_ADDRESS
-        const taskQueue = process.env.TASK_QUEUE
-        if (!address) throw new Error('TEMPORAL_ADDRESS missing')
-        if (!taskQueue) throw new Error('TASK_QUEUE missing')
-
-        const { Connection, Client } = await import('@temporalio/client')
-        const connection = await Connection.connect({ address })
-        const client = new Client({ connection })
-        const wfId = `entry_${String(payload?.symbol || 'UNK')}_${Date.now()}`
-        const handle = await client.workflow.start('EntryAssistantWorkflow', {
-          taskQueue,
-          workflowId: wfId,
-          args: [{ ...payload, openaiQueue: String(process.env.TASK_QUEUE_OPENAI || ''), binanceQueue: String(process.env.TASK_QUEUE_BINANCE || '') }],
-          workflowIdReusePolicy: 'WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE'
-        })
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, workflowId: handle.workflowId }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }))
-      }
-      return
-    }
-
-    // Temporal: start multiple Entry Assistant workflows in batch
-    if (url.pathname === '/api/temporal/entry/start_batch' && req.method === 'POST') {
-      try {
-        const address = process.env.TEMPORAL_ADDRESS
-        const taskQueue = process.env.TASK_QUEUE
-        if (!address) throw new Error('TEMPORAL_ADDRESS missing')
-        if (!taskQueue) throw new Error('TASK_QUEUE missing')
-
-        const body = await new Promise<string>((resolve) => {
-          let data = ''
-          req.on('data', chunk => data += chunk)
-          req.on('end', () => resolve(data))
-        })
-        const payload = (() => { try { return JSON.parse(body || '[]') } catch { return [] } })()
-        const list = Array.isArray(payload) ? payload : []
-        if (list.length === 0) {
-          res.statusCode = 400
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'empty_list' }))
-          return
-        }
-
-        const { Connection, Client } = await import('@temporalio/client')
-        const connection = await Connection.connect({ address })
-        const client = new Client({ connection })
-
-        const results: Array<{ workflowId: string; ok: boolean; error?: string }> = []
-        for (const item of list) {
-          try {
-            const sym = String(item?.symbol || 'UNK')
-            const wfId = `entry_${sym}_${Date.now()}_${Math.random().toString(36).slice(2,6)}`
-            const handle = await client.workflow.start('EntryAssistantWorkflow', {
-              taskQueue,
-              workflowId: wfId,
-              args: [{ ...item, openaiQueue: String(process.env.TASK_QUEUE_OPENAI || ''), binanceQueue: String(process.env.TASK_QUEUE_BINANCE || '') }],
-              workflowIdReusePolicy: 'WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE'
-            })
-            results.push({ workflowId: handle.workflowId, ok: true })
-          } catch (e: any) {
-            results.push({ workflowId: '', ok: false, error: String(e?.message || e) })
-          }
-        }
-
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, results }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }))
-      }
-      return
-    }
-
-    // Temporal: query Entry Assistant workflow status (strict, no fallbacks)
-    if (url.pathname === '/api/temporal/entry/status' && req.method === 'GET') {
-      try {
-        const address = process.env.TEMPORAL_ADDRESS
-        if (!address) throw new Error('TEMPORAL_ADDRESS missing')
-        const id = url.searchParams.get('id') || ''
-        if (!id) {
-          res.statusCode = 400
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'id missing' }))
-          return
-        }
-        const { Connection, Client } = await import('@temporalio/client')
-        const connection = await Connection.connect({ address })
-        const client = new Client({ connection })
-        const handle = client.workflow.getHandle(id)
-        const status = await handle.query('status')
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, workflowId: id, status }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }))
-      }
-      return
-    }
-
-    // Temporal: list active Entry Assistant workflows (running)
-    if (url.pathname === '/api/temporal/entry/active' && req.method === 'GET') {
-      try {
-        const address = process.env.TEMPORAL_ADDRESS
-        if (!address) throw new Error('TEMPORAL_ADDRESS missing')
-        const namespace = process.env.TEMPORAL_NAMESPACE || 'default'
-        const { Connection, Client } = await import('@temporalio/client')
-        const connection = await Connection.connect({ address })
-        const client = new Client({ connection })
-        const svc = client.workflowService
-        const listResp = await (svc as any).listWorkflowExecutions({
-          namespace,
-          pageSize: 50,
-          query: 'WorkflowType = "EntryAssistantWorkflow" and ExecutionStatus = "Running"'
-        })
-        const execs = (listResp?.executions ?? []) as any[]
-        const list = execs.map((e: any) => ({ id: e?.execution?.workflowId || null }))
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, items: list }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: String(e?.message || e), items: [] }))
-      }
-      return
-    }
-
-    // Temporal: send cancel signal to Entry Assistant workflow
-    if (url.pathname === '/api/temporal/entry/cancel' && req.method === 'POST') {
-      try {
-        const address = process.env.TEMPORAL_ADDRESS
-        if (!address) throw new Error('TEMPORAL_ADDRESS missing')
-        const body = await new Promise<string>((resolve) => {
-          let data = ''
-          req.on('data', chunk => data += chunk)
-          req.on('end', () => resolve(data))
-        })
-        const payload = (() => { try { return JSON.parse(body || '{}') } catch { return {} } })()
-        const id = String(payload?.id || '')
-        if (!id) {
-          res.statusCode = 400
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'id missing' }))
-          return
-        }
-        const { Connection, Client } = await import('@temporalio/client')
-        const connection = await Connection.connect({ address })
-        const client = new Client({ connection })
-        const handle = client.workflow.getHandle(id)
-        await handle.signal('cancel')
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, workflowId: id }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }))
-      }
-      return
-    }
-
-    // Temporal: start/stop/status Auto Copy workflow
-    if (url.pathname === '/api/temporal/auto_copy/start' && req.method === 'POST') {
-      try {
-        const address = process.env.TEMPORAL_ADDRESS
-        const taskQueue = process.env.TASK_QUEUE
-        if (!address) throw new Error('TEMPORAL_ADDRESS missing')
-        if (!taskQueue) throw new Error('TASK_QUEUE missing')
-        const body = await new Promise<string>((resolve) => { let d=''; req.on('data', c=>d+=c); req.on('end',()=>resolve(d)) })
-        const payload = (() => { try { return JSON.parse(body || '{}') } catch { return {} } })()
-        const items = Array.isArray(payload?.items) ? payload.items : []
-        const intervalMinutes = Math.max(1, Number(payload?.intervalMinutes || 5))
-        const maxRounds = payload?.maxRounds == null ? null : Math.max(1, Number(payload?.maxRounds))
-        if (items.length === 0) {
-          res.statusCode = 400
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'items missing' }))
-          return
-        }
-        const { Connection, Client } = await import('@temporalio/client')
-        const connection = await Connection.connect({ address })
-        const client = new Client({ connection })
-        const wfId = String(payload?.workflowId || `auto_copy_${Date.now()}`)
-        const handle = await client.workflow.start('AutoCopyWorkflow', {
-          taskQueue,
-          workflowId: wfId,
-          args: [{ items, intervalMinutes, maxRounds, openaiQueue: String(process.env.TASK_QUEUE_OPENAI || ''), binanceQueue: String(process.env.TASK_QUEUE_BINANCE || '') }],
-          workflowIdReusePolicy: 'WORKFLOW_ID_REUSE_POLICY_TERMINATE_IF_RUNNING'
-        })
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, workflowId: handle.workflowId }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }))
-      }
-      return
-    }
-    // Temporal: find the latest running Auto Copy workflow (best effort)
-    if (url.pathname === '/api/temporal/auto_copy/active' && req.method === 'GET') {
-      try {
-        const address = process.env.TEMPORAL_ADDRESS
-        if (!address) throw new Error('TEMPORAL_ADDRESS missing')
-        const namespace = process.env.TEMPORAL_NAMESPACE || 'default'
-        const { Connection, Client } = await import('@temporalio/client')
-        const connection = await Connection.connect({ address })
-        const client = new Client({ connection })
-        const svc = client.workflowService
-        const listResp = await (svc as any).listWorkflowExecutions({
-          namespace,
-          pageSize: 20,
-          query: 'WorkflowType = "AutoCopyWorkflow" and ExecutionStatus = "Running"'
-        })
-        const execs = (listResp?.executions ?? []) as any[]
-        // Sort by startTime descending to get the most recent workflow
-        const sorted = execs.sort((a: any, b: any) => {
-          const aTime = a?.startTime?.seconds || 0
-          const bTime = b?.startTime?.seconds || 0
-          return bTime - aTime // Descending (newest first)
-        })
-        const latest = sorted.length ? sorted[0] : null
-        const wid = latest?.execution?.workflowId || null
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, workflowId: wid }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }))
-      }
-      return
-    }
-
-    if (url.pathname === '/api/temporal/auto_copy/status' && req.method === 'GET') {
-      try {
-        const address = process.env.TEMPORAL_ADDRESS
-        if (!address) throw new Error('TEMPORAL_ADDRESS missing')
-        const id = url.searchParams.get('id') || ''
-        if (!id) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: false, error: 'id missing' })); return }
-        const { Connection, Client } = await import('@temporalio/client')
-        const connection = await Connection.connect({ address })
-        const client = new Client({ connection })
-        const h = client.workflow.getHandle(id)
-        const status = await h.query('status')
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true, workflowId: id, status }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }))
-      }
-      return
-    }
-
-    if (url.pathname === '/api/temporal/auto_copy/command' && req.method === 'POST') {
-      try {
-        const address = process.env.TEMPORAL_ADDRESS
-        if (!address) throw new Error('TEMPORAL_ADDRESS missing')
-        const body = await new Promise<string>((resolve) => { let d=''; req.on('data', c=>d+=c); req.on('end',()=>resolve(d)) })
-        const payload = (() => { try { return JSON.parse(body || '{}') } catch { return {} } })()
-        const id = String(payload?.id || '')
-        const cmd = String(payload?.cmd || '')
-        if (!id || !cmd) { res.statusCode = 400; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ ok:false, error:'id/cmd missing' })); return }
-        const { Connection, Client } = await import('@temporalio/client')
-        const connection = await Connection.connect({ address })
-        const client = new Client({ connection })
-        const h = client.workflow.getHandle(id)
-        if (cmd === 'pause') await h.signal('pause')
-        else if (cmd === 'resume') await h.signal('resume')
-        else if (cmd === 'cancel') await h.signal('cancel')
-        else { res.statusCode = 400; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ ok:false, error:'unknown_cmd' })); return }
-        res.statusCode = 200
-        res.setHeader('content-type','application/json')
-        res.end(JSON.stringify({ ok: true, workflowId: id, cmd }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type','application/json')
-        res.end(JSON.stringify({ ok:false, error: String(e?.message || e) }))
       }
       return
     }
@@ -5489,7 +4424,7 @@ const server = http.createServer(async (req, res) => {
             }
             
             if (tp > 0 && symbol) {
-              waitingTpSchedule(symbol, tp, qty, 'LONG', 'MARK_PRICE')
+              waitingTpSchedule(symbol, tp, qty, 'SHORT', 'MARK_PRICE')
               restoredCount++
               console.info('[RESTORED_WAITING_TP]', { symbol, tp, qty, source: TP_VALUES[symbol] ? 'historical' : 'estimated' })
             } else {
@@ -5521,329 +4456,278 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
-    if (url.pathname === '/api/profit_taker_status' && req.method === 'GET') {
+
+    // === DEV-ONLY PROMPT MANAGEMENT API ===
+    const isDevEnv = process.env.NODE_ENV !== 'production'
+    const checkDevAuth = (authHeader: string | undefined): boolean => {
+      if (!isDevEnv) return false
+      const expected = process.env.DEV_AUTH_TOKEN || 'dev-secret-token'
+      return authHeader === expected
+    }
+    
+    if (url.pathname === '/dev/prompts' && req.method === 'GET') {
+      if (!isDevEnv) { res.statusCode = 404; res.end('Not Found'); return }
+      if (!checkDevAuth(req.headers['x-dev-auth'] as string)) {
+        res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'unauthorized' })); return
+      }
       try {
-        const { getProfitTakerList } = await import('../services/profit-taker/registry')
-        const entries = getProfitTakerList()
-        // Align enabled flag with trigger.getConfig logic: env has priority, else config/profit_taker.json
-        let enabled = false
-        try {
-          const env = String(process.env.PROFIT_TAKER_ENABLED || '').toLowerCase()
-          if (env) {
-            enabled = env === '1' || env === 'true'
-          } else {
-            const fs = await import('node:fs')
-            const path = await import('node:path')
-            const j = JSON.parse(fs.readFileSync(path.resolve('config/profit_taker.json'), 'utf8'))
-            enabled = j?.enabled !== false
+        const { listAssistants } = await import('../services/lib/dev_prompts.js')
+        res.statusCode = 200; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ assistants: listAssistants() }))
+      } catch (e: any) {
+        res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    
+    if (url.pathname.startsWith('/dev/prompts/') && req.method === 'GET') {
+      if (!isDevEnv) { res.statusCode = 404; res.end('Not Found'); return }
+      if (!checkDevAuth(req.headers['x-dev-auth'] as string)) {
+        res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'unauthorized' })); return
+      }
+      try {
+        const key = url.pathname.split('/dev/prompts/')[1]
+        if (!key) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_key' })); return }
+        const { getOverlayPrompt } = await import('../services/lib/dev_prompts.js')
+        const overlay = getOverlayPrompt(key)
+        if (!overlay) { res.statusCode = 404; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'not_found' })); return }
+        res.statusCode = 200; res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ text: overlay.text, sha256: overlay.sha256, revision: overlay.revision, updatedAt: overlay.updatedAt }))
+      } catch (e: any) {
+        res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    
+    if (url.pathname.startsWith('/dev/prompts/') && req.method === 'PUT') {
+      if (!isDevEnv) { res.statusCode = 404; res.end('Not Found'); return }
+      if (!checkDevAuth(req.headers['x-dev-auth'] as string)) {
+        res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'unauthorized' })); return
+      }
+      try {
+        const key = url.pathname.split('/dev/prompts/')[1]
+        if (!key) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_key' })); return }
+        const chunks: Buffer[] = []; for await (const ch of req) chunks.push(ch as Buffer)
+        const bodyStr = Buffer.concat(chunks).toString('utf8')
+        let parsed: any = null
+        try { parsed = JSON.parse(bodyStr) } catch { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'invalid_json' })); return }
+        const { text, clientSha256, ifMatchRevision } = parsed
+        if (!text) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_text' })); return }
+        const { setOverlayPrompt } = await import('../services/lib/dev_prompts.js')
+        const result = setOverlayPrompt(key, text, clientSha256, ifMatchRevision)
+        res.statusCode = 200; res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(result))
+      } catch (e: any) {
+        res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    
+    // Export všech overlay promptů (podporuje oba endpointy pro kompatibilitu)
+    if ((url.pathname === '/dev/prompts/export' || url.pathname === '/dev/prompts/export-all') && req.method === 'POST') {
+      if (!isDevEnv) { res.statusCode = 404; res.end('Not Found'); return }
+      if (!checkDevAuth(req.headers['x-dev-auth'] as string)) {
+        res.statusCode = 401; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'unauthorized' })); return
+      }
+      try {
+        const { exportAllOverlaysToRegistry } = await import('../services/lib/dev_prompts.js')
+        const results = exportAllOverlaysToRegistry()
+        
+        // Formátuj odpověď pro UI
+        const success = results.filter(r => r.exported).length
+        const failed = results.filter(r => !r.exported).length
+        const response = {
+          success,
+          failed,
+          total: results.length,
+          results
+        }
+        
+        res.statusCode = 200; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(response))
+      } catch (e: any) {
+        res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
+      }
+      return
+    }
+
+    // === AI OVERVIEW SSE ENDPOINT (MULTIPLEXED - ALL ASSISTANTS) ===
+    if (url.pathname === '/dev/ai-stream/all' && req.method === 'GET') {
+      // Allow auth via header or query param token for EventSource compatibility
+      const tokenParam = String(url.searchParams.get('token') || '')
+      const headerOk = checkDevAuth(req.headers['x-dev-auth'] as string)
+      const expectedToken = process.env.DEV_AUTH_TOKEN || 'dev-secret-token'
+      const tokenOk = tokenParam && tokenParam === expectedToken
+      
+      if (!(headerOk || tokenOk)) {
+        res.statusCode = 403
+        res.end('FORBIDDEN')
+        return
+      }
+      
+      try {
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-store',
+          'Connection': 'keep-alive',
+          'Access-Control-Allow-Origin': '*'
+        })
+        
+        // Send immediate ping so client knows stream is open
+        res.write(`: connected\n\n`)
+        
+        const { aiTap } = await import('../services/lib/ai_tap')
+        const send = (e: any) => {
+          try {
+            res.write(`data: ${JSON.stringify(e)}\n\n`)
+          } catch {}
+        }
+        
+        // Subscribe to ALL assistants at once (multiplexed stream)
+        const allAssistants = [
+          'entry_strategy_conservative',
+          'entry_strategy_aggressive',
+          'entry_risk_manager',
+          'strategy_updater',
+          'hot_screener',
+          'reactive_entry_assistant',
+          'ai_profit_taker'
+        ] as const
+        
+        const unsubscribers = allAssistants.map(key => aiTap.subscribe(key as any, send))
+        
+        // Send keep-alive every 30s
+        const keepAlive = setInterval(() => {
+          try {
+            res.write(`: keepalive\n\n`)
+          } catch {
+            clearInterval(keepAlive)
           }
+        }, 30000)
+        
+        req.on('close', () => {
+          try {
+            unsubscribers.forEach(unsub => unsub())
+            clearInterval(keepAlive)
+          } catch {}
+        })
+      } catch {
+        try {
+          res.write('event: error\n')
+          res.write('data: {"error":"stream_error"}\n\n')
         } catch {}
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ enabled, entries }))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ enabled: false, entries: [], error: error?.message || 'unknown' }))
       }
       return
     }
 
-    if (url.pathname === '/api/topup_watcher_status' && req.method === 'GET') {
-      try {
-        const { listWatchers, isWatcherEnabled } = await import('../services/top-up-watcher/registry')
-        const entries = listWatchers()
-        const enabled = isWatcherEnabled()
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ enabled, entries }))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ enabled: false, entries: [], error: error?.message || 'unknown' }))
+    // === AI OVERVIEW SSE ENDPOINT (SINGLE ASSISTANT - LEGACY) ===
+    if (url.pathname.startsWith('/dev/ai-stream/') && req.method === 'GET') {
+      // Allow auth via header or query param token for EventSource compatibility
+      const tokenParam = String(url.searchParams.get('token') || '')
+      const headerOk = checkDevAuth(req.headers['x-dev-auth'] as string)
+      const expectedToken = process.env.DEV_AUTH_TOKEN || 'dev-secret-token'
+      const tokenOk = tokenParam && tokenParam === expectedToken
+      
+      if (!(headerOk || tokenOk)) {
+        res.statusCode = 403
+        res.end('FORBIDDEN')
+        return
       }
-      return
-    }
-
-    if (url.pathname === '/api/topup_watcher_events/latest' && req.method === 'GET') {
-      try {
-        const symbol = String(url.searchParams.get('symbol') || '').trim().toUpperCase()
-        if (!symbol) {
-          res.statusCode = 400
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ error: 'symbol required' }))
-          return
-        }
-        const { readLatestEvent } = await import('../services/top-up-watcher/events')
-        const event = await readLatestEvent(symbol)
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ event }))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ event: null, error: error?.message || 'unknown' }))
+      
+      const assistantKey = url.pathname.replace('/dev/ai-stream/', '').trim()
+      const allowed = [
+        'entry_strategy_conservative',
+        'entry_strategy_aggressive',
+        'entry_risk_manager',
+        'strategy_updater',
+        'hot_screener',
+        'reactive_entry_assistant',
+        'ai_profit_taker'
+      ]
+      
+      if (!assistantKey || !allowed.includes(assistantKey)) {
+        res.statusCode = 404
+        res.end('NOT_FOUND')
+        return
       }
-      return
-    }
-
-    // Top-Up Executor: status
-    if (url.pathname === '/api/top_up_executor_status' && req.method === 'GET') {
+      
       try {
-        const { getTopUpExecutorStatus } = await import('../services/top-up-executor/trigger')
-        const { enabled, entries } = getTopUpExecutorStatus()
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ enabled, entries }))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ enabled: false, entries: [], error: error?.message || 'unknown' }))
-      }
-      return
-    }
-
-    // Top-Up Executor: toggle (persist to .env.local)
-    if (url.pathname === '/api/top_up_executor_toggle' && (req.method === 'GET' || req.method === 'POST')) {
-      try {
-        if (req.method === 'POST') {
-          const body = await new Promise<string>((resolve) => {
-            let data = ''
-            req.on('data', chunk => data += chunk)
-            req.on('end', () => resolve(data))
-          })
-          const { enabled } = JSON.parse(body || '{}')
-          const enabledBool = Boolean(enabled)
-          ;(process as any).env.TOP_UP_EXECUTOR_ENABLED = enabledBool ? '1' : '0'
-          const fs = await import('node:fs')
-          const path = await import('node:path')
-          const envPath = path.resolve(process.cwd(), '.env.local')
-          let envContent = ''
-          try { if (fs.existsSync(envPath)) envContent = fs.readFileSync(envPath, 'utf8') } catch {}
-          const lines = envContent.split('\n')
-          let found = false
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].startsWith('TOP_UP_EXECUTOR_ENABLED=')) { lines[i] = `TOP_UP_EXECUTOR_ENABLED=${enabledBool ? '1' : '0'}`; found = true; break }
-          }
-          if (!found) lines.push(`TOP_UP_EXECUTOR_ENABLED=${enabledBool ? '1' : '0'}`)
-          fs.writeFileSync(envPath, lines.join('\n'), 'utf8')
-          res.statusCode = 200
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ enabled: enabledBool, success: true }))
-        } else {
-          const envFlag = String(process.env.TOP_UP_EXECUTOR_ENABLED || '').toLowerCase()
-          if (envFlag) {
-            res.statusCode = 200
-            res.setHeader('content-type', 'application/json')
-            res.end(JSON.stringify({ enabled: envFlag === '1' || envFlag === 'true' }))
-            return
-          }
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-store',
+          'Connection': 'keep-alive',
+          'Access-Control-Allow-Origin': '*'
+        })
+        
+        // Send immediate ping so client knows stream is open
+        res.write(`: connected\n\n`)
+        
+        const { aiTap } = await import('../services/lib/ai_tap')
+        const send = (e: any) => {
           try {
-            const fs = await import('node:fs')
-            const path = await import('node:path')
-            const file = path.resolve('config/top_up_executor.json')
-            if (fs.existsSync(file)) {
-              const j = JSON.parse(fs.readFileSync(file, 'utf8'))
-              const enabled = j?.enabled !== false
-              res.statusCode = 200
-              res.setHeader('content-type', 'application/json')
-              res.end(JSON.stringify({ enabled }))
-            } else {
-              res.statusCode = 200
-              res.setHeader('content-type', 'application/json')
-              res.end(JSON.stringify({ enabled: true }))
-            }
-          } catch {
-            const enabled = process.env.TOP_UP_EXECUTOR_ENABLED === '1' || process.env.TOP_UP_EXECUTOR_ENABLED === 'true'
-            res.statusCode = 200
-            res.setHeader('content-type', 'application/json')
-            res.end(JSON.stringify({ enabled }))
-          }
+            res.write(`data: ${JSON.stringify(e)}\n\n`)
+          } catch {}
         }
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ enabled: false, success: false, error: error?.message || 'unknown' }))
-      }
-      return
-    }
-
-    if (url.pathname === '/api/profit_taker_audit' && req.method === 'GET') {
-      try {
-        const { readAuditEntries } = await import('../services/profit-taker/audit')
-        const symbol = url.searchParams.get('symbol') || undefined
-        const limitParam = Number(url.searchParams.get('limit') || 50)
-        const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(500, Math.floor(limitParam)) : 50
-        const entries = await readAuditEntries(symbol, limit as any).catch(()=>Promise.resolve([]))
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ entries }))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ entries: [], error: error?.message || 'unknown' }))
-      }
-      return
-    }
-
-    if (url.pathname === '/api/profit_taker_audit/latest' && req.method === 'GET') {
-      try {
-        const symbol = url.searchParams.get('symbol') || undefined
-        const { readAuditLatest } = await import('../services/profit-taker/audit')
-        const entry = await readAuditLatest(symbol)
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ entry }))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ entry: null, error: error?.message || 'unknown' }))
-      }
-      return
-    }
-
-    if (url.pathname === '/api/profit_taker_toggle' && (req.method === 'GET' || req.method === 'POST')) {
-      try {
-        if (req.method === 'POST') {
-          const body = await new Promise<string>((resolve) => {
-            let data = ''
-            req.on('data', chunk => data += chunk)
-            req.on('end', () => resolve(data))
-          })
-          const { enabled } = JSON.parse(body || '{}')
-          const enabledBool = Boolean(enabled)
-          process.env.PROFIT_TAKER_ENABLED = enabledBool ? '1' : '0'
-          const fs = await import('node:fs')
-          const path = await import('node:path')
-          const envPath = path.resolve(process.cwd(), '.env.local')
-          let envContent = ''
-          try { if (fs.existsSync(envPath)) envContent = fs.readFileSync(envPath, 'utf8') } catch {}
-          const lines = envContent.split('\n')
-          let found = false
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].startsWith('PROFIT_TAKER_ENABLED=')) { lines[i] = `PROFIT_TAKER_ENABLED=${enabledBool ? '1' : '0'}`; found = true; break }
-          }
-          if (!found) lines.push(`PROFIT_TAKER_ENABLED=${enabledBool ? '1' : '0'}`)
-          fs.writeFileSync(envPath, lines.join('\n'), 'utf8')
-          res.statusCode = 200
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ enabled: enabledBool, success: true }))
-        } else {
+        
+        const unsub = aiTap.subscribe(assistantKey as any, send)
+        
+        // Send keep-alive every 30s
+        const keepAlive = setInterval(() => {
           try {
-            const { getConfig } = await import('../services/profit-taker/trigger')
-            const cfg = getConfig()
-            const enabled = Boolean(cfg?.enabled)
-            res.statusCode = 200
-            res.setHeader('content-type', 'application/json')
-            res.end(JSON.stringify({ enabled }))
+            res.write(`: keepalive\n\n`)
           } catch {
-            const enabled = process.env.PROFIT_TAKER_ENABLED === '1' || process.env.PROFIT_TAKER_ENABLED === 'true'
-            res.statusCode = 200
-            res.setHeader('content-type', 'application/json')
-            res.end(JSON.stringify({ enabled }))
+            clearInterval(keepAlive)
           }
-        }
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ enabled: false, success: false, error: error?.message || 'unknown' }))
-      }
-      return
-    }
-
-    if (url.pathname === '/api/topup_watcher_status' && req.method === 'GET') {
-      try {
-        const { listWatchers } = await import('../services/top-up-watcher/registry')
-        const entries = listWatchers()
-        let enabled = false
+        }, 30000)
+        
+        req.on('close', () => {
+          try {
+            unsub()
+            clearInterval(keepAlive)
+          } catch {}
+        })
+      } catch {
         try {
-          const env = String(process.env.TOPUP_WATCHER_ENABLED || '').toLowerCase()
-          if (env) {
-            enabled = env === '1' || env === 'true'
-          } else {
-            const fs = await import('node:fs')
-            const path = await import('node:path')
-            const file = path.resolve('config/top_up_watcher.json')
-            if (fs.existsSync(file)) {
-              const j = JSON.parse(fs.readFileSync(file, 'utf8'))
-              enabled = j?.enabled !== false
-            } else {
-              enabled = true
-            }
-          }
-        } catch {
-          enabled = process.env.TOPUP_WATCHER_ENABLED === '1' || process.env.TOPUP_WATCHER_ENABLED === 'true'
-        }
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ enabled, entries }))
-      } catch (error: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ enabled: false, entries: [], error: error?.message || 'unknown' }))
+          res.write('event: error\n')
+          res.write('data: {"error":"stream_error"}\n\n')
+        } catch {}
       }
       return
     }
-    if (url.pathname === '/api/topup_watcher_toggle' && (req.method === 'GET' || req.method === 'POST')) {
+
+    if (url.pathname === '/api/snapshot_overheat') {
+      res.setHeader('Cache-Control', 'no-store')
+      const t0 = performance.now()
       try {
-        if (req.method === 'POST') {
-          const body = await new Promise<string>((resolve) => {
-            let data = ''
-            req.on('data', chunk => data += chunk)
-            req.on('end', () => resolve(data))
-          })
-          const { enabled } = JSON.parse(body || '{}')
-          const enabledBool = Boolean(enabled)
-          process.env.TOPUP_WATCHER_ENABLED = enabledBool ? '1' : '0'
-          const fs = await import('node:fs')
-          const path = await import('node:path')
-          const envPath = path.resolve(process.cwd(), '.env.local')
-          let envContent = ''
-          try { if (fs.existsSync(envPath)) envContent = fs.readFileSync(envPath, 'utf8') } catch {}
-          const lines = envContent.split('\n')
-          let found = false
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].startsWith('TOPUP_WATCHER_ENABLED=')) { lines[i] = `TOPUP_WATCHER_ENABLED=${enabledBool ? '1' : '0'}`; found = true; break }
-          }
-          if (!found) lines.push(`TOPUP_WATCHER_ENABLED=${enabledBool ? '1' : '0'}`)
-          fs.writeFileSync(envPath, lines.join('\n'), 'utf8')
-          res.statusCode = 200
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ enabled: enabledBool, success: true }))
-        } else {
-          const envFlag = String(process.env.TOPUP_WATCHER_ENABLED || '').toLowerCase()
-          if (envFlag) {
-            res.statusCode = 200
-            res.setHeader('content-type', 'application/json')
-            res.end(JSON.stringify({ enabled: envFlag === '1' || envFlag === 'true' }))
-            return
-          }
-          try {
-            const fs = await import('node:fs')
-            const path = await import('node:path')
-            const file = path.resolve('config/top_up_watcher.json')
-            if (fs.existsSync(file)) {
-              const j = JSON.parse(fs.readFileSync(file, 'utf8'))
-              const enabled = j?.enabled !== false
-              res.statusCode = 200
-              res.setHeader('content-type', 'application/json')
-              res.end(JSON.stringify({ enabled }))
-            } else {
-              res.statusCode = 200
-              res.setHeader('content-type', 'application/json')
-              res.end(JSON.stringify({ enabled: true }))
-            }
-          } catch {
-            const enabled = process.env.TOPUP_WATCHER_ENABLED === '1' || process.env.TOPUP_WATCHER_ENABLED === 'true'
-            res.statusCode = 200
-            res.setHeader('content-type', 'application/json')
-            res.end(JSON.stringify({ enabled }))
-          }
-        }
-      } catch (error: any) {
+        const fresh = String(url.searchParams.get('fresh') || '1') === '1'
+        const topN = Number(url.searchParams.get('topN') || '')
+        // 1) Build raw snapshot (base = gainers)
+        const raw = await buildMarketRawSnapshot({ universeStrategy: 'overheat', desiredTopN: Number.isFinite(topN) ? topN : undefined, fresh, allowPartial: true })
+        // 2) Compute features
+        const { computeFeatures } = await import('../services/features/compute')
+        const feats = computeFeatures(raw)
+        // 3) Filter candidates via overheat screener
+        const { selectCandidates } = await import('../services/signals/candidate_selector')
+        const candidates = selectCandidates(feats, raw, {
+          decisionFlag: 'OK',
+          allowWhenNoTrade: false,
+          limit: 50,
+          cfg: { atr_pct_min: 0, atr_pct_max: 100, min_liquidity_usdt: 0 },
+          universeStrategy: 'overheat'
+        } as any)
+        // Map back to raw entries (keep indicators)
+        const selectedSet = new Set(candidates.map(c=>c.symbol))
+        const universe = raw.universe.filter(u=>selectedSet.has(u.symbol))
+        const body = JSON.stringify({
+          timestamp: new Date().toISOString(),
+          universe,
+          duration_ms: Math.round(performance.now()-t0)
+        })
+        res.statusCode = 200
+        res.setHeader('content-type','application/json')
+        res.end(body)
+      } catch (err:any) {
         res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ enabled: false, success: false, error: error?.message || 'unknown' }))
+        res.setHeader('content-type','application/json')
+        res.end(JSON.stringify({ error: err?.message || 'INTERNAL_ERROR' }))
       }
       return
     }
@@ -5889,141 +4773,645 @@ const server = http.createServer(async (req, res) => {
       return
     }
 
-    // Cooldown endpoints
-    if (url.pathname === '/api/cooldowns' && req.method === 'GET') {
-      try {
-        const active = getActiveCooldowns()
-        res.statusCode = 200
-        res.setHeader('content-type','application/json')
-        res.end(JSON.stringify({ ok: true, active }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type','application/json')
-        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
-      }
-      return
-    }
-    if (url.pathname === '/api/cooldowns/clear' && req.method === 'POST') {
-      try {
-        const chunks: Buffer[] = []
-        for await (const ch of req) chunks.push(ch as Buffer)
-        const bodyStr = Buffer.concat(chunks).toString('utf8')
-        const parsed: any = bodyStr ? JSON.parse(bodyStr) : null
-        const symbol = String(parsed?.symbol || '')
-        if (!symbol) { res.statusCode = 400; res.setHeader('content-type','application/json'); res.end(JSON.stringify({ ok:false, error:'missing_symbol' })); return }
-        clearCooldown(symbol)
-        res.statusCode = 200
-        res.setHeader('content-type','application/json')
-        res.end(JSON.stringify({ ok: true }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type','application/json')
-        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
-      }
-      return
-    }
-
-    // Fear & Greed Index (alternative.me) with 20m TTL cache
-    if (url.pathname === '/api/fear_greed' && req.method === 'GET') {
+    // Health Monitor API: Get health for symbol
+    if (url.pathname === '/api/health_monitor' && req.method === 'POST') {
       res.setHeader('Cache-Control', 'no-store')
-      try {
-        const key = makeKey('/api/fear_greed')
-        const cached = ttlGet<any>(key)
-        if (cached) {
-          res.statusCode = 200
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify(cached))
-          return
-        }
-        const r = await undiciRequest('https://api.alternative.me/fng/?limit=1&format=json', { method: 'GET', headers: { 'accept': 'application/json' } })
-        const body = await r.body.text()
-        if (r.statusCode !== 200) throw new Error(`HTTP ${r.statusCode}`)
-        let value: number | null = null
-        let classification: string | null = null
-        let updatedAt: string | null = null
-        try {
-          const j = JSON.parse(body)
-          const d = Array.isArray(j?.data) && j.data.length > 0 ? j.data[0] : null
-          value = Number(d?.value)
-          classification = (d?.value_classification ? String(d.value_classification) : null)
-          updatedAt = (d?.timestamp ? new Date(Number(d.timestamp) * 1000).toISOString() : null)
-        } catch {}
-        if (!Number.isFinite(value as any) || value == null) throw new Error('bad_payload')
-        const out = { value: Number(value), classification, updated_at: updatedAt, fetched_at: new Date().toISOString() }
-        ttlSet(key, out, 20 * 60 * 1000)
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify(out))
-      } catch (e: any) {
-        // On error, return last cached value if present
-        try {
-          const cached = ttlGet<any>(makeKey('/api/fear_greed'))
-          if (cached) {
-            res.statusCode = 200
-            res.setHeader('content-type', 'application/json')
-            res.end(JSON.stringify(cached))
-            return
-          }
-        } catch {}
-        res.statusCode = 502
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: e?.message || 'fetch_failed' }))
-      }
-      return
-    }
-
-    if (url.pathname === '/api/top_up_multiplier' && req.method === 'POST') {
       try {
         const body = await new Promise<string>((resolve) => {
           let data = ''
-          req.on('data', chunk => data += chunk)
+          req.on('data', chunk => { data += chunk })
           req.on('end', () => resolve(data))
         })
-        const { multiplier } = JSON.parse(body || '{}')
-        const val = Number(multiplier)
-        if (!Number.isFinite(val) || val <= 0) throw new Error('invalid_multiplier')
-        process.env.TOP_UP_MULTIPLIER = String(val)
+        
+        const parsed = JSON.parse(body)
+        const symbol = String(parsed?.symbol || '')
+        
+        if (!symbol) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ error: 'symbol_required' }))
+          return
+        }
+        
+        const health = getLatestHealth(symbol)
+        
+        if (!health) {
+          res.statusCode = 204 // No Content
+          res.end()
+          return
+        }
+        
+        // Debug mode
+        const debugHeader = req.headers['x-health-debug']
+        const debug = debugHeader === '1' || debugHeader === 'true'
+        
+        const response = debug 
+          ? { ...health, debug_trace: health._debug }
+          : health
+        
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ multiplier: val }))
+        res.end(JSON.stringify(response))
+        
       } catch (error: any) {
-        res.statusCode = 400
+        res.statusCode = 500
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: error?.message || 'invalid' }))
+        res.end(JSON.stringify({ error: error?.message || 'unknown' }))
       }
       return
     }
 
-    if (url.pathname === '/api/top_up_executor_audit' && req.method === 'GET') {
+    // Health Monitor API: Get worker status
+    if (url.pathname === '/api/health_monitor_status' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store')
       try {
-        const { readAuditEntries } = await import('../services/top-up-executor/audit')
-        const symbol = url.searchParams.get('symbol') || undefined
-        const limitParam = Number(url.searchParams.get('limit') || 50)
-        const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(200, Math.floor(limitParam)) : 50
-        const entries = await readAuditEntries(symbol, limit)
+        const enabled = isHealthMonitorEnabled()
+        const entries = getHealthWorkerEntries()
+        
+        console.log('[HEALTH_MONITOR_STATUS_API]', {
+          enabled,
+          totalEntries: entries.length,
+          pendingOrders: entries.filter(e => e.type === 'pending_order').length,
+          positions: entries.filter(e => e.type === 'position').length,
+          withOutput: entries.filter(e => e.lastOutput !== null).length
+        })
+        
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ entries }))
+        res.end(JSON.stringify({ enabled, entries }))
+        
       } catch (error: any) {
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ entries: [], error: error?.message || 'unknown' }))
+        res.end(JSON.stringify({ error: error?.message || 'unknown' }))
       }
       return
     }
 
-    if (url.pathname === '/api/top_up_executor_audit/latest' && req.method === 'GET') {
+    // Health Monitor API: Manual sync and trigger check
+    if (url.pathname === '/api/health_monitor_sync' && req.method === 'POST') {
+      res.setHeader('Cache-Control', 'no-store')
       try {
-        const { readAuditLatest } = await import('../services/top-up-executor/audit')
-        const symbol = url.searchParams.get('symbol') || undefined
-        const entry = await readAuditLatest(symbol)
+        await healthSyncPositions()
+        
+        const enabled = isHealthMonitorEnabled()
+        const entries = getHealthWorkerEntries()
+        
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ entry }))
+        res.end(JSON.stringify({
+          success: true,
+          message: 'Sync complete and health check triggered',
+          status: { enabled, entries }
+        }))
+        
       } catch (error: any) {
         res.statusCode = 500
         res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ entry: null, error: error?.message || 'unknown' }))
+        res.end(JSON.stringify({ error: error?.message || 'unknown' }))
+      }
+      return
+    }
+
+    // =================================================================
+    // REACTIVE ENTRY API (SHORT TRADING)
+    // =================================================================
+
+    // GET /api/reactive-entry/snapshot - Build market snapshot
+    if (url.pathname === '/api/reactive-entry/snapshot' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store')
+      const t0 = performance.now()
+      
+      try {
+        const symbol = url.searchParams.get('symbol') || ''
+        const microRange = url.searchParams.get('micro_range') === '1'
+        const uiLang = (url.searchParams.get('ui_lang') || 'cs') as 'cs' | 'en'
+        
+        if (!symbol) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'symbol required' }))
+          return
+        }
+        
+        // Rate limiting
+        const rateLimitKey = `reactive_entry_${symbol}`
+        if (!checkRateLimit(rateLimitKey)) {
+          res.statusCode = 429
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'rate_limit_exceeded' }))
+          return
+        }
+        
+        const api = getBinanceAPI()
+        
+        // 1. Fetch trading rules
+        const symbolInfo = await api.getSymbolInfo(symbol)
+        const filters = symbolInfo?.filters || []
+        const priceFilter = filters.find((f: any) => f.filterType === 'PRICE_FILTER')
+        const lotFilter = filters.find((f: any) => f.filterType === 'LOT_SIZE')
+        const minNotionalFilter = filters.find((f: any) => f.filterType === 'MIN_NOTIONAL')
+        
+        const tickSize = Number(priceFilter?.tickSize || 0.01)
+        const stepSize = Number(lotFilter?.stepSize || 0.001)
+        const minNotional = Number(minNotionalFilter?.notional || 5)
+        
+        // 2. Fetch current prices
+        const markPrice = await fetchMarkPrice(symbol)
+        const lastPrice = await fetchLastTradePrice(symbol)
+        
+        // 3. Fetch candles (parallel)
+        const baseUrl = 'https://fapi.binance.com/fapi/v1/klines'
+        const fetchPromises = [
+          undiciRequest(`${baseUrl}?symbol=${symbol}&interval=5m&limit=300`),
+          undiciRequest(`${baseUrl}?symbol=${symbol}&interval=15m&limit=200`),
+          undiciRequest(`${baseUrl}?symbol=${symbol}&interval=1h&limit=200`),
+          undiciRequest(`${baseUrl}?symbol=${symbol}&interval=4h&limit=200`)
+        ]
+        
+        if (microRange) {
+          fetchPromises.unshift(undiciRequest(`${baseUrl}?symbol=${symbol}&interval=1m&limit=90`))
+        }
+        
+        const responses = await Promise.all(fetchPromises)
+        const klinesData = await Promise.all(responses.map(r => r.body.json()))
+        
+        const klines1m = microRange ? klinesData[0] : []
+        const klines5m = microRange ? klinesData[1] : klinesData[0]
+        const klines15m = microRange ? klinesData[2] : klinesData[1]
+        const klines1h = microRange ? klinesData[3] : klinesData[2]
+        const klines4h = microRange ? klinesData[4] : klinesData[3]
+        
+        // 4. Calculate indicators
+        const r6 = (n: number) => round(n, 6)
+        
+        // EMA
+        const emaResult: any = {}
+        if (klines5m.length >= 50) {
+          const closes5m = klines5m.map((k: any) => parseFloat(k[4]))
+          emaResult.m5 = {
+            '20': ema(closes5m, 20),
+            '50': ema(closes5m, 50)
+          }
+        }
+        if (klines15m.length >= 50) {
+          const closes15m = klines15m.map((k: any) => parseFloat(k[4]))
+          emaResult.m15 = {
+            '20': ema(closes15m, 20),
+            '50': ema(closes15m, 50)
+          }
+        }
+        if (klines1h.length >= 50) {
+          const closes1h = klines1h.map((k: any) => parseFloat(k[4]))
+          emaResult.h1 = {
+            '20': ema(closes1h, 20),
+            '50': ema(closes1h, 50)
+          }
+        }
+        
+        // RSI
+        const closes5m = klines5m.map((k: any) => parseFloat(k[4]))
+        const closes15m = klines15m.map((k: any) => parseFloat(k[4]))
+        const rsi_m5 = rsi(closes5m, 14)
+        const rsi_m15 = rsi(closes15m, 14)
+        
+        // ATR
+        const bars15m = klines15m.map((k: any) => ({
+          high: parseFloat(k[2]),
+          low: parseFloat(k[3]),
+          close: parseFloat(k[4])
+        }))
+        const atrPct = atrPctFromBars(bars15m, 14)
+        const lastClose = closes15m[closes15m.length - 1]
+        const atrPrice = atrPct && lastClose ? (atrPct / 100) * lastClose : null
+        
+        // VWAP (today's session)
+        const now = new Date()
+        const startOfDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0)
+        const todayBars = klines15m
+          .filter((k: any) => Number(k[0]) >= startOfDay)
+          .map((k: any) => ({
+            high: parseFloat(k[2]),
+            low: parseFloat(k[3]),
+            close: parseFloat(k[4]),
+            volume: parseFloat(k[5])
+          }))
+        const vwap_today = vwapFromBars(todayBars)
+        
+        // 5. Detect RESISTANCE levels (swing highs z M5)
+        const resistances: Array<{ price: number; age_mins: number }> = []
+        const nowMs = Date.now()
+        
+        for (let i = 1; i < klines5m.length - 1; i++) {
+          const prev = parseFloat(klines5m[i - 1][2]) // high
+          const curr = parseFloat(klines5m[i][2])     // high
+          const next = parseFloat(klines5m[i + 1][2]) // high
+          
+          if (curr > prev && curr > next) {
+            const openTime = Number(klines5m[i][0])
+            const ageMins = Math.floor((nowMs - openTime) / (60 * 1000))
+            resistances.push({ price: curr, age_mins: ageMins })
+          }
+        }
+        
+        // Vybrat posledních 3-5 nejčerstvějších resistances
+        const sortedResistances = resistances
+          .sort((a, b) => a.age_mins - b.age_mins)
+          .slice(0, 5)
+        
+        // 6. Calculate ranges
+        const rangeResult: any = {}
+        
+        if (klines1h.length > 0) {
+          const h1Lows = klines1h.map((k: any) => parseFloat(k[3]))
+          const h1Highs = klines1h.map((k: any) => parseFloat(k[2]))
+          rangeResult.h1 = {
+            low: Math.min(...h1Lows),
+            high: Math.max(...h1Highs)
+          }
+        }
+        
+        if (klines4h.length > 0) {
+          const h4Lows = klines4h.map((k: any) => parseFloat(k[3]))
+          const h4Highs = klines4h.map((k: any) => parseFloat(k[2]))
+          rangeResult.h4 = {
+            low: Math.min(...h4Lows),
+            high: Math.max(...h4Highs)
+          }
+        }
+        
+        // Micro range
+        let micro_range: any = null
+        if (microRange && klines1m.length >= 30) {
+          const last30 = klines1m.slice(-30)
+          const lows = last30.map((k: any) => parseFloat(k[3]))
+          const highs = last30.map((k: any) => parseFloat(k[2]))
+          micro_range = {
+            low_lookback_mins: 30,
+            low: Math.min(...lows),
+            high: Math.max(...highs)
+          }
+        } else if (klines5m.length >= 6) {
+          const last6 = klines5m.slice(-6)
+          const lows = last6.map((k: any) => parseFloat(k[3]))
+          const highs = last6.map((k: any) => parseFloat(k[2]))
+          micro_range = {
+            low_lookback_mins: 30,
+            low: Math.min(...lows),
+            high: Math.max(...highs)
+          }
+        }
+        
+        // 7. Build OHLCV candles
+        const candles: any = {}
+        
+        if (klines5m.length > 0) {
+          candles.m5 = klines5m.slice(-300).map((k: any) => ({
+            t: Number(k[0]),
+            o: r6(parseFloat(k[1])),
+            h: r6(parseFloat(k[2])),
+            l: r6(parseFloat(k[3])),
+            c: r6(parseFloat(k[4])),
+            v: r6(parseFloat(k[5]))
+          }))
+        }
+        
+        if (klines15m.length > 0) {
+          candles.m15 = klines15m.slice(-200).map((k: any) => ({
+            t: Number(k[0]),
+            o: r6(parseFloat(k[1])),
+            h: r6(parseFloat(k[2])),
+            l: r6(parseFloat(k[3])),
+            c: r6(parseFloat(k[4])),
+            v: r6(parseFloat(k[5]))
+          }))
+        }
+        
+        if (klines1h.length > 0) {
+          candles.h1 = klines1h.slice(-200).map((k: any) => ({
+            t: Number(k[0]),
+            o: r6(parseFloat(k[1])),
+            h: r6(parseFloat(k[2])),
+            l: r6(parseFloat(k[3])),
+            c: r6(parseFloat(k[4])),
+            v: r6(parseFloat(k[5]))
+          }))
+        }
+        
+        if (klines4h.length > 0) {
+          candles.h4 = klines4h.slice(-200).map((k: any) => ({
+            t: Number(k[0]),
+            o: r6(parseFloat(k[1])),
+            h: r6(parseFloat(k[2])),
+            l: r6(parseFloat(k[3])),
+            c: r6(parseFloat(k[4])),
+            v: r6(parseFloat(k[5]))
+          }))
+        }
+        
+        // 8. Get position data
+        const positions = await fetchPositions()
+        const position = positions.find((p: any) => String(p?.symbol) === symbol)
+        const hasPosition = position && Math.abs(Number(position?.positionAmt || 0)) > 0
+        
+        const positionData = hasPosition ? {
+          avg_entry_price: Number(position.entryPrice || 0),
+          size: Math.abs(Number(position.positionAmt || 0)),
+          unrealized_pnl: Number(position.unRealizedProfit || 0)
+        } : {
+          avg_entry_price: null,
+          size: null,
+          unrealized_pnl: null
+        }
+        
+        // 9. Build snapshot
+        const snapshot: ReactiveEntryInput = {
+          ok: true,
+          symbol,
+          ts_utc: new Date().toISOString(),
+          ui_lang: uiLang,
+          tradingRules: {
+            tickSize,
+            stepSize,
+            minNotional
+          },
+          prices: {
+            last_trade: lastPrice,
+            current: markPrice,
+            vwap_today: vwap_today || undefined
+          },
+          ema: Object.keys(emaResult).length > 0 ? emaResult : undefined,
+          momentum: {
+            rsi_m5,
+            rsi_m15,
+            atr_m15: atrPct,
+            atr_m15_bps: atrPct ? atrPct * 100 : null,
+            atr_m15_price: atrPrice
+          },
+          range: Object.keys(rangeResult).length > 0 ? rangeResult : undefined,
+          micro_range: micro_range || undefined,
+          resistances: sortedResistances.length > 0 ? sortedResistances : undefined,
+          position: positionData,
+          bars_meta: {
+            m5: candles.m5?.length || 0,
+            m15: candles.m15?.length || 0,
+            h1: candles.h1?.length || 0
+          },
+          candles: Object.keys(candles).length > 0 ? candles : undefined
+        }
+        
+        // CANDLES VALIDATION: Check minimum counts (recommended: 300 M5, 200 M15, 200 H1)
+        const candlesValidation = {
+          m5_count: candles.m5?.length || 0,
+          m15_count: candles.m15?.length || 0,
+          h1_count: candles.h1?.length || 0,
+          m5_ok: (candles.m5?.length || 0) >= 200,  // Relaxed from 300 to 200 for practicality
+          m15_ok: (candles.m15?.length || 0) >= 100, // Relaxed from 200 to 100
+          h1_ok: (candles.h1?.length || 0) >= 100    // Relaxed from 200 to 100
+        }
+        
+        console.info('[REACTIVE_ENTRY_CANDLES_VALIDATION]', {
+          symbol,
+          ...candlesValidation,
+          sufficient_context: candlesValidation.m5_ok && candlesValidation.m15_ok
+        })
+        
+        if (!candlesValidation.m5_ok || !candlesValidation.m15_ok) {
+          console.warn('[REACTIVE_ENTRY_INSUFFICIENT_CONTEXT]', {
+            symbol,
+            m5: candlesValidation.m5_count,
+            m15: candlesValidation.m15_count,
+            h1: candlesValidation.h1_count,
+            m5_required: 200,
+            m15_required: 100,
+            recommendation: 'AI may have limited context for pattern recognition'
+          })
+        }
+        
+        const latencyMs = Math.round(performance.now() - t0)
+        console.log('[REACTIVE_ENTRY_SNAPSHOT]', { symbol, latencyMs, bars: snapshot.bars_meta })
+        
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(snapshot))
+        
+      } catch (error: any) {
+        console.error('[REACTIVE_ENTRY_SNAPSHOT_ERR]', error)
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: error?.message || 'unknown' }))
+      }
+      return
+    }
+
+    // POST /api/ai_profit_taker - manual AI profit taker trigger
+    if (url.pathname === '/api/ai_profit_taker' && req.method === 'POST') {
+      res.setHeader('Cache-Control', 'no-store')
+      res.setHeader('Content-Type', 'application/json')
+      
+      try {
+        const body = await parseJsonBody(req)
+        const symbol = String(body?.symbol || '')
+        
+        if (!symbol) {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: 'Missing symbol' }))
+          return
+        }
+        
+        // Import dynamically
+        const { runAIProfitTaker } = await import('../services/ai-profit-taker/decision.js')
+        
+        const result = await runAIProfitTaker(symbol)
+        
+        // Emit to aiTap for DevAiOverview
+        if (result.ok && result.data) {
+          const { aiTap } = await import('../services/lib/ai_tap.js')
+          aiTap.emit('ai_profit_taker', {
+            symbol,
+            raw_request: result.data.input,
+            raw_response: result.data.decision
+          })
+        }
+        
+        res.statusCode = 200
+        res.end(JSON.stringify(result))
+      } catch (e: any) {
+        console.error('[AI_PROFIT_TAKER_ERR]', e)
+        res.statusCode = 500
+        res.end(JSON.stringify({ error: e?.message || 'Internal error' }))
+      }
+      return
+    }
+
+    // POST /api/reactive-entry/analyze - AI decision
+    if (url.pathname === '/api/reactive-entry/analyze' && req.method === 'POST') {
+      res.setHeader('Cache-Control', 'no-store')
+      const t0 = performance.now()
+      
+      try {
+        const body = await new Promise<string>((resolve) => {
+          let data = ''
+          req.on('data', chunk => { data += chunk })
+          req.on('end', () => resolve(data))
+        })
+        
+        const snapshot = JSON.parse(body) as ReactiveEntryInput
+        
+        if (!snapshot.symbol) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'symbol required' }))
+          return
+        }
+        
+        // Rate limiting
+        const rateLimitKey = `reactive_entry_analyze_${snapshot.symbol}`
+        if (!checkRateLimit(rateLimitKey)) {
+          res.statusCode = 429
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: false, error: 'rate_limit_exceeded' }))
+          return
+        }
+        
+        // Call AI decision
+        const decision = await runReactiveEntryDecision(snapshot)
+        
+        if (!decision.ok || !decision.data) {
+          res.statusCode = decision.code === 'no_api_key' ? 401 : 500
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({
+            ok: false,
+            error: decision.code || 'decision_failed',
+            meta: decision.meta
+          }))
+          return
+        }
+        
+        // Server-side post-processing (SHORT logic!)
+        let finalDecision = { ...decision.data }
+        const currentPrice = snapshot.prices?.current || 0
+        const tickSize = snapshot.tradingRules?.tickSize || 0.00001
+        const atrBps = snapshot.momentum?.atr_m15_bps ?? 150
+        
+        // Calculate minimal edge requirements
+        const edgeMinBps = Math.max(15, Math.min(25, Math.round(0.6 * atrBps)))
+        const minEdgeAbs = Math.max(5 * tickSize, currentPrice * (edgeMinBps / 10000))
+        const minEdgePrice = roundToTick(currentPrice + minEdgeAbs, tickSize) // SHORT: entry >= current
+        
+        // Get nearest fresh resistance (age <= 30 min)
+        const nearestResistance = findNearestResistance(
+          snapshot.resistances || [],
+          currentPrice,
+          30
+        )
+        
+        // Calculate proper entry based on resistance - ATR buffer
+        const atrPrice = snapshot.momentum?.atr_m15_price ?? (currentPrice * 0.015)
+        const atrBuffer = 0.25 * atrPrice
+        
+        // For SHORT: Find nearest resistance >= current, subtract buffer
+        let properEntryPrice = currentPrice + minEdgeAbs // default
+        if (nearestResistance && nearestResistance.price >= currentPrice) {
+          properEntryPrice = roundToTick(nearestResistance.price - atrBuffer, tickSize)
+          console.log('[REACTIVE_ENTRY_RESISTANCE_BASED]', {
+            symbol: snapshot.symbol,
+            resistance: nearestResistance.price,
+            atrBuffer,
+            entry: properEntryPrice
+          })
+        }
+        
+        // Store ATR info in decision
+        finalDecision.atr_info = {
+          atr_price: atrPrice,
+          atr_buffer: atrBuffer,
+          resistance_used: nearestResistance?.price ?? null,
+          proper_entry: properEntryPrice
+        }
+        
+        // Validate ENTRY decision (SHORT: entry >= current)
+        if (finalDecision.decision === 'entry') {
+          const edgeBps = finalDecision.entry?.price 
+            ? edgeFromCurrentBps(finalDecision.entry.price, currentPrice) 
+            : 0
+          const violatesChase = finalDecision.entry?.price 
+            ? (finalDecision.entry.price < currentPrice) // SHORT: nesmíme chase dolů!
+            : false
+          const violatesEdge = finalDecision.entry?.price 
+            ? (edgeBps < edgeMinBps || (finalDecision.entry.price - currentPrice) < 5 * tickSize)
+            : true
+          
+          const probOk = finalDecision.class === 'scout'
+            ? (finalDecision.confidence >= 0.60 && edgeBps >= edgeMinBps && atrBps >= 90)
+            : (finalDecision.confidence >= 0.75)
+          
+          if (violatesChase || violatesEdge || !probOk) {
+            console.warn('[REACTIVE_ENTRY_VALIDATION_FAIL]', {
+              symbol: snapshot.symbol,
+              violatesChase,
+              violatesEdge,
+              probOk,
+              confidence: finalDecision.confidence,
+              edgeBps: edgeBps.toFixed(2),
+              edgeMinBps
+            })
+            
+            // Force SKIP
+            finalDecision.decision = 'skip'
+            finalDecision.entry = null
+            finalDecision.mode = 'none'
+            finalDecision.class = 'none'
+            finalDecision.size_hint_pct = 0
+            
+            const uiLang = snapshot.ui_lang || 'cs'
+            finalDecision.reasoning = uiLang === 'cs'
+              ? `Server validation failed: ${violatesChase ? 'chasing' : violatesEdge ? 'edge' : 'confidence'}`
+              : `Server validation failed: ${violatesChase ? 'chasing' : violatesEdge ? 'edge' : 'confidence'}`
+          }
+        }
+        
+        const latencyMs = Math.round(performance.now() - t0)
+        console.log('[REACTIVE_ENTRY_ANALYZE]', { 
+          symbol: snapshot.symbol, 
+          decision: finalDecision.decision,
+          latencyMs,
+          aiLatencyMs: decision.latencyMs
+        })
+        
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({
+          ok: true,
+          ...finalDecision,
+          latencyMs: decision.latencyMs,
+          raw_request: decision.raw_request,
+          raw_response: decision.raw_response
+        }))
+        
+      } catch (error: any) {
+        console.error('[REACTIVE_ENTRY_ANALYZE_ERR]', error)
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: error?.message || 'unknown' }))
+      }
+      return
+    }
+
+    // GET /api/reactive-entry/health - Health check
+    if (url.pathname === '/api/reactive-entry/health' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        const health = getHealthStatus()
+        
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify(health))
+        
+      } catch (error: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: error?.message || 'unknown' }))
       }
       return
     }
@@ -6035,18 +5423,14 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json')
     res.end(JSON.stringify({ error: e?.message ?? 'Internal error' }))
   }
-
 })
-
-// Nastavení dlouhého timeoutu pro server - 10 minut pro GPT-5
-server.timeout = 600000  // 10 minut
-server.keepAliveTimeout = 600000  // 10 minut
 
 server.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`)
-  console.log(`Server timeout set to: ${server.timeout}ms (10 minutes for GPT-5)`)
   try { startOrderSweeper() } catch (e) { console.error('[SWEEPER_START_ERR]', (e as any)?.message || e) }
   try { startSlProtectionMonitor() } catch (e) { console.error('[SL_MONITOR_START_ERR]', (e as any)?.message || e) }
   try { loadBackgroundCriteria() } catch {}
   try { startBackgroundTrading() } catch (e) { console.error('[BACKGROUND_START_ERR]', (e as any)?.message || e) }
 })
+
+

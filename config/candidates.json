@@ -1,6 +1,6 @@
 {
   "profile": "lean",
-  "topK": 12,
+  "topK": 50,
   "hard_gates": {
     "min_quote_volume_usd": 5000000,
     "min_trades_24h": 20000,
@@ -94,6 +94,31 @@
       },
       "adapter_compact_payload": false,
       "diag_enabled": false
+    }
+  },
+  "overheat": {
+    "enabled": true,
+    "description": "Přepálené altcoiny s přísnými kritérii pro mean reversion shorts",
+    "criteria": {
+      "rsi_m15_min": 50,
+      "rsi_h1_min": 45,
+      "vwap_distance_atr_min": 0.2,
+      "funding_min": 0.00001,
+      "oi_change_min": 0.5,
+      "spread_max_bps": 1000,
+      "upper_wick_min": 0.1,
+      "h1_range_pos_min": 50,
+      "swing_high_buffer_atr": 0.1,
+      "bonus_score_min": 0
+    },
+    "weights": {
+      "rsi_m15": 0.25,
+      "vwap_distance": 0.20,
+      "funding": 0.15,
+      "oi_change": 0.15,
+      "bear_stack": 0.10,
+      "knot_pattern": 0.10,
+      "near_resistance": 0.05
     }
   }
 }

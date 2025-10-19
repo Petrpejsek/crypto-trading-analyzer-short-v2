@@ -407,11 +407,10 @@ export function EntryControls({
                     <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
                       <span style={{ color: 'var(--muted)' }}>Side</span>
                       <select 
-                        value={control.side || 'LONG'} 
+                        value={control.side || (() => { throw new Error(`Missing side for ${strategy.symbol}`) })()} 
                         onChange={(e) => handleControlUpdate(strategy.symbol, 'side', e.target.value as any)}
                         disabled
                       >
-                        <option value="LONG">LONG</option>
                         <option value="SHORT">SHORT</option>
                       </select>
                     </label>
@@ -497,6 +496,9 @@ export function EntryControls({
           <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ fontSize: 12, opacity: 0.7 }}>
               Max expozice rizika: ${totalAmount.toLocaleString()} / ${(maxPerCoin * maxCoins).toLocaleString()}
+              <br/>
+              🔍 DEBUG: includedCount={includedCount}, coinControls.length={coinControls.length}, 
+              included={coinControls.filter(c => c.include).map(c => c.symbol).join(', ') || 'NONE'}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
@@ -525,10 +527,20 @@ export function EntryControls({
 
 function PrepareButton({ count, placing, onClick, auto, selectionKey }: { count: number; placing?: boolean; onClick: () => void; auto?: boolean; selectionKey: string }) {
   const disabled = count === 0 || !!placing
-  const handle = async () => { if (!disabled) await onClick() }
+  const handle = async () => { 
+    console.log('[PREPARE_BUTTON_CLICKED]', { count, disabled, placing })
+    if (!disabled) {
+      console.log('[PREPARE_BUTTON_CALLING_ONCLICK]')
+      await onClick()
+    } else {
+      console.warn('[PREPARE_BUTTON_BLOCKED]', { reason: count === 0 ? 'no_coins' : 'placing' })
+    }
+  }
   const lastKeyRef = React.useRef<string>('')
   React.useEffect(() => {
+    console.log('[AUTO_PREPARE_CHECK]', { auto, disabled, selectionKey, lastKey: lastKeyRef.current, willTrigger: auto && !disabled && selectionKey && selectionKey !== lastKeyRef.current })
     if (auto && !disabled && selectionKey && selectionKey !== lastKeyRef.current) {
+      console.log('[AUTO_PREPARE_TRIGGERED]', { selectionKey })
       lastKeyRef.current = selectionKey
       handle()
     }

@@ -79,7 +79,7 @@ async function main(): Promise<void> {
     const entry = Number.isFinite(ts) && ts > 0 ? quantize(baseEntry, ts) : +baseEntry.toFixed(6)
     const sl = Number.isFinite(ts) && ts > 0 ? quantize(baseSl, ts) : +baseSl.toFixed(6)
     const tp = Number.isFinite(ts) && ts > 0 ? quantize(baseTp, ts) : +baseTp.toFixed(6)
-    return { symbol, side: 'LONG' as const, strategy: 'conservative' as const, tpLevel: 'tp1' as const, amount, leverage, useBuffer: false, entry, sl, tp }
+    return { symbol, side: 'SHORT' as const, strategy: 'conservative' as const, tpLevel: 'tp1' as const, amount, leverage, useBuffer: false, entry, sl, tp }
   })
 
   const payload = { orders }

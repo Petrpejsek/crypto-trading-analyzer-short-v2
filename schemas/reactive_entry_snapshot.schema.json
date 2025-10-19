@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReactiveEntrySnapshot",
+  "description": "Market snapshot input for SHORT entry analysis",
+  "type": "object",
+  "required": ["ok", "symbol", "ts_utc", "tradingRules", "prices"],
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "symbol": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ts_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ui_lang": {
+      "type": "string",
+      "enum": ["cs", "en"]
+    },
+    "tradingRules": {
+      "type": "object",
+      "required": ["tickSize", "stepSize", "minNotional"],
+      "properties": {
+        "tickSize": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "stepSize": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "minNotional": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "prices": {
+      "type": "object",
+      "required": ["last_trade", "current"],
+      "properties": {
+        "last_trade": {
+          "type": "number"
+        },
+        "current": {
+          "type": "number"
+        },
+        "vwap_today": {
+          "type": "number"
+        }
+      }
+    },
+    "ema": {
+      "type": "object"
+    },
+    "momentum": {
+      "type": "object"
+    },
+    "range": {
+      "type": "object"
+    },
+    "micro_range": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "low_lookback_mins": { "type": "number" },
+            "low": { "type": "number" },
+            "high": { "type": "number" }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "resistances": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "price": { "type": "number" },
+          "age_mins": { "type": "number" }
+        }
+      }
+    },
+    "position": {
+      "type": "object"
+    },
+    "bars_meta": {
+      "type": "object"
+    },
+    "candles": {
+      "type": "object"
+    }
+  }
+}
+

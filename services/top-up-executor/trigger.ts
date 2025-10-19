@@ -77,7 +77,8 @@ export async function processDueTopUpExecutors(): Promise<void> {
         const positions = await api.getPositions()
         const pos = (Array.isArray(positions) ? positions : []).find((p: any) => String(p?.symbol) === entry.symbol)
         const amt = Number(pos?.positionAmt || 0)
-        if (!pos || !(amt > 0)) {
+        // SHORT: positionAmt is NEGATIVE
+        if (!pos || !(amt < 0)) {
           if (isAuditEnabled()) appendAudit({ id: `tup_${Date.now()}_${entry.symbol}`, symbol: entry.symbol, phase: 'cooldown_skip', rationale: 'position not visible in snapshot', ts: new Date().toISOString() })
           rescheduleTopUpExecutor(entry.symbol, Math.min(120, Number(cfg?.intervalMinutes || 2) * 60))
           continue
@@ -222,9 +223,10 @@ async function placeTopUpOrder(symbol: string, quantity: number, limitPrice: num
     return { qty_requested: rawQty, qty_sent: 0, pos_before: posBefore, pos_after: null }
   }
 
+  // SHORT: Top-up = SELL (adding to short position)
   const params = {
     symbol,
-    side: 'BUY' as const,
+    side: 'SELL' as const,
     type: limitPrice ? 'LIMIT' as const : 'MARKET' as const,
     quantity: String(qty),
     reduceOnly: false,

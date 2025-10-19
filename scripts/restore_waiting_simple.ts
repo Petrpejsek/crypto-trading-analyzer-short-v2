@@ -35,13 +35,13 @@ async function main() {
         const entryOrder = orders.find((o: any) => {
           const clientId = String(o?.clientOrderId || '')
           const isInternal = /^sv2_e_l_/.test(clientId)
-          const isEntry = String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT'
+          const isEntry = String(o?.side) === 'SELL' && String(o?.type) === 'LIMIT'
           return isInternal && isEntry && String(o?.symbol) === symbol
         })
         
         if (entryOrder) {
           // Restore waiting TP using the exported function
-          waitingTpSchedule(symbol, tp, qty, 'LONG', 'MARK_PRICE')
+          waitingTpSchedule(symbol, tp, qty, 'SHORT', 'MARK_PRICE')
           restoredCount++
           
           console.log('[RESTORED_WAITING_TP]', { 

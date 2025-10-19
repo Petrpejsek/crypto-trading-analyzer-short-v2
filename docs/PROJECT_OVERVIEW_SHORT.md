@@ -6,7 +6,12 @@ Basic Info
 
 Runtime
 
-- PORT: 3081
+**DEVELOPMENT vs PRODUCTION:**
+- **DEV mode** (`./dev.sh start`): Runs on PORT 8888 with live code reload via tsx. Code changes take effect immediately.
+- **PRODUCTION mode** (`pm2 start ecosystem.short.config.cjs`): Runs on PORT 3081. Code changes require rebuild and restart.
+- **CRITICAL**: Strategy Updater and other services only reflect code changes in DEV mode. If debugging/fixing code, MUST use `./dev.sh start`, NOT PM2 production.
+
+- PORT: 3081 (production) / 8888 (dev)
 - PM2 apps:
 ```
 │ 0  │ trader-short-backend    │ default     │ 1.0.0   │ fork    │ 94211    │ 11m    │ 1    │ online    │ 0%       │ 37.1mb   │ petrlie… │ disabled │

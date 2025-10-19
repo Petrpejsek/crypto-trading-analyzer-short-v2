@@ -102,7 +102,7 @@ export const SettingsDrawer: React.FC<Props & { finalPickerStatus?: 'idle'|'load
       localStorage.setItem('conservative_entry_buffer', String(Math.max(0, Math.min(10, conservativeBuffer))))
       localStorage.setItem('aggressive_entry_buffer', String(Math.max(0, Math.min(10, aggressiveBuffer))))
       localStorage.setItem('max_per_coin_usdt', String(Math.max(10, maxPerCoin)))
-      localStorage.setItem('max_coins_count', String(Math.max(1, Math.min(20, maxCoins))))
+      localStorage.setItem('max_coins_count', String(Math.max(1, Math.min(50, maxCoins))))
       localStorage.setItem('default_hot_strategy', defaultStrategy)
       localStorage.setItem('default_tp_level', defaultTPLevel)
       // Strategy Updater handled in OrdersPanel now
@@ -163,8 +163,6 @@ export const SettingsDrawer: React.FC<Props & { finalPickerStatus?: 'idle'|'load
             <label style={{ display:'flex', flexDirection:'column', gap:6, fontSize:12 }}>
               <span style={{ color:'var(--muted)' }}>Side policy</span>
               <select value={sidePolicy} onChange={e=>setSidePolicy(e.target.value as any)}>
-                <option value="long_only">LONG only</option>
-                <option value="both">LONG/SHORT</option>
                 <option value="short_only">SHORT only</option>
               </select>
             </label>
@@ -253,15 +251,15 @@ export const SettingsDrawer: React.FC<Props & { finalPickerStatus?: 'idle'|'load
               />
             </label>
             <label style={{ display:'flex', flexDirection:'column', gap:6, fontSize:12 }}>
-              <span style={{ color:'var(--muted)' }}>Max coins count</span>
+              <span style={{ color:'var(--muted)' }}>Max coins count (až 50)</span>
               <input 
                 type="number" 
                 min={1} 
-                max={20} 
+                max={50} 
                 step={1} 
                 value={maxCoins} 
                 onChange={e=>setMaxCoins(Number(e.target.value))}
-                title="Maximální počet coinů současně"
+                title="Maximální počet coinů současně (1-50)"
               />
             </label>
             <label style={{ display:'flex', flexDirection:'column', gap:6, fontSize:12 }}>

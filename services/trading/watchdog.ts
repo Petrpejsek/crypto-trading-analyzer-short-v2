@@ -77,7 +77,8 @@ export function startWatchdog(): void {
         if (pos && !exitsOk) {
           // KRITICKÁ SITUACE: Máme pozici ale nemáme exits (SL/TP)
           // Pouze flatten pozici, NERUŠÍME ordery (mohly by tam být jiné SL/TP)
-          await reduceOnlyMarket(w.symbol, w.side || 'LONG')
+          if (!w.side) throw new Error(`Missing side for watchdog ${w.symbol}`)
+          await reduceOnlyMarket(w.symbol, w.side)
           console.warn('[WATCHDOG_EMERGENCY_FLATTEN]', { symbol: w.symbol, reason: 'position_without_exits' })
         } else if (!pos && !exitsOk) {
           // Žádná pozice, žádné exits → můžeme bezpečně zrušit všechny ordery

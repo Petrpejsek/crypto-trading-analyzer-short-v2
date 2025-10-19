@@ -92,7 +92,7 @@ export function HotScreener({ hotPicks, status, onSelectionChange, selectedSymbo
 
       {status === 'loading' && (
         <div style={{ padding: 20, textAlign: 'center', opacity: 0.7 }}>
-          🤖 GPT-5 analyzuje 50 coinů...
+          🤖 GPT-5 analyzuje 70 coinů...
         </div>
       )}
 

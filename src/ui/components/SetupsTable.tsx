@@ -1,4 +1,5 @@
 import React from 'react'
+import { writeClipboard } from '../utils/clipboard'
 import type { ExchangeFilters } from '../../../types/market_raw'
 
 type FinalPick = {
@@ -132,9 +133,10 @@ export const SetupsTable: React.FC<Props> = ({ finalPicks, finalPickerStatus, fi
 
   const filtered = React.useMemo(() => {
     const list = Array.isArray(finalPicks) ? finalPicks : []
-    if (settings.side_policy === 'long_only') return list.filter(s => s.side === 'LONG')
+    // SHORT-only project: remove long_only policy, enforce SHORT
     if (settings.side_policy === 'short_only') return list.filter(s => s.side === 'SHORT')
-    return list
+    // Default: only show SHORT picks (no long_only option)
+    return list.filter(s => s.side === 'SHORT')
   }, [finalPicks, settings.side_policy])
 
   const limited = React.useMemo(() => filtered.slice(0, Math.max(1, Math.min(settings.max_picks || 6, 6))), [filtered, settings.max_picks])
@@ -154,7 +156,7 @@ export const SetupsTable: React.FC<Props> = ({ finalPicks, finalPickerStatus, fi
 
   const copyToast = () => { setCopied(true); window.setTimeout(()=>setCopied(false), 1200) }
 
-  const copyPicks = () => { try { navigator.clipboard.writeText(JSON.stringify(finalPicks ?? [], null, 2)) } catch { console.info('Clipboard skipped: document not focused') } }
+  const copyPicks = () => { try { writeClipboard(JSON.stringify(finalPicks ?? [], null, 2)) } catch { console.info('Clipboard skipped: document not focused') } }
 
   
 
@@ -196,7 +198,7 @@ export const SetupsTable: React.FC<Props> = ({ finalPicks, finalPickerStatus, fi
   async function copyRow(p: FinalPick) {
     try {
       const obj = serializePick(p)
-      await navigator.clipboard.writeText(JSON.stringify(obj, null, 2))
+      await writeClipboard(JSON.stringify(obj, null, 2))
       copyToast()
     } catch { console.info('Clipboard skipped: document not focused') }
   }
@@ -204,7 +206,7 @@ export const SetupsTable: React.FC<Props> = ({ finalPicks, finalPickerStatus, fi
   async function copyAll() {
     try {
       const arr = limited.map(serializePick)
-      await navigator.clipboard.writeText(JSON.stringify(arr, null, 2))
+      await writeClipboard(JSON.stringify(arr, null, 2))
       copyToast()
     } catch { console.info('Clipboard skipped: document not focused') }
   }
@@ -246,7 +248,7 @@ export const SetupsTable: React.FC<Props> = ({ finalPicks, finalPickerStatus, fi
         <div className="error" style={{ margin: '8px 0' }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
             <strong>Final Picker selhal (STRICT NO-FALLBACK)</strong>
-            <button className="btn" onClick={()=>{ try { navigator.clipboard.writeText(JSON.stringify(finalPickerMeta ?? {}, null, 2)) } catch { console.info('Clipboard skipped: document not focused') } }}>Copy details</button>
+            <button className="btn" onClick={()=>{ try { writeClipboard(JSON.stringify(finalPickerMeta ?? {}, null, 2)) } catch { console.info('Clipboard skipped: document not focused') } }}>Copy details</button>
           </div>
           <div style={{ fontSize: 12, opacity: .9, marginTop: 4 }}>Code: {finalPickerMeta?.error_code ?? 'unknown'}</div>
         </div>
@@ -373,7 +375,7 @@ export const SetupsTable: React.FC<Props> = ({ finalPicks, finalPickerStatus, fi
               </div>
               <div className="row gap-8" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
                 <button className="btn" onClick={() => setConfirming(null)}>Cancel</button>
-                <button className="btn" disabled={disabled || (needsAccept && !accept) || executing} title={disabled ? reason : (needsAccept && !accept ? 'Please accept NO-TRADE risk' : '')} onClick={() => { if (executing) return; setExecuting(true); try { navigator.clipboard.writeText(JSON.stringify({ pick: confirming, plan }, null, 2)) } catch { console.info('Clipboard skipped: document not focused') }; setTimeout(()=>setExecuting(false), 2000); setConfirming(null) }}>
+                <button className="btn" disabled={disabled || (needsAccept && !accept) || executing} title={disabled ? reason : (needsAccept && !accept ? 'Please accept NO-TRADE risk' : '')} onClick={() => { if (executing) return; setExecuting(true); try { writeClipboard(JSON.stringify({ pick: confirming, plan }, null, 2)) } catch { console.info('Clipboard skipped: document not focused') }; setTimeout(()=>setExecuting(false), 2000); setConfirming(null) }}>
                   {executing ? 'Executing…' : 'Execute'}{showSoftWarn ? <span className="pill" style={{ marginLeft: 6, background:'#fff3cd', color:'#92400e' }}>warn</span> : null}
                 </button>
               </div>

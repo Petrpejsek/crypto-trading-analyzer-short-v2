@@ -31,10 +31,13 @@ function makeClientOrderId(prefix: string): string {
 
 export async function TradeLifecycleWorkflow(params: TradeLifecycleParams): Promise<void> {
   if (!params.binanceQueue) throw new Error('binanceQueue missing')
+  // SHORT-only project: reject LONG trades
+  if (params.side === 'LONG') throw new Error('LONG trades not allowed in SHORT project')
+  if (params.side !== 'SHORT') throw new Error(`Invalid side: ${params.side} - must be SHORT`)
   const a = makeActivities(params.binanceQueue)
   const symbol = params.symbol.toUpperCase()
-  const isLong = params.side === 'LONG'
-  const positionSide = isLong ? 'LONG' : 'SHORT'
+  const isLong = false  // Always false in SHORT project
+  const positionSide = 'SHORT'
   const workingType = params.workingType === 'CONTRACT_PRICE' ? 'CONTRACT_PRICE' : 'MARK_PRICE'
 
   // 1) Align leverage
@@ -49,9 +52,10 @@ export async function TradeLifecycleWorkflow(params: TradeLifecycleParams): Prom
   const qty = await a.binanceCalculateQuantity(symbol, Math.max(1, Math.floor(params.notionalUsd * params.leverage)), refPrice)
 
   // 3) Place ENTRY
+  // SHORT: isLong is always false, so side = SELL for entry
   const commonEntry = {
     symbol,
-    side: isLong ? 'BUY' : 'SELL',
+    side: 'SELL' as const,  // isLong=false → SELL (opening short)
     closePosition: false,
     positionSide,
     newClientOrderId: makeClientOrderId('e_l'),
@@ -67,12 +71,13 @@ export async function TradeLifecycleWorkflow(params: TradeLifecycleParams): Prom
       return { ...commonEntry, type: 'LIMIT', price: String(params.entryPrice), timeInForce: 'GTC' as const, quantity: qty }
     }
     if (params.entryType === 'STOP_MARKET') {
-      const stopPrice = params.entryPrice && Number.isFinite(params.entryPrice) ? String(params.entryPrice) : String(refPrice * (isLong ? 1.001 : 0.999))
+      // SHORT: stopPrice should be below current price
+      const stopPrice = params.entryPrice && Number.isFinite(params.entryPrice) ? String(params.entryPrice) : String(refPrice * 0.999)
       return { ...commonEntry, type: 'STOP_MARKET', stopPrice, quantity: qty, workingType }
     }
     // STOP (stop-limit)
     const price = params.entryPrice && Number.isFinite(params.entryPrice) ? String(params.entryPrice) : String(refPrice)
-    const stopPrice = String(isLong ? refPrice * 1.001 : refPrice * 0.999)
+    const stopPrice = String(refPrice * 0.999)  // SHORT: below current price
     return { ...commonEntry, type: 'STOP' as const, price, stopPrice, timeInForce: 'GTC' as const, quantity: qty, workingType }
   })()
 
@@ -94,9 +99,10 @@ export async function TradeLifecycleWorkflow(params: TradeLifecycleParams): Prom
   const tpStr = String(params.tp)
 
   // Protective CP SL always
+  // SHORT: SL/TP = BUY (closing short position)
   const slCpParams = {
     symbol,
-    side: isLong ? 'SELL' : 'BUY',
+    side: 'BUY' as const,  // isLong=false → BUY (closing short at loss)
     type: 'STOP_MARKET',
     stopPrice: slStr,
     closePosition: true,
@@ -109,7 +115,7 @@ export async function TradeLifecycleWorkflow(params: TradeLifecycleParams): Prom
   // Quantitative RO SL when position exists
   const slRoParams = positionQtyAbs > 0 ? {
     symbol,
-    side: isLong ? 'SELL' : 'BUY',
+    side: 'BUY' as const,  // isLong=false → BUY (closing short at loss)
     type: 'STOP_MARKET',
     stopPrice: slStr,
     quantity: String(positionQtyAbs),
@@ -122,7 +128,7 @@ export async function TradeLifecycleWorkflow(params: TradeLifecycleParams): Prom
   // TP MARKET close-only to ensure position gets closed on target
   const tpParams = {
     symbol,
-    side: isLong ? 'SELL' : 'BUY',
+    side: 'BUY' as const,  // isLong=false → BUY (closing short at profit)
     type: 'TAKE_PROFIT_MARKET',
     stopPrice: tpStr,
     closePosition: true,

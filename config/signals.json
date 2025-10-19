@@ -1,18 +1,11 @@
 {
-  "enabled": false,
+  "enabled": true,
   "max_setups": 3,
   "preview_when_no_trade": true,
   "preview_limit": 5,
   "allowWhenNoTrade": true,
   "preview": {
     "limit": 5,
-    "computeMockSetup": true,
-    "account_equity_usd_preview": 10000,
-    "risk_per_trade_pct_preview": 0.3,
-    "entry_offset_atr": 0.2,
-    "sl_offset_atr": 1.2,
-    "tp1_rrr": 1.5,
-    "tp2_rrr": 2.5,
     "min_atr_pct": 0.25,
     "max_atr_pct": 8
   },

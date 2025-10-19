@@ -179,14 +179,8 @@ function lintPromptText(assistantKey: string, text: string): LintViolation[] {
     }
   }
   
-  if (assistantKey === 'entry_risk_manager') {
-    if (!text.includes('spread > 0.25')) {
-      violations.push({
-        rule: 'ENTRY_RISK_INVARIANT',
-        message: 'Chybí invariant: "skip při spread > 0.25 %"'
-      })
-    }
-  }
+  // entry_risk_manager: Odstraněna zastaralá validace pro "spread > 0.25"
+  // Prompt explicitně používá kontextové hodnocení místo rigidních hranic
   
   return violations
 }
@@ -297,7 +291,10 @@ export function listAssistants(): Array<{
     'entry_updater',
     'strategy_updater',
     'profit_taker',
-    'top_up_executor'
+    'top_up_executor',
+    'ai_profit_taker',
+    'reactive_entry_assistant',
+    'health_monitor'
   ]
   
   const meta = loadMeta()
@@ -469,7 +466,10 @@ export function exportAllOverlaysToRegistry(): Array<{
     entry_updater: 'prompts/short/entry_updater.md',
     strategy_updater: 'prompts/short/strategy_updater.md',
     profit_taker: 'prompts/short/profit_taker.md',
-    top_up_executor: 'prompts/short/top_up_executor.md'
+    top_up_executor: 'prompts/short/top_up_executor.md',
+    ai_profit_taker: 'prompts/short/ai_profit_taker.md',
+    reactive_entry_assistant: 'prompts/short/reactive_entry_assistant.md',
+    health_monitor: 'prompts/short/health_monitor.md'
   }
   
   for (const [key, overlay] of Object.entries(meta)) {

@@ -7,6 +7,9 @@ import path from 'node:path'
 import { request as undiciRequest } from 'undici'
 import type { Kline } from '../../types/market_raw'
 import cfg from '../../config/fetcher.json'
+import { aiTap } from '../lib/ai_tap'
+import { validateSnapshotFreshness } from '../lib/freshness_guard'
+import { logPayloadSize } from '../lib/payload_monitor'
 
 // Input type for strategy updater
 export type StrategyUpdateInput = {
@@ -133,13 +136,33 @@ export async function runStrategyUpdate(input: StrategyUpdateInput): Promise<{
     // temperature intentionally omitted for gpt-5; default will be used by API
     // No timeout needed - let API handle its own timeouts
 
-    console.info('[STRATEGY_UPDATE_PAYLOAD_BYTES]', JSON.stringify(input).length)
+    // PAYLOAD SIZE MONITORING
+    logPayloadSize('strategy_updater', input, input.symbol)
+    
     console.info('[STRATEGY_UPDATE_SYMBOL]', input.symbol)
     console.info('[STRATEGY_UPDATE_POSITION]', {
       side: input.position.side,
       size: input.position.size,
       pnl: input.position.unrealizedPnl
     })
+    
+    // FRESHNESS VALIDATION: Check market_snapshot timestamp
+    if (input.market_snapshot && (input.market_snapshot as any).ts) {
+      const freshness = validateSnapshotFreshness({ timestamp: (input.market_snapshot as any).ts }, 60000)
+      console.info('[STRATEGY_UPDATE_FRESHNESS]', {
+        symbol: input.symbol,
+        ok: freshness.ok,
+        age_seconds: freshness.age_seconds,
+        error: freshness.error || null
+      })
+      
+      if (!freshness.ok) {
+        console.warn('[STRATEGY_UPDATE_STALE_DATA]', {
+          symbol: input.symbol,
+          age_seconds: freshness.age_seconds
+        })
+      }
+    }
     
     // DEBUG: Log key data being sent to AI
     console.info('[STRATEGY_UPDATE_DEBUG_DATA]', {
@@ -189,11 +212,30 @@ export async function runStrategyUpdate(input: StrategyUpdateInput): Promise<{
         { role: 'system', content: promptResult.text },
         { role: 'user', content: JSON.stringify(input) }
       ],
+      temperature: 0.1,
       response_format: { type: 'json_schema', json_schema: schemaUpdater as any },
       max_completion_tokens: 8192
     }
 
+    // AI Overview: Emit request payload
+    try {
+      aiTap.emit('strategy_updater', {
+        symbol: input?.symbol || null,
+        raw_request: body,
+        raw_response: null
+      })
+    } catch {}
+
     const resp = await client.chat.completions.create(body)
+    
+    // AI Overview: Emit response payload
+    try {
+      aiTap.emit('strategy_updater', {
+        symbol: input?.symbol || null,
+        raw_request: null,
+        raw_response: resp
+      })
+    } catch {}
     const text = resp.choices?.[0]?.message?.content || ''
 
     if (!text || !String(text).trim()) {

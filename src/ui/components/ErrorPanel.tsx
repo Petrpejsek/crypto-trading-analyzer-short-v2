@@ -1,4 +1,5 @@
 import React from 'react'
+import { writeClipboard } from '../utils/clipboard'
 
 type ErrorShape = { error: string; stage?: string; symbol?: string | null; stack?: string[] }
 
@@ -7,7 +8,7 @@ type Props = { payload: ErrorShape | null }
 export const ErrorPanel: React.FC<Props> = ({ payload }) => {
   if (!payload) return null
   const onCopy = async () => {
-    try { await navigator.clipboard.writeText(JSON.stringify(payload, null, 2)) } catch { console.info('Clipboard skipped: document not focused') }
+    try { await writeClipboard(JSON.stringify(payload, null, 2)) } catch { console.info('Clipboard skipped: document not focused') }
   }
   return (
     <div className="error mt-12">

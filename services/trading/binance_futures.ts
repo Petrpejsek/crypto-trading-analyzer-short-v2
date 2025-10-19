@@ -5,6 +5,8 @@ import tradingCfg from '../../config/trading.json'
 import { wrapBinanceFuturesApi } from '../exchange/binance/safeSender'
 import { isCooldownActive } from '../risk/cooldown'
 import { noteApiCall, setBanUntilMs } from '../../server/lib/rateLimits'
+import { binanceCache } from '../../server/lib/apiCache'
+import { requestCoalescer } from '../../server/lib/requestCoalescer'
 
 // SAFE_BOOT log pro identifikaci procesu
 console.log('[SAFE_BOOT]', { pid: process.pid, file: __filename })
@@ -42,6 +44,7 @@ export interface PlaceOrdersRequest {
     entry?: number
     sl: number
     tp: number
+    universe?: 'volume' | 'gainers' | 'losers' | 'overheat' // Universe zdroj pro P&L tracking
   }>
 }
 
@@ -50,7 +53,7 @@ class BinanceFuturesAPI {
   private secretKey: string
   private baseURL = 'https://fapi.binance.com'
   private serverTimeOffsetMs = 0
-  private lastServerTimeSync = 0
+  private lastServerTimeSync = Date.now() - 31000 // Force initial sync by setting old timestamp
 
   constructor() {
     this.apiKey = process.env.BINANCE_API_KEY || ''
@@ -73,20 +76,58 @@ class BinanceFuturesAPI {
   }
 
   private async request(method: string, endpoint: string, params: Record<string, any> = {}): Promise<any> {
-
-    // Sync server time aggressively to avoid -1021
-    let timestamp = Date.now()
-    try {
-      const now = Date.now()
-      const res = await fetch(`${this.baseURL}/fapi/v1/time`)
-      const j = await res.json().catch(()=>null)
-      const srv = Number(j?.serverTime)
-      if (Number.isFinite(srv)) {
-        this.serverTimeOffsetMs = srv - now
-        this.lastServerTimeSync = now
+    // 🔹 CACHE LOGIC for GET requests
+    const methodUp = String(method || '').toUpperCase()
+    const isGet = methodUp === 'GET'
+    
+    if (isGet) {
+      // Build cache key from endpoint + params
+      const paramKeys = Object.keys(params).sort()
+      const cacheKeyParts = [endpoint, ...paramKeys.map(k => `${k}=${params[k]}`)]
+      const cacheKey = cacheKeyParts.join(':')
+      
+      // 1️⃣ CACHE CHECK
+      const cached = binanceCache.get(cacheKey)
+      if (cached !== null) {
+        console.log(`[CACHE_HIT] ${endpoint}`)
+        return cached
       }
-      timestamp = Date.now() + (this.serverTimeOffsetMs || 0)
-    } catch {}
+      
+      // 2️⃣ REQUEST COALESCER
+      return requestCoalescer.fetch(cacheKey, async () => {
+        const result = await this._executeRequest(method, endpoint, params)
+        // 3️⃣ STORE TO CACHE
+        binanceCache.set(cacheKey, result, endpoint)
+        return result
+      })
+    }
+    
+    // POST/DELETE requests - no cache
+    return this._executeRequest(method, endpoint, params)
+  }
+
+  private async _executeRequest(method: string, endpoint: string, params: Record<string, any> = {}): Promise<any> {
+    // Smart time sync: only resync if cache is older than 30 seconds
+    let timestamp = Date.now()
+    const TIME_SYNC_CACHE_MS = 30000 // 30 seconds
+    const now = Date.now()
+    const timeSinceLastSync = now - this.lastServerTimeSync
+    
+    // Only sync if cache is stale or never synced
+    if (timeSinceLastSync > TIME_SYNC_CACHE_MS) {
+      try {
+        const res = await fetch(`${this.baseURL}/fapi/v1/time`)
+        const j = await res.json().catch(()=>null)
+        const srv = Number(j?.serverTime)
+        if (Number.isFinite(srv)) {
+          this.serverTimeOffsetMs = srv - now
+          this.lastServerTimeSync = now
+        }
+      } catch {}
+    }
+    
+    // Use cached or newly synced offset
+    timestamp = Date.now() + (this.serverTimeOffsetMs || 0)
     // Expand recvWindow to mitigate clock skew/network latency issues (-1021)
     const defaultRecvWindow = (() => {
       const env = Number(process.env.BINANCE_RECV_WINDOW_MS)
@@ -211,20 +252,23 @@ class BinanceFuturesAPI {
             delete o.reduceOnly
           }
 
-          // 5) Pro STOP_MARKET/TAKE_PROFIT_MARKET odstraňujeme reduceOnly úplně – Binance jej u "close-only" exekuce
-          //    nepotřebuje a často jej odmítá (-1106). Pro řízení směru používáme positionSide.
-          if ((o?.type === 'STOP_MARKET' || o?.type === 'TAKE_PROFIT_MARKET') && o?.reduceOnly === true) {
+          // 5) Pro STOP_MARKET/TAKE_PROFIT_MARKET/MARKET odstraňujeme reduceOnly úplně – Binance jej u "close-only" exekuce
+          //    nepotřebuje a často jej odmítá (-1106). Pro řízení směru používáme positionSide nebo quantity.
+          if ((o?.type === 'STOP_MARKET' || o?.type === 'TAKE_PROFIT_MARKET' || o?.type === 'MARKET') && o?.reduceOnly === true) {
             console.error('[FIXING_REDUCEONLY_MARKET]', { symbol: o.symbol, type: o.type, removing_reduceOnly: true })
             delete o.reduceOnly
           }
 
-          // SAFE mode whitelist LONG-only (block anything else) - pouze pokud je SAFE mode zapnutý
+          // SAFE mode whitelist for SHORT-only project
           if (safeMode) {
             const allowed = (
-              (String(o.side) === 'BUY' && String(o.type) === 'LIMIT' && o.closePosition !== true) ||
-              (String(o.side) === 'SELL' && String(o.type) === 'STOP_MARKET' && (o.closePosition === true || o.reduceOnly === true)) ||
-              (String(o.side) === 'SELL' && String(o.type) === 'TAKE_PROFIT_MARKET' && (o.closePosition === true || o.reduceOnly === true)) ||
-              (String(o.side) === 'SELL' && String(o.type) === 'TAKE_PROFIT')
+              // Entry: SELL (opening short position)
+              (String(o.side) === 'SELL' && (String(o.type) === 'LIMIT' || String(o.type) === 'MARKET' || String(o.type) === 'STOP' || String(o.type) === 'STOP_MARKET') && o.closePosition !== true) ||
+              // Exit SL: BUY (closing short position at loss)
+              (String(o.side) === 'BUY' && String(o.type) === 'STOP_MARKET' && (o.closePosition === true || o.reduceOnly === true)) ||
+              // Exit TP: BUY (closing short position at profit)
+              (String(o.side) === 'BUY' && String(o.type) === 'TAKE_PROFIT_MARKET' && (o.closePosition === true || o.reduceOnly === true)) ||
+              (String(o.side) === 'BUY' && String(o.type) === 'TAKE_PROFIT')
             )
             if (!allowed) {
               try { console.error('[BLOCKED_ORDER]', { symbol: String(o.symbol), side: String(o.side), type: String(o.type), closePosition: !!o.closePosition }) } catch {}
@@ -480,15 +524,15 @@ class BinanceFuturesAPI {
 
     try {
       const res = await this.request('POST', '/fapi/v1/order', p)
-      // Hook: Track Entry Updater for internal conservative entries (BUY LIMIT, clientOrderId e_l_*)
+      // Hook: Track Entry Updater for internal conservative entries (SELL LIMIT for SHORT, clientOrderId e_l_*)
       try {
-        const sideBuy = String(p.side || '').toUpperCase() === 'BUY'
+        const sideSell = String(p.side || '').toUpperCase() === 'SELL'
         const isLimit = String(p.type || '').toUpperCase() === 'LIMIT'
         const reduceOnly = (p as any)?.reduceOnly === true
         const closePosition = (p as any)?.closePosition === true
         const cid = String((res as any)?.clientOrderId || (p as any)?.newClientOrderId || '')
         const isInternalEntry = /^sv2_e_l_/.test(cid)
-        if (sideBuy && isLimit && !reduceOnly && !closePosition && isInternalEntry) {
+        if (sideSell && isLimit && !reduceOnly && !closePosition && isInternalEntry) {
           const { trackEntryOrder, hasEntryTrack } = await import('../entry-updater/registry')
           const orderIdNum = Number((res as any)?.orderId || 0)
           const entryPriceNum = Number((p as any)?.price || 0)
@@ -726,7 +770,13 @@ export function getWaitingTpList(): WaitingTpEntry[] {
     return Object.values(waitingTpBySymbol)
       .filter(w => w.status === 'waiting')
       .sort((a, b) => (new Date(a.since).getTime() - new Date(b.since).getTime()))
-  } catch { return [] }
+  } catch (e: any) {
+    console.error('[WAITING_TP_LIST_ERROR]', {
+      message: e?.message || String(e),
+      stack: e?.stack || null
+    })
+    throw new Error(`Failed to get waiting TP list: ${e?.message || String(e)}`)
+  }
 }
 
 export function waitingTpSchedule(symbol: string, tp: number, qtyPlanned: string | null, positionSide?: 'LONG'|'SHORT'|undefined, workingType?: 'MARK_PRICE' | 'CONTRACT_PRICE'): void {
@@ -780,9 +830,10 @@ function waitingTpCleanupIfNoEntry(symbol: string): void {
   try {
     if (!waitingTpBySymbol[symbol]) return
     // Check if there's still an ENTRY order for this symbol
+    // SHORT: entry = SELL
     getBinanceAPI().getOpenOrders(symbol).then(orders => {
       const hasEntry = (Array.isArray(orders) ? orders : []).some((o: any) => 
-        String(o?.side) === 'BUY' && 
+        String(o?.side) === 'SELL' && 
         String(o?.type) === 'LIMIT' && 
         !(o?.reduceOnly || o?.closePosition)
       )
@@ -839,19 +890,29 @@ export async function waitingTpProcessPassFromPositions(positionsRaw: any[]): Pr
       // Žádné REST dotazy na openOrders – cleanup řeší server na základě WS snapshotu
       // ANTI-DUPLICATE: Zkontroluj, jestli už TP order pro tento symbol neexistuje
       if (size > 0 && w.checks >= 1) {
-        // Předem určeme očekávaný positionSide a exit side pro konzistentní deduplikaci
-        const positionSideComputed = (w.positionSide === 'SHORT' || rec.side === 'SHORT') ? 'SHORT' : 'LONG'
-        const expectedExitSide = positionSideComputed === 'SHORT' ? 'BUY' : 'SELL'
+        // SHORT-only project: validate and force SHORT
+        if (w.positionSide && w.positionSide !== 'SHORT') throw new Error(`[TP_POLLER] Invalid positionSide: ${w.positionSide}`)
+        if (rec.side && rec.side !== 'SHORT') throw new Error(`[TP_POLLER] Invalid side: ${rec.side}`)
+        const positionSideComputed = 'SHORT'  // Forced SHORT-only
+        const expectedExitSide = 'BUY'  // SHORT exits with BUY
         // V one-way módu (bez hedge) Binance vyžaduje neposílat positionSide parametr vůbec.
         // Detekce bez extra API dotazu: z REST snapshotu pozic zjistíme, zda Binance posílá positionSide=LONG/SHORT pro tento symbol
         const posRecord = (() => {
-          try { return list.find((pp: any) => String(pp?.symbol || '') === symbol) } catch { return null }
+          try {
+            return list.find((pp: any) => String(pp?.symbol || '') === symbol)
+          } catch (e: any) {
+            console.warn('[TP_POLLER_POS_LOOKUP_ERROR]', { symbol, error: e?.message })
+            return null
+          }
         })()
         const positionSideField = (() => {
           try {
             const raw = String((posRecord as any)?.positionSide || '')
             return raw === 'LONG' || raw === 'SHORT' ? raw as 'LONG'|'SHORT' : null
-          } catch { return null }
+          } catch (e: any) {
+            console.warn('[TP_POLLER_POSITION_SIDE_ERROR]', { symbol, error: e?.message })
+            return null
+          }
         })()
         const includePositionSide = Boolean(positionSideField || w.positionSide)
         try {
@@ -946,7 +1007,8 @@ async function rehydrateWaitingFromDisk(): Promise<void> {
         if (!keep) {
           try {
             const open = await api.getOpenOrders(w.symbol)
-            const hasEntry = (Array.isArray(open) ? open : []).some((o: any) => String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT')
+            // SHORT: entry = SELL (opening short position)
+            const hasEntry = (Array.isArray(open) ? open : []).some((o: any) => String(o?.side) === 'SELL' && String(o?.type) === 'LIMIT')
             keep = hasEntry
           } catch {}
         }
@@ -990,9 +1052,9 @@ async function waitForStopOrdersCleared(symbol: string, timeoutMs = 4000): Promi
 }
 
 async function waitForPositionSize(symbol: string, {
-  sideLong,
+  sideShort,
   positionSide
-}: { sideLong: boolean; positionSide?: 'LONG' | 'SHORT' }, timeoutMs = 5000): Promise<number> {
+}: { sideShort: boolean; positionSide?: 'LONG' | 'SHORT' }, timeoutMs = 5000): Promise<number> {
   const api = getBinanceAPI()
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -1007,7 +1069,7 @@ async function waitForPositionSize(symbol: string, {
         } else {
           // One-way mode: sign encodes side
           if (Number.isFinite(amt) && Math.abs(amt) > 0) {
-            if ((sideLong && amt > 0) || (!sideLong && amt < 0)) return Math.abs(amt)
+            if ((sideShort && amt < 0) || (!sideShort && amt > 0)) return Math.abs(amt)
           }
         }
       }
@@ -1097,7 +1159,7 @@ export async function __legacy_executeHotTradingOrdersV2(request: PlaceOrdersReq
     console.error('[DEBUG_PROCESSING_ORDER]', { symbol: order.symbol, side: order.side })
     let entryRes: any, tpRes: any, slRes: any;
     try {
-      if (order.side !== 'LONG') { console.warn(`[SIMPLE_BRACKET_SKIP] non-LONG ${order.symbol}`); continue }
+      if (order.side !== 'SHORT') { console.warn(`[SIMPLE_BRACKET_SKIP] non-SHORT ${order.symbol}`); continue }
       
       // CRITICAL: Block if symbol already has orders or position
       if (symbolsWithPositions.has(order.symbol)) {
@@ -1112,7 +1174,7 @@ export async function __legacy_executeHotTradingOrdersV2(request: PlaceOrdersReq
         continue
       }
 
-      let positionSide: 'LONG' | undefined; try { positionSide = (await api.getHedgeMode()) ? 'LONG' : undefined } catch {}
+      let positionSide: 'SHORT' | undefined; try { positionSide = (await api.getHedgeMode()) ? 'SHORT' : undefined } catch {}
       const entryPx = Number(order.entry); if (!entryPx || entryPx <= 0) throw new Error(`Invalid entry price for ${order.symbol}`)
       const notionalUsd = order.amount * order.leverage
       const qty = await api.calculateQuantity(order.symbol, notionalUsd, entryPx)
@@ -1150,7 +1212,7 @@ export async function __legacy_executeHotTradingOrdersV2(request: PlaceOrdersReq
       // RAW log (first GPT input values seen by trading engine)
       const rawLog = {
         symbol: String(order.symbol),
-        side: String(order.side || 'LONG').toUpperCase() as 'LONG' | 'SHORT',
+        side: String(order.side || 'SHORT').toUpperCase() as 'LONG' | 'SHORT',
         entryRaw: Number(order.entry ?? null) as number | null,
         slRaw: Number(order.sl ?? null) as number | null,
         tpRaw: Number(order.tp ?? null) as number | null
@@ -1163,9 +1225,10 @@ export async function __legacy_executeHotTradingOrdersV2(request: PlaceOrdersReq
       let entryParams: (OrderParams & { __engine?: string })
       if (isAggressive && (ot === 'stop_limit' || ot === 'stop-limit')) {
         // Aggressive STOP LIMIT: trigger at entry price and place limit at the same price
+        // SHORT: entry = SELL (opening short position)
         entryParams = {
           symbol: order.symbol,
-          side: 'BUY',
+          side: 'SELL',
           type: 'STOP',
           price: String(entryRounded),
           stopPrice: String(entryRounded),
@@ -1176,44 +1239,47 @@ export async function __legacy_executeHotTradingOrdersV2(request: PlaceOrdersReq
           positionSide,
       // Compat variables for ID payload (legacy V2 function; not used at runtime)
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      newClientOrderId: makeDeterministicClientId('e_stl', { symbol: order.symbol, side: 'BUY', type: 'STOP', price: String(entryRounded), stopPrice: String(entryRounded), timeInForce: 'GTC', quantity: qty, positionSide }),
+      newClientOrderId: makeDeterministicClientId('e_stl', { symbol: order.symbol, side: 'SELL', type: 'STOP', price: String(entryRounded), stopPrice: String(entryRounded), timeInForce: 'GTC', quantity: qty, positionSide }),
           newOrderRespType: 'RESULT',
           __engine: 'v2_simple_bracket_immediate'
         }
       } else if (isAggressive && ot === 'stop') {
-        // Aggressive STOP MARKET: stopPrice must be above current price for LONG
-        const stopPriceAbove = entryRounded * 1.001 // Add 0.1% buffer above entry price
+        // Aggressive STOP MARKET: stopPrice must be below current price for SHORT
+        // SHORT: entry = SELL (opening short position)
+        const stopPriceBelow = entryRounded * 0.999 // Add 0.1% buffer below entry price for SHORT
         entryParams = {
           symbol: order.symbol,
-          side: 'BUY',
+          side: 'SELL',
           type: 'STOP_MARKET',
-          stopPrice: String(stopPriceAbove),
+          stopPrice: String(stopPriceBelow),
           quantity: qty,
           closePosition: false,
           workingType,
           positionSide,
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      newClientOrderId: makeDeterministicClientId('e_stm', { symbol: order.symbol, side: 'BUY', type: 'STOP_MARKET', stopPrice: String(stopPriceAbove), quantity: qty, positionSide }),
+      newClientOrderId: makeDeterministicClientId('e_stm', { symbol: order.symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(stopPriceBelow), quantity: qty, positionSide }),
           newOrderRespType: 'RESULT',
           __engine: 'v2_simple_bracket_immediate'
         }
       } else if (String(ot) === 'market') {
+        // SHORT: entry = SELL (opening short position)
         entryParams = {
           symbol: order.symbol,
-          side: 'BUY',
+          side: 'SELL',
           type: 'MARKET',
           quantity: qty,
           closePosition: false,
           positionSide,
-          newClientOrderId: makeDeterministicClientId('e_m', { symbol: order.symbol, side: 'BUY', type: 'MARKET', quantity: qty, positionSide }),
+          newClientOrderId: makeDeterministicClientId('e_m', { symbol: order.symbol, side: 'SELL', type: 'MARKET', quantity: qty, positionSide }),
           newOrderRespType: 'RESULT',
           __engine: 'v2_simple_bracket_immediate'
         }
       } else {
         // Default LIMIT (conservative)
+        // SHORT: entry = SELL (opening short position)
         entryParams = {
           symbol: order.symbol,
-          side: 'BUY',
+          side: 'SELL',
           type: 'LIMIT',
           price: String(entryRounded),
           quantity: qty,
@@ -1221,15 +1287,16 @@ export async function __legacy_executeHotTradingOrdersV2(request: PlaceOrdersReq
           closePosition: false,
           positionSide,
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      newClientOrderId: makeDeterministicClientId('e_l', { symbol: order.symbol, side: 'BUY', type: 'LIMIT', price: String(entryRounded), timeInForce: 'GTC', quantity: qty, positionSide }),
+      newClientOrderId: makeDeterministicClientId('e_l', { symbol: order.symbol, side: 'SELL', type: 'LIMIT', price: String(entryRounded), timeInForce: 'GTC', quantity: qty, positionSide }),
           newOrderRespType: 'RESULT',
           __engine: 'v2_simple_bracket_immediate'
         }
       }
       // SL STOP_MARKET (always) - use rounded price
+      // SHORT: SL = BUY (closes short position at loss)
       const slParams: OrderParams & { __engine?: string } = {
         symbol: order.symbol,
-        side: 'SELL',
+        side: 'BUY',
         type: 'STOP_MARKET',
         stopPrice: String(slRounded),
         closePosition: true,
@@ -1301,7 +1368,8 @@ export async function __legacy_executeHotTradingOrdersV2(request: PlaceOrdersReq
         let hasPosition = false
         let positionQty = qty // Default na původní vypočítanou quantity
         try {
-          const size = await waitForPositionSize(order.symbol, { sideLong: true, positionSide }, 2000)
+          // SHORT project: sideShort = true
+          const size = await waitForPositionSize(order.symbol, { sideShort: true, positionSide }, 2000)
           hasPosition = Number(size) > 0
           if (hasPosition) positionQty = String(size)
           console.error('[STEP_2_POSITION_CHECK]', { symbol: order.symbol, hasPosition, size, positionQty })
@@ -1310,15 +1378,17 @@ export async function __legacy_executeHotTradingOrdersV2(request: PlaceOrdersReq
         // 4. Rozhodni podle MARK a přítomnosti pozice, aby se zabránilo -2021 (would immediately trigger)
         let markPx: number | null = null
         try { markPx = await api.getMarkPrice(order.symbol) } catch {}
-        const tpOk = hasPosition || (tpRounded > Number(markPx))
-        const slOk = hasPosition || (slRounded < Number(markPx))
+        // SHORT: TP must be BELOW mark, SL must be ABOVE mark
+        const tpOk = hasPosition || (tpRounded < Number(markPx))
+        const slOk = hasPosition || (slRounded > Number(markPx))
 
         console.error('[STEP_3_POLICY]', { symbol: order.symbol, phase: 'SAFE', hasPosition, quantity: positionQty, mark: markPx, tp: tpRounded, sl: slRounded, tpOk, slOk })
 
         // Build params depending on whether we already have a position
+        // SHORT: TP/SL = BUY (closing short position)
         const tpParamsHasPos: OrderParams & { __engine?: string } = {
           symbol: order.symbol,
-          side: 'SELL',
+          side: 'BUY',
           type: 'TAKE_PROFIT',
           price: String(tpRounded),
           quantity: positionQty,
@@ -1332,7 +1402,7 @@ export async function __legacy_executeHotTradingOrdersV2(request: PlaceOrdersReq
         }
         const slParamsHasPos: OrderParams & { __engine?: string } = {
           symbol: order.symbol,
-          side: 'SELL',
+          side: 'BUY',
           type: 'STOP_MARKET',
           stopPrice: String(slRounded),
           quantity: positionQty,
@@ -1345,7 +1415,7 @@ export async function __legacy_executeHotTradingOrdersV2(request: PlaceOrdersReq
         }
         const tpParamsPre: OrderParams & { __engine?: string } = {
           symbol: order.symbol,
-          side: 'SELL',
+          side: 'BUY',
           type: 'TAKE_PROFIT_MARKET',
           stopPrice: String(tpRounded),
           closePosition: true,
@@ -1357,7 +1427,7 @@ export async function __legacy_executeHotTradingOrdersV2(request: PlaceOrdersReq
         }
         const slParamsPre: OrderParams & { __engine?: string } = {
           symbol: order.symbol,
-          side: 'SELL',
+          side: 'BUY',
           type: 'STOP_MARKET',
           stopPrice: String(slRounded),
           closePosition: true,
@@ -1550,7 +1620,19 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
   const api = getBinanceAPI()
   const results: Array<any> = []
   const priceLogs: Array<any> = []
-  const makeId = (p: string) => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  // Universe značky pro clientOrderId tracking: v=volume, g=gainers, l=losers, o=overheat
+  const universeTag = (u?: string) => {
+    if (u === 'volume') return 'v'
+    if (u === 'gainers') return 'g'
+    if (u === 'losers') return 'l'
+    if (u === 'overheat') return 'o'
+    return '' // Žádná značka pro legacy orders bez universe
+  }
+  const makeId = (p: string, universe?: string) => {
+    const tag = universeTag(universe)
+    const base = tag ? `${p}_${tag}` : p
+    return `${base}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  }
   const workingType: 'MARK_PRICE' = 'MARK_PRICE'
 
   // Prepare all orders (compute qty, params)
@@ -1574,10 +1656,11 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
           continue
         }
       } catch {}
-      // Support both LONG and SHORT sides
-      let positionSide: 'LONG' | 'SHORT' | undefined
+      // SHORT-only project: validate side
+      if (order.side !== 'SHORT') throw new Error(`[PLACE_ORDERS] Invalid side: ${order.side} - must be SHORT`)
+      let positionSide: 'SHORT' | undefined
       try {
-        if (await api.getHedgeMode()) positionSide = (order.side === 'SHORT') ? 'SHORT' : 'LONG'
+        if (await api.getHedgeMode()) positionSide = 'SHORT'
         else positionSide = undefined
       } catch {}
 
@@ -1611,7 +1694,10 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
 
       const rawLog = {
         symbol: String(order.symbol),
-        side: String(order.side || 'LONG').toUpperCase() as 'LONG' | 'SHORT',
+        side: (() => {
+          if (!order.side) throw new Error(`Missing side for order ${order.symbol}`)
+          return String(order.side).toUpperCase() as 'LONG' | 'SHORT'
+        })(),
         entryRaw: Number(order.entry ?? null) as number | null,
         slRaw: Number(order.sl ?? null) as number | null,
         tpRaw: Number(order.tp ?? null) as number | null
@@ -1659,7 +1745,7 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
             closePosition: false,
             workingType,
             positionSide,
-            newClientOrderId: makeId('e_stl'),
+            newClientOrderId: makeId('e_stl', order.universe),
             newOrderRespType: 'RESULT',
             __engine: 'v3_batch_2s'
           }
@@ -1675,7 +1761,7 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
             closePosition: false,
             workingType,
             positionSide,
-            newClientOrderId: makeId('e_stm'),
+            newClientOrderId: makeId('e_stm', order.universe),
             newOrderRespType: 'RESULT',
             __engine: 'v3_batch_2s'
           }
@@ -1688,7 +1774,7 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
             quantity: qty,
             closePosition: false,
             positionSide,
-            newClientOrderId: makeId('e_m'),
+            newClientOrderId: makeId('e_m', order.universe),
             newOrderRespType: 'RESULT',
             __engine: 'v3_batch_2s'
           }
@@ -1702,7 +1788,7 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
           timeInForce: 'GTC',
           closePosition: false,
           positionSide,
-          newClientOrderId: makeId('e_l'),
+          newClientOrderId: makeId('e_l', order.universe),
           newOrderRespType: 'RESULT',
           __engine: 'v3_batch_2s'
         }
@@ -1779,7 +1865,10 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       const stopPrice = o?.stopPrice != null ? String(o.stopPrice) : (o?.entryParams?.stopPrice != null ? String(o.entryParams.stopPrice) : '')
       const qty = o?.quantity != null ? String(o.quantity) : (o?.origQty != null ? String(o.origQty) : (o?.entryParams?.quantity != null ? String(o.entryParams.quantity) : ''))
       return `${symbol}|${side}|${type}|${price}|${stopPrice}|${qty}`
-    } catch { return null }
+    } catch (e: any) {
+      console.warn('[ENTRY_KEY_PARSE_ERROR]', { error: e?.message, order_id: o?.orderId })
+      return null
+    }
   }
   const existingEntryKeys = new Set<string>()
   for (const eo of (Array.isArray(existingOpenOrdersPhase1) ? existingOpenOrdersPhase1 : [])) {
@@ -1841,6 +1930,17 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
     }
   }))
 
+  // Track which symbols mají potvrzené ENTRY (úspěšně odesláno v této fázi)
+  const entryOkSymbols = new Set<string>()
+  for (const r of entrySettled) {
+    try {
+      if (r && r.status === 'fulfilled') {
+        const v = (r as any).value
+        if (v && v.symbol && v.ok === true) entryOkSymbols.add(String(v.symbol))
+      }
+    } catch {}
+  }
+
   // Phase 2: Wait 3 seconds (per request)
   console.error('[BATCH_PHASE_2_WAIT]', { ms: 3000, ts: new Date().toISOString() })
   await sleep(3000)
@@ -1865,8 +1965,8 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
   for (const p of prepared) {
     const existing = ordersBySym.get(p.symbol) || []
 
-    // SAFETY: Do not create exits if there is neither open entry order nor a position.
-    // This prevents orphaned STOP_MARKET orders when entry was not placed/was cancelled.
+    // SAFETY: Do not create exits if there is neither open entry order nor a position,
+    // and nebyl potvrzen ENTRY v této dávce. Zabrání to sirotčím SL při failnutém ENTRY.
     let posQtyStrForGate: string | null = null
     try {
       const positions = await api.getPositions()
@@ -1876,7 +1976,8 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
     } catch {}
     const hasOpenEntry = (() => {
       try {
-        const expectedSide = String(p.order?.side || 'LONG').toUpperCase() === 'SHORT' ? 'SELL' : 'BUY'
+        if (!p.order?.side) throw new Error(`Missing side for pending order ${p.symbol}`)
+        const expectedSide = String(p.order.side).toUpperCase() === 'SHORT' ? 'SELL' : 'BUY'
         return (existing as any[]).some((o: any) => {
           const sameSymbol = String(o?.symbol || '') === p.symbol
           const sideMatch = String(o?.side || '').toUpperCase() === expectedSide
@@ -1888,11 +1989,12 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
         })
       } catch { return false }
     })()
+    const entryConfirmedThisBatch = entryOkSymbols.has(p.symbol)
     // PRE-ENTRY GLOBAL GATE: pokud nemáme otevřený ENTRY a ani reálnou pozici, a PREENTRY_EXITS_ENABLED=false,
     // neodesílej žádné CP/RO SL ani TP – zabráníme pre-entry exitům úplně.
     const preentryEnabled = Boolean((tradingCfg as any)?.PREENTRY_EXITS_ENABLED === true)
     // If pre-entry exits are disabled and we are in pure pre-entry (open entry present, no real position), skip exits
-    if (!preentryEnabled && hasOpenEntry && !posQtyStrForGate) {
+    if (!preentryEnabled && (hasOpenEntry || entryConfirmedThisBatch) && !posQtyStrForGate) {
       try { console.warn('[SKIP_EXITS_NO_ENTRY]', { symbol: p.symbol }) } catch {}
       continue
     }
@@ -1900,7 +2002,8 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
     const hasSameCpSL = (() => {
       try {
         const desired = Number(p.rounded.sl)
-        const exitSideWanted = String(p.order?.side || 'LONG').toUpperCase() === 'SHORT' ? 'BUY' : 'SELL'
+        if (!p.order?.side) throw new Error(`Missing side for pending order ${p.symbol}`)
+        const exitSideWanted = String(p.order.side).toUpperCase() === 'SHORT' ? 'BUY' : 'SELL'
         return (existing as any[]).some((o: any) => {
           const sameSide = String(o?.side).toUpperCase() === exitSideWanted
           const t = String(o?.type || '').toUpperCase()
@@ -1914,7 +2017,8 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
     const hasSameRoSL = (() => {
       try {
         const desired = Number(p.rounded.sl)
-        const exitSideWanted = String(p.order?.side || 'LONG').toUpperCase() === 'SHORT' ? 'BUY' : 'SELL'
+        if (!p.order?.side) throw new Error(`Missing side for pending order ${p.symbol}`)
+        const exitSideWanted = String(p.order.side).toUpperCase() === 'SHORT' ? 'BUY' : 'SELL'
         return (existing as any[]).some((o: any) => {
           const sameSide = String(o?.side).toUpperCase() === exitSideWanted
           const t = String(o?.type || '').toUpperCase()
@@ -1928,7 +2032,8 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
     const hasSameTP = (() => {
       try {
         const desired = Number(p.rounded.tp)
-        const exitSideWanted = String(p.order?.side || 'LONG').toUpperCase() === 'SHORT' ? 'BUY' : 'SELL'
+        if (!p.order?.side) throw new Error(`Missing side for pending order ${p.symbol}`)
+        const exitSideWanted = String(p.order.side).toUpperCase() === 'SHORT' ? 'BUY' : 'SELL'
         return (existing as any[]).some((o: any) => {
           const sameSide = String(o?.side).toUpperCase() === exitSideWanted
           const t = String(o?.type || '').toUpperCase()
@@ -1940,15 +2045,13 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       } catch { return false }
     })()
     
-    // 1) CP SL (closePosition=true) – ochranný SL pouze pokud není čistý pre-entry bez pozice a PREENTRY_EXITS_ENABLED je true
+    // 1) CP SL (closePosition=true) – ochranný SL pouze pokud EXISTUJE otevřený ENTRY NEBO reálná pozice
     if (hasSameCpSL) {
       console.warn('[DEDUP_SKIP_SL_CP]', { symbol: p.symbol, reason: 'SL_CP_same_price_exists' })
     } else {
-      let allowCpSl = true
-      if (!preentryEnabled && !posQtyStrForGate && hasOpenEntry) {
-        allowCpSl = false
-        console.info('[PREENTRY_CP_SL_BLOCKED]', { symbol: p.symbol })
-      }
+      // Nová politika: CP SL smí vzniknout jen pokud je přítomný OPEN ENTRY nebo skutečná POZICE
+      let allowCpSl = Boolean(hasOpenEntry || posQtyStrForGate || entryConfirmedThisBatch)
+      if (!allowCpSl) console.info('[CP_SL_SKIP_NO_ENTRY_OR_POSITION]', { symbol: p.symbol })
       // PRE-ENTRY DEDUP/REPLACE: pokud máme otevřený interní ENTRY a nemáme reálnou pozici,
       // nech pouze nejvíce ochranný CP SL a novější SL posílej jen pokud je více ochranný.
       try {
@@ -1979,15 +2082,29 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
 
             const desired = Number(p.rounded.sl)
             if (Number.isFinite(desired)) {
-              if (desired < (best as any).stopPrice) {
+              // KRITICKÁ OPRAVA: Pro SHORT, NIŽŠÍ SL = LEPŠÍ ochrana!
+              // desired > best.stopPrice = nový je HORŠÍ (výš, dál od profitu) → keep existing
+              // desired < best.stopPrice = nový je LEPŠÍ (níž, blíž k profitu) → send new + cleanup old
+              if (desired > (best as any).stopPrice) {
                 // Nový SL by zhoršil ochranu – neodesílej nový a ponech nejlepší existující.
                 allowCpSl = false
-                try { console.info('[PREENTRY_SL_KEEP_EXISTING]', { symbol: p.symbol, currentBest: (best as any).stopPrice, proposed: desired }) } catch {}
-                // Navíc zruš méně ochranné CP SL (nižší než best) – ponech pouze nejlepší
+                try { console.info('[PREENTRY_SL_KEEP_EXISTING]', { symbol: p.symbol, currentBest: (best as any).stopPrice, proposed: desired, reason: 'new_is_worse' }) } catch {}
+                // Navíc zruš méně ochranné CP SL (vyšší než best pro SHORT) – ponech pouze nejlepší
                 for (const o of cpSlOrders) {
-                  if (o.orderId !== (best as any).orderId && o.stopPrice < (best as any).stopPrice) {
-                    try { await cancelOrder(p.symbol, o.orderId); console.info('[PREENTRY_SL_DEDUP_CANCEL]', { symbol: p.symbol, orderId: o.orderId, stopPrice: o.stopPrice }) } catch {}
+                  if (o.orderId !== (best as any).orderId && o.stopPrice > (best as any).stopPrice) {
+                    try { await cancelOrder(p.symbol, o.orderId); console.info('[PREENTRY_SL_DEDUP_CANCEL]', { symbol: p.symbol, orderId: o.orderId, stopPrice: o.stopPrice, reason: 'less_protective_than_best' }) } catch {}
                   }
+                }
+              } else {
+                // Nový SL je LEPŠÍ (lower = more protective for SHORT) → send new + cleanup ALL old
+                allowCpSl = true
+                try { console.info('[PREENTRY_SL_MORE_PROTECTIVE]', { symbol: p.symbol, currentBest: (best as any).stopPrice, proposed: desired, reason: 'new_is_better' }) } catch {}
+                // CLEANUP: Smaž VŠECHNY staré SL ordery (jsou všechny horší než nový)
+                for (const o of cpSlOrders) {
+                  try { 
+                    await cancelOrder(p.symbol, o.orderId)
+                    console.info('[PREENTRY_SL_CLEANUP_OLD]', { symbol: p.symbol, orderId: o.orderId, oldStopPrice: o.stopPrice, newStopPrice: desired, reason: 'replacing_with_better' }) 
+                  } catch {}
                 }
               }
             }
@@ -1996,7 +2113,8 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       } catch {}
       try {
         const mark = await api.getMarkPrice(p.symbol)
-        const isShortLocal = String(p.order?.side || 'LONG').toUpperCase() === 'SHORT'
+        if (!p.order?.side) throw new Error(`Missing side for pending order ${p.symbol}`)
+        const isShortLocal = String(p.order.side).toUpperCase() === 'SHORT'
         // LONG: disallow if mark <= SL; SHORT: disallow if mark >= SL
         if (Number.isFinite(Number(mark))) {
           const markNum = Number(mark)
@@ -2010,7 +2128,10 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       if (allowCpSl) {
         const slParams: OrderParams & { __engine?: string } = {
           symbol: p.symbol,
-          side: (String(p.order?.side || 'LONG').toUpperCase() === 'SHORT') ? 'BUY' : 'SELL',
+          side: (() => {
+            if (!p.order?.side) throw new Error(`Missing side for pending order ${p.symbol}`)
+            return (String(p.order.side).toUpperCase() === 'SHORT') ? 'BUY' : 'SELL'
+          })(),
           type: 'STOP_MARKET',
           stopPrice: p.rounded.sl,
           closePosition: true,
@@ -2062,7 +2183,10 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       } else if (posQtyStr && !hasSameRoSL) {
         const roSlParams: OrderParams & { __engine?: string } = {
           symbol: p.symbol,
-          side: (String(p.order?.side || 'LONG').toUpperCase() === 'SHORT') ? 'BUY' : 'SELL',
+          side: (() => {
+            if (!p.order?.side) throw new Error(`Missing side for pending order ${p.symbol}`)
+            return (String(p.order.side).toUpperCase() === 'SHORT') ? 'BUY' : 'SELL'
+          })(),
           type: 'STOP_MARKET',
           stopPrice: p.rounded.sl,
           quantity: posQtyStr,
@@ -2091,7 +2215,8 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
         let allowTp = true
         try {
           const mark = await api.getMarkPrice(p.symbol)
-          const isShortLocal = String(p.order?.side || 'LONG').toUpperCase() === 'SHORT'
+          if (!p.order?.side) throw new Error(`Missing side for pending order ${p.symbol}`)
+        const isShortLocal = String(p.order.side).toUpperCase() === 'SHORT'
           // LONG: disallow if mark >= TP; SHORT: disallow if mark <= TP
           if (Number.isFinite(Number(mark))) {
             const markNum = Number(mark)
@@ -2103,7 +2228,8 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
           }
         } catch {}
         if (allowTp) {
-          const baseTp: any = { symbol: p.symbol, side: (String(p.order?.side || 'LONG').toUpperCase() === 'SHORT') ? 'BUY' : 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: p.rounded.tp, closePosition: true, workingType }
+          if (!p.order?.side) throw new Error(`Missing side for pending order ${p.symbol}`)
+          const baseTp: any = { symbol: p.symbol, side: (String(p.order.side).toUpperCase() === 'SHORT') ? 'BUY' : 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: p.rounded.tp, closePosition: true, workingType }
           const tpParams: OrderParams & { __engine?: string } = p.positionSide
             ? { ...baseTp, positionSide: p.positionSide, newClientOrderId: makeDeterministicClientId('x_tp_tm', { ...baseTp, positionSide: p.positionSide }), newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' } as any
             : { ...baseTp, newClientOrderId: makeDeterministicClientId('x_tp_tm', baseTp), newOrderRespType: 'RESULT', __engine: 'v3_batch_2s' } as any

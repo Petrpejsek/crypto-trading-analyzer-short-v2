@@ -52,7 +52,7 @@ export async function runMarketDecider(input: MarketCompact): Promise<{ ok: bool
   try {
     if (!process.env.OPENAI_API_KEY) throw Object.assign(new Error('no_api_key'), { status: 401 })
     const m3 = cfg?.m3 || {}
-    const model = m3.model || cfg.model || 'gpt-5'
+    const model = m3.model || cfg.model || 'gpt-4o'
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, organization: (process as any)?.env?.OPENAI_ORG_ID, project: (process as any)?.env?.OPENAI_PROJECT, timeout: 600000 } as any)  // 10 minut timeout pro GPT-5
     const instructions = 'Reply with JSON only. No prose. Follow the JSON schema exactly.'
     // No timeout needed - let API handle its own timeouts
@@ -65,6 +65,7 @@ export async function runMarketDecider(input: MarketCompact): Promise<{ ok: bool
         model,
         input: JSON.stringify(input),
         instructions,
+        temperature: 0.1,
         response_format: {
           type: 'json_schema',
           json_schema: { name: 'market_decision', schema: decisionSchema as any, strict: true }
@@ -79,6 +80,7 @@ export async function runMarketDecider(input: MarketCompact): Promise<{ ok: bool
           { role: 'system', content: instructions },
           { role: 'user', content: JSON.stringify(input) }
         ],
+        temperature: 0.1,
         response_format: {
           type: 'json_schema',
           json_schema: { name: 'market_decision', schema: decisionSchema as any, strict: true }

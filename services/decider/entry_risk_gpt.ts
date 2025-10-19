@@ -1,20 +1,25 @@
 import OpenAI from 'openai'
 import Ajv from 'ajv'
 import addFormats from 'ajv-formats'
-import fs from 'node:fs'
-import path from 'node:path'
 import { resolvePromptPathShort } from '../prompts/guard'
-import crypto from 'node:crypto'
 import riskSchemaJson from '../../schemas/entry_risk.schema.json'
-import { cleanSchema } from './lib/clean_schema'
+import { resolveAssistantPrompt, notePromptUsage } from '../lib/dev_prompts'
+import { aiTap } from '../lib/ai_tap'
+import { validateSnapshotFreshness } from '../lib/freshness_guard'
+import { logPayloadSize } from '../lib/payload_monitor'
 
 const ajv = new Ajv({ allErrors: true, removeAdditional: false, strict: false })
 addFormats(ajv)
 const validate = ajv.compile(riskSchemaJson as any)
 
-const SYSTEM_PROMPT = fs.readFileSync(resolvePromptPathShort('entry_risk_manager.md'), 'utf8')
-const PROMPT_HASH = crypto.createHash('sha256').update(SYSTEM_PROMPT).digest('hex')
 const SCHEMA_VERSION = String((riskSchemaJson as any).version || '1.0.0')
+
+function getPrompt(): { text: string; sha256: string } {
+  const fallback = resolvePromptPathShort('entry_risk_manager.md')
+  const result = resolveAssistantPrompt('entry_risk_manager', fallback)
+  notePromptUsage('entry_risk_manager', result.sha256)
+  return { text: result.text, sha256: result.sha256 }
+}
 
 export type EntryRiskInput = Record<string, any>
 export type EntryRiskOutput = {
@@ -47,6 +52,28 @@ function extractText(resp: any): string {
 export async function runEntryRisk(input: EntryRiskInput): Promise<{ ok: boolean; code?: string; latencyMs: number; data: EntryRiskOutput | null; meta?: any }> {
   const t0 = Date.now()
   console.log('[ENTRY_RISK_REQUEST]', { symbol: input?.symbol, candidates: input?.candidates?.length })
+  
+  // PAYLOAD SIZE MONITORING
+  logPayloadSize('entry_risk', input, input?.symbol || null)
+  
+  // FRESHNESS VALIDATION: Check asset_data timestamp
+  if (input?.asset_data && (input.asset_data as any).timestamp) {
+    const freshness = validateSnapshotFreshness({ timestamp: (input.asset_data as any).timestamp }, 60000)
+    console.info('[ENTRY_RISK_FRESHNESS]', {
+      symbol: input?.symbol,
+      ok: freshness.ok,
+      age_seconds: freshness.age_seconds,
+      error: freshness.error || null
+    })
+    
+    if (!freshness.ok) {
+      console.warn('[ENTRY_RISK_STALE_DATA]', {
+        symbol: input?.symbol,
+        age_seconds: freshness.age_seconds
+      })
+    }
+  }
+  
   try {
     if (!process.env.OPENAI_API_KEY) {
       throw Object.assign(new Error('no_api_key'), { status: 401 })
@@ -58,6 +85,8 @@ export async function runEntryRisk(input: EntryRiskInput): Promise<{ ok: boolean
     } as any)
 
     const model = process.env.ENTRY_RISK_MODEL || 'gpt-4o'
+
+    const promptResult = getPrompt()
 
     // Pro Responses API použijeme zjednodušené schéma bez nullable
     const responsesSchema = {
@@ -103,25 +132,67 @@ export async function runEntryRisk(input: EntryRiskInput): Promise<{ ok: boolean
     try {
       const useResponses = String(model).startsWith('gpt-5')
       if (useResponses) {
-        const resp: any = await client.responses.create({
+        const body: any = {
           model,
           input: JSON.stringify(input),
-          instructions: SYSTEM_PROMPT,
-          temperature: 0.2,
+          instructions: promptResult.text,
+          temperature: 0.1,
           text: { format: { name: 'entry_risk', type: 'json_schema', schema: responsesSchema as any, strict: true } }
-        } as any)
+        }
+        
+        // AI Overview: Emit request payload
+        try {
+          aiTap.emit('entry_risk_manager', {
+            symbol: input?.symbol || null,
+            raw_request: body,
+            raw_response: null
+          })
+        } catch {}
+        
+        const resp: any = await client.responses.create(body as any)
+        
+        // AI Overview: Emit response payload
+        try {
+          aiTap.emit('entry_risk_manager', {
+            symbol: input?.symbol || null,
+            raw_request: null,
+            raw_response: resp
+          })
+        } catch {}
+        
         text = extractText(resp)
       } else {
-        // Use the simplified schema for Chat Completions as well to avoid anyOf/null issues
-        const resp = await client.chat.completions.create({
+        const body: any = {
           model,
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'system', content: promptResult.text },
             { role: 'user', content: JSON.stringify(input) }
           ],
-          temperature: 0.2,
+          temperature: 0.1,
           response_format: { type: 'json_schema', json_schema: { name: 'entry_risk', schema: responsesSchema as any, strict: true } as any }
-        } as any)
+        }
+        
+        // AI Overview: Emit request payload
+        try {
+          aiTap.emit('entry_risk_manager', {
+            symbol: input?.symbol || null,
+            raw_request: body,
+            raw_response: null
+          })
+        } catch {}
+        
+        // Use the simplified schema for Chat Completions as well to avoid anyOf/null issues
+        const resp = await client.chat.completions.create(body as any)
+        
+        // AI Overview: Emit response payload
+        try {
+          aiTap.emit('entry_risk_manager', {
+            symbol: input?.symbol || null,
+            raw_request: null,
+            raw_response: resp
+          })
+        } catch {}
+        
         text = extractText(resp)
       }
     } catch (e: any) {
@@ -133,26 +204,27 @@ export async function runEntryRisk(input: EntryRiskInput): Promise<{ ok: boolean
       throw e
     }
 
-    if (!text || !String(text).trim()) return result(false, 'empty_output', Date.now() - t0, null, { prompt_hash: PROMPT_HASH, schema_version: SCHEMA_VERSION })
+    if (!text || !String(text).trim()) return result(false, 'empty_output', Date.now() - t0, null, { prompt_sha256: promptResult.sha256, prompt_hash: promptResult.sha256, schema_version: SCHEMA_VERSION })
 
     let parsed: any
-    try { parsed = JSON.parse(text) } catch { return result(false, 'invalid_json', Date.now() - t0, null, { prompt_hash: PROMPT_HASH, schema_version: SCHEMA_VERSION }) }
+    try { parsed = JSON.parse(text) } catch { return result(false, 'invalid_json', Date.now() - t0, null, { prompt_sha256: promptResult.sha256, prompt_hash: promptResult.sha256, schema_version: SCHEMA_VERSION }) }
 
     if (!validate(parsed)) {
       try { console.error('[ENTRY_RISK_SCHEMA_FAIL]', validate.errors?.slice(0, 3)) } catch {}
-      return result(false, 'schema', Date.now() - t0, null, { prompt_hash: PROMPT_HASH, schema_version: SCHEMA_VERSION })
+      return result(false, 'schema', Date.now() - t0, null, { prompt_sha256: promptResult.sha256, prompt_hash: promptResult.sha256, schema_version: SCHEMA_VERSION })
     }
 
     const latencyMs = Date.now() - t0
     console.log('[ENTRY_RISK_SUCCESS]', { symbol: input?.symbol, decision: parsed?.decision, profile: parsed?.risk_profile, prob: parsed?.prob_success })
-    return result(true, undefined, latencyMs, parsed as EntryRiskOutput, { prompt_hash: PROMPT_HASH, schema_version: SCHEMA_VERSION })
+    return result(true, undefined, latencyMs, parsed as EntryRiskOutput, { prompt_sha256: promptResult.sha256, prompt_hash: promptResult.sha256, schema_version: SCHEMA_VERSION })
   } catch (e: any) {
     const latencyMs = Date.now() - t0
     const name = String(e?.name || '').toLowerCase()
     const code = name.includes('abort') ? 'timeout' : (e?.status ? 'http' : 'unknown')
     const status = e?.status ?? e?.response?.status ?? null
     const msg = e?.response?.data?.error?.message ?? e?.message ?? null
-    return result(false, code, latencyMs, null, { prompt_hash: PROMPT_HASH, schema_version: SCHEMA_VERSION, http_status: status, http_error: msg ? String(msg).slice(0, 160) : null })
+    const safePrompt = (() => { try { return getPrompt().sha256 } catch { return null } })()
+    return result(false, code, latencyMs, null, { prompt_sha256: safePrompt, prompt_hash: safePrompt || null, schema_version: SCHEMA_VERSION, http_status: status, http_error: msg ? String(msg).slice(0, 160) : null })
   }
 }
 

@@ -69,7 +69,16 @@ export function buildPragueDate(parts: Partial<DateParts>): Date {
 
 export function currentPeriod(periods: TradingPeriod[], at: Date | number = Date.now()): TradingPeriod | null {
   const now = getPragueParts(at)
+  const nowDate = new Date(typeof at === 'number' ? at : at.getTime())
+  
+  // Get day of week (0=Sunday, 1=Monday, ..., 6=Saturday) - matching JS Date.getDay()
+  // We need Prague day, so we create a date string and parse day from it
+  const pragueDay = nowDate.toLocaleDateString('en-US', { timeZone: 'Europe/Prague', weekday: 'short' })
+  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  const day = dayMap[pragueDay] ?? 0
+  
   const h = now.hour
+  
   const includesHour = (p: TradingPeriod, hour: number): boolean => {
     const from = p.fromHour
     const to = p.toHour
@@ -77,20 +86,36 @@ export function currentPeriod(periods: TradingPeriod[], at: Date | number = Date
     // wrap-around (e.g., 23->1 covers 23, 0)
     return hour >= from || hour < to
   }
-  for (const p of periods) {
+  
+  // Filter periods for current day
+  const todayPeriods = periods.filter(p => p.day === day)
+  
+  for (const p of todayPeriods) {
     if (includesHour(p, h)) return p
   }
+  
   return null
 }
 
-export function hourStatusMap(periods: TradingPeriod[]): Record<number, TradingPeriod> {
+export function hourStatusMap(periods: TradingPeriod[], at: Date | number = Date.now()): Record<number, TradingPeriod> {
+  const nowDate = new Date(typeof at === 'number' ? at : at.getTime())
+  
+  // Get Prague day of week
+  const pragueDay = nowDate.toLocaleDateString('en-US', { timeZone: 'Europe/Prague', weekday: 'short' })
+  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  const day = dayMap[pragueDay] ?? 0
+  
   const map: Record<number, TradingPeriod> = {} as any
   const covers = (p: TradingPeriod, h: number): boolean => {
     if (p.fromHour < p.toHour) return h >= p.fromHour && h < p.toHour
     return h >= p.fromHour || h < p.toHour
   }
+  
+  // Filter periods for current day
+  const todayPeriods = periods.filter(p => p.day === day)
+  
   for (let h = 0; h < 24; h++) {
-    const found = periods.find(p => covers(p, h))
+    const found = todayPeriods.find(p => covers(p, h))
     if (found) map[h] = found
   }
   return map
@@ -99,27 +124,49 @@ export function hourStatusMap(periods: TradingPeriod[]): Record<number, TradingP
 export function nextBestStart(periods: TradingPeriod[], at: Date | number = Date.now()): { period: TradingPeriod; start: Date } | null {
   const best = periods.filter(p => p.status === 'BEST')
   if (!best.length) return null
+  
   const nowParts = getPragueParts(at)
   const nowDate = new Date(typeof at === 'number' ? at : (at as Date).getTime())
+  
+  // Get current Prague day of week
+  const pragueDay = nowDate.toLocaleDateString('en-US', { timeZone: 'Europe/Prague', weekday: 'short' })
+  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  const currentDay = dayMap[pragueDay] ?? 0
+  
   let bestCandidate: { period: TradingPeriod; start: Date } | null = null
 
-  for (const p of best) {
-    // Today start
-    let start = buildPragueDate({ year: nowParts.year, month: nowParts.month, day: nowParts.day, hour: p.fromHour, minute: 0, second: 0 })
-    // If start already passed or equal to current minute, schedule to next day
-    const curParts = getPragueParts(nowDate)
-    const curHM = curParts.hour * 60 + curParts.minute
-    const startHM = p.fromHour * 60
-    if (startHM <= curHM) {
-      // move to tomorrow in Prague
-      const tomorrow = new Date(start.getTime() + 24 * 3600 * 1000)
-      const tParts = getPragueParts(tomorrow)
-      start = buildPragueDate({ year: tParts.year, month: tParts.month, day: tParts.day, hour: p.fromHour, minute: 0, second: 0 })
+  // Search through next 7 days
+  for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
+    const targetDay = (currentDay + dayOffset) % 7
+    const dayBestPeriods = best.filter(p => p.day === targetDay)
+    
+    for (const p of dayBestPeriods) {
+      // Calculate start date for this period
+      const baseDate = new Date(nowDate.getTime() + dayOffset * 24 * 3600 * 1000)
+      const baseParts = getPragueParts(baseDate)
+      let start = buildPragueDate({ 
+        year: baseParts.year, 
+        month: baseParts.month, 
+        day: baseParts.day, 
+        hour: p.fromHour, 
+        minute: 0, 
+        second: 0 
+      })
+      
+      // Skip if this start time has already passed
+      if (start.getTime() <= nowDate.getTime()) {
+        continue
+      }
+      
+      if (!bestCandidate || start.getTime() < bestCandidate.start.getTime()) {
+        bestCandidate = { period: p, start }
+      }
     }
-    if (!bestCandidate || start.getTime() < bestCandidate.start.getTime()) {
-      bestCandidate = { period: p, start }
-    }
+    
+    // If we found a candidate, we can stop (we're looking for the nearest)
+    if (bestCandidate) break
   }
+  
   return bestCandidate
 }
 

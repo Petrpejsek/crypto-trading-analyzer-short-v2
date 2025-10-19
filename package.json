@@ -44,7 +44,9 @@
     "qa:fp:neg:all": "npm run -s qa:fp:neg:dup && npm run -s qa:fp:neg:side && npm run -s qa:fp:neg:rrr && npm run -s qa:fp:neg:entry && npm run -s qa:fp:neg:vwap && npm run -s qa:fp:neg:adv && npm run -s qa:fp:neg:conf && npm run -s qa:fp:neg:lev",
     "qa:fp:neg:all:report": "rm -f out/fp_neg_results.json && npm run -s qa:fp:neg:dup -- --write out/fp_neg_results.json && npm run -s qa:fp:neg:side -- --write out/fp_neg_results.json && npm run -s qa:fp:neg:rrr -- --write out/fp_neg_results.json && npm run -s qa:fp:neg:entry -- --write out/fp_neg_results.txt && npm run -s qa:fp:neg:vwap -- --write out/fp_neg_results.json && npm run -s qa:fp:neg:adv -- --write out/fp_neg_results.json && npm run -s qa:fp:neg:conf -- --write out/fp_neg_results.json && npm run -s qa:fp:neg:lev -- --write out/fp_neg_results.json",
     "check-prompts": "tsx scripts/gen_prompts_registry.ts",
-    "test:prompt-guard": "tsx scripts/test_prompt_side_guard.ts"
+    "test:prompt-guard": "tsx scripts/test_prompt_side_guard.ts",
+    "locks:check": "tsx scripts/check-locks.ts check",
+    "locks:clear": "tsx scripts/check-locks.ts clear"
   },
   "keywords": [],
   "author": "",
@@ -60,6 +62,7 @@
     "buffer": "^6.0.3",
     "crypto-browserify": "^3.12.1",
     "dotenv": "^17.2.1",
+    "lightweight-charts": "^5.0.9",
     "openai": "^5.12.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

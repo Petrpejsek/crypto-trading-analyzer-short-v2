@@ -41,7 +41,7 @@ async function main() {
         const hasInternalEntry = orders.some((o: any) => {
           const clientId = String(o?.clientOrderId || '')
           const isInternal = /^sv2_e_l_/.test(clientId)
-          const isEntry = String(o?.side) === 'BUY' && String(o?.type) === 'LIMIT' && 
+          const isEntry = String(o?.side) === 'SELL' && String(o?.type) === 'LIMIT' && 
                          !(o?.reduceOnly || o?.closePosition)
           return isInternal && isEntry && String(o?.symbol) === symbol
         })
@@ -64,7 +64,7 @@ async function main() {
             symbol,
             tp,
             qty,
-            positionSide: 'LONG',
+            positionSide: 'SHORT',
             workingType: 'MARK_PRICE'
           }
           

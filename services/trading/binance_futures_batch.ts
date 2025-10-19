@@ -127,13 +127,16 @@ class BinanceFuturesAPI {
               delete o.reduceOnly
             }
 
-          // SAFE mode whitelist
+          // SAFE mode whitelist for SHORT-only project
           if (safeMode) {
             const allowed = (
-              (String(o.side) === 'BUY' && (String(o.type) === 'LIMIT' || String(o.type) === 'MARKET') && o.closePosition !== true) ||
-              (String(o.side) === 'SELL' && String(o.type) === 'STOP_MARKET' && (o.closePosition === true || o.reduceOnly === true)) ||
-              (String(o.side) === 'SELL' && String(o.type) === 'TAKE_PROFIT_MARKET' && (o.closePosition === true || o.reduceOnly === true)) ||
-              (String(o.side) === 'SELL' && String(o.type) === 'TAKE_PROFIT')
+              // Entry: SELL (opening short position)
+              (String(o.side) === 'SELL' && (String(o.type) === 'LIMIT' || String(o.type) === 'MARKET' || String(o.type) === 'STOP' || String(o.type) === 'STOP_MARKET') && o.closePosition !== true) ||
+              // Exit SL: BUY (closing short position at loss)
+              (String(o.side) === 'BUY' && String(o.type) === 'STOP_MARKET' && (o.closePosition === true || o.reduceOnly === true)) ||
+              // Exit TP: BUY (closing short position at profit)
+              (String(o.side) === 'BUY' && String(o.type) === 'TAKE_PROFIT_MARKET' && (o.closePosition === true || o.reduceOnly === true)) ||
+              (String(o.side) === 'BUY' && String(o.type) === 'TAKE_PROFIT')
             )
             if (!allowed) {
               try { console.error('[BLOCKED_ORDER]', { engine: engineTag, symbol: String(o.symbol), side: String(o.side), type: String(o.type), closePosition: !!o.closePosition, reduceOnly: !!o.reduceOnly }) } catch {}
@@ -290,7 +293,7 @@ const getBinanceAPI = () => wrapBinanceFuturesApi(new BinanceFuturesAPI())
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-async function waitForPositionSize(symbol: string, options: { sideLong?: boolean; positionSide?: string }, timeoutMs = 5000): Promise<string> {
+async function waitForPositionSize(symbol: string, options: { sideShort?: boolean; positionSide?: string }, timeoutMs = 5000): Promise<string> {
   const api = getBinanceAPI()
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
@@ -332,9 +335,9 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
   
   for (const order of request.orders) {
     try {
-      if (order.side !== 'LONG') { console.warn(`[BATCH_SKIP] non-LONG ${order.symbol}`); continue }
+      if (order.side !== 'SHORT') { console.warn(`[BATCH_SKIP] non-SHORT ${order.symbol}`); continue }
 
-      let positionSide: 'LONG' | undefined; try { positionSide = (await api.getHedgeMode()) ? 'LONG' : undefined } catch {}
+      let positionSide: 'SHORT' | undefined; try { positionSide = (await api.getHedgeMode()) ? 'SHORT' : undefined } catch {}
       const entryPx = Number(order.entry); if (!entryPx || entryPx <= 0) throw new Error(`Invalid entry price for ${order.symbol}`)
       const notionalUsd = order.amount * order.leverage
       const qty = await api.calculateQuantity(order.symbol, notionalUsd, entryPx)
@@ -363,9 +366,10 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
 
       // ENTRY - respektuj orderType z requestu
       const isMarketEntry = (order.orderType === 'market')
+      // SHORT: entry = SELL (opening short position)
       const entryParams: OrderParams & { __engine?: string } = {
         symbol: order.symbol,
-        side: 'BUY',
+        side: 'SELL',
         type: isMarketEntry ? 'MARKET' : 'LIMIT',
         ...(isMarketEntry ? {} : { price: String(order.entry), timeInForce: 'GTC' }),
         quantity: qty,
@@ -450,7 +454,8 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
         let positionQty = data.qty
         let hasPosition = false
         try {
-          const size = await waitForPositionSize(symbol, { sideLong: true, positionSide: data.positionSide }, 1000)
+          // SHORT project: sideShort = true
+          const size = await waitForPositionSize(symbol, { sideShort: true, positionSide: data.positionSide }, 1000)
           if (Number(size) > 0) {
             positionQty = String(size)
             hasPosition = true
@@ -468,10 +473,11 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
         let slParams: OrderParams & { __engine?: string }
         
         if (hasPosition) {
-          // S pozicí: quantity + reduceOnly - LIMIT TP (musí být TP > Entry pro LONG!)
+          // S pozicí: quantity + reduceOnly
+          // SHORT: TP/SL = BUY (closing short position)
           tpParams = { 
             symbol, 
-            side: 'SELL', 
+            side: 'BUY', 
             type: 'TAKE_PROFIT', 
             price: String(data.order.tp), 
             quantity: positionQty,
@@ -483,7 +489,7 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
           }
           slParams = { 
             symbol, 
-            side: 'SELL', 
+            side: 'BUY', 
             type: 'STOP_MARKET', 
             stopPrice: String(order.sl), 
             quantity: positionQty,
@@ -495,9 +501,10 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
           }
         } else {
           // Bez pozice: closePosition=true (bez quantity, bez reduceOnly)
+          // SHORT: TP/SL = BUY (closing short position)
           tpParams = { 
             symbol, 
-            side: 'SELL', 
+            side: 'BUY', 
             type: 'TAKE_PROFIT_MARKET', 
             stopPrice: String(order.tp), 
             closePosition: true,
@@ -507,9 +514,8 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
             __engine: 'v2_batch_safe'
           }
           slParams = { 
-          slParams = { 
             symbol, 
-            side: 'SELL', 
+            side: 'BUY', 
             type: 'STOP_MARKET', 
             stopPrice: String(order.sl), 
             closePosition: true,

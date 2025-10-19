@@ -1,4 +1,5 @@
 import React from 'react'
+import { writeClipboard } from '../utils/clipboard'
 
 type EntryBody = { symbol: string; body: string; sentAt?: string }
 
@@ -13,7 +14,7 @@ export const AiPayloadsPanel: React.FC<{
   const [suError, setSuError] = React.useState<string | null>(null)
   const [recent, setRecent] = React.useState<Array<{ symbol: string; body: string; mtime: number }>>([])
   const copy = async (text: string) => {
-    try { await navigator.clipboard.writeText(text) } catch {}
+    try { await writeClipboard(text) } catch {}
   }
   const ageMin = (iso?: string | null) => {
     try { if (!iso) return null; const t = Date.parse(iso); if (!Number.isFinite(t)) return null; return Math.round((Date.now() - t) / 60000) } catch { return null }

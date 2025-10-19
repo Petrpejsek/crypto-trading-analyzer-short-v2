@@ -9,15 +9,24 @@ const DEFAULT_LIMITS: TopUpLimits = {
 }
 
 function getConfig(): any {
+  const fs = require('node:fs') as typeof import('node:fs')
+  const path = require('node:path') as typeof import('node:path')
+  const file = path.resolve('config/top_up_watcher.json')
+  
+  // STRICT: Config file must exist - no fallback to empty object
+  if (!fs.existsSync(file)) {
+    throw new Error(`[TOP_UP_WATCHER_CONFIG] Config file not found: ${file}`)
+  }
+
   try {
-    const fs = require('node:fs') as typeof import('node:fs')
-    const path = require('node:path') as typeof import('node:path')
-    const file = path.resolve('config/top_up_watcher.json')
-    if (fs.existsSync(file)) {
-      return JSON.parse(fs.readFileSync(file, 'utf8'))
-    }
-  } catch {}
-  return {}
+    return JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch (e: any) {
+    console.error('[TOP_UP_WATCHER_CONFIG_ERROR]', {
+      message: e?.message || String(e),
+      path: file
+    })
+    throw new Error(`Failed to load top-up watcher config: ${e?.message || String(e)}`)
+  }
 }
 
 function normalizeSymbol(symbol: string): string {

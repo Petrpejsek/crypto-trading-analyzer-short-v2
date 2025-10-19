@@ -8,7 +8,7 @@
     "hot_picks": {
       "type": "array",
       "minItems": 0,
-      "maxItems": 7,
+      "maxItems": 40,
       "items": {
         "type": "object",
         "properties": {

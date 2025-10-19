@@ -11,11 +11,14 @@ function sanitizeOrder(o: Any): Any {
     delete p.price
   }
 
-  // 2) Whitelist (LONG ONLY) – fail-fast místo konverzí
+  // 2) Whitelist (SHORT ONLY) – fail-fast místo konverzí
   const allowed =
-    (p.side === 'BUY' && p.type === 'LIMIT' && p.closePosition !== true) ||
-    (p.side === 'SELL' && p.type === 'STOP_MARKET' && p.closePosition === true) ||
-    (p.side === 'SELL' && p.type === 'TAKE_PROFIT_MARKET' && p.closePosition === true)
+    // Entry: SELL (opening short position)
+    (p.side === 'SELL' && (p.type === 'LIMIT' || p.type === 'MARKET' || p.type === 'STOP' || p.type === 'STOP_MARKET') && p.closePosition !== true) ||
+    // Exit SL: BUY (closing short at loss)
+    (p.side === 'BUY' && p.type === 'STOP_MARKET' && p.closePosition === true) ||
+    // Exit TP: BUY (closing short at profit)
+    (p.side === 'BUY' && p.type === 'TAKE_PROFIT_MARKET' && p.closePosition === true)
 
   if (!allowed) {
     // eslint-disable-next-line no-console

@@ -24,14 +24,12 @@ function basicCounts(f: FeaturesSnapshot) {
 }
 
 function setupRuleCounts(f: FeaturesSnapshot) {
-  let longOk = 0, shortOk = 0
+  let shortOk = 0
   for (const r of f.universe) {
-    const isLong = r.ema_order_H1 === '20>50>200' && (r.vwap_rel_M15 ?? 0) > 0 && (r.RSI_M15 ?? 0) >= 45 && (r.RSI_M15 ?? 0) <= 70
     const isShort = r.ema_order_H1 === '200>50>20' && (r.vwap_rel_M15 ?? 0) < 0 && (r.RSI_M15 ?? 0) >= 30 && (r.RSI_M15 ?? 0) <= 55
-    if (isLong) longOk++
     if (isShort) shortOk++
   }
-  return { longOk, shortOk }
+  return { longOk: 0, shortOk }
 }
 
 async function main() {
@@ -120,15 +118,14 @@ async function main() {
   const tp = ['1.0R','1.8R','3.0R']
   const hypothetical = {
     setups: cands.slice(0, previewLimit).map(r => {
-      const isLong = r.ema_order_H1 === '20>50>200' && (r.vwap_rel_M15 ?? 0) > 0 && (r.RSI_M15 ?? 0) >= 45 && (r.RSI_M15 ?? 0) <= 70
       const isShort = r.ema_order_H1 === '200>50>20' && (r.vwap_rel_M15 ?? 0) < 0 && (r.RSI_M15 ?? 0) >= 30 && (r.RSI_M15 ?? 0) <= 55
-      const side = isLong ? 'LONG' : (isShort ? 'SHORT' : 'LONG')
+      const side = 'SHORT' // SHORT only system
       return {
         symbol: r.symbol,
         mode: 'intraday',
         side,
         entry: 'limit @ last_close',
-        sl: side === 'LONG' ? `${slMult.toFixed(1)}x ATR(H1) below` : `${slMult.toFixed(1)}x ATR(H1) above`,
+        sl: `${slMult.toFixed(1)}x ATR(H1) above`,
         tp,
         trailing: '1x ATR after TP1',
         sizing: { risk_pct: minimalRisk },

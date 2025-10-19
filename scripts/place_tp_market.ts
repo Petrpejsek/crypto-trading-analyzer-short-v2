@@ -53,8 +53,8 @@ async function main(): Promise<void> {
   const stopStr = Number.isFinite(stop) ? String(stop) : String(mark * mult)
 
   const params: any = hedgeMode
-    ? { symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: stopStr, closePosition: true, workingType: 'MARK_PRICE', positionSide: 'LONG', newOrderRespType: 'RESULT' }
-    : { symbol, side: 'SELL', type: 'TAKE_PROFIT_MARKET', stopPrice: stopStr, closePosition: true, workingType: 'MARK_PRICE', newOrderRespType: 'RESULT' }
+    ? { symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET', stopPrice: stopStr, closePosition: true, workingType: 'MARK_PRICE', positionSide: 'SHORT', newOrderRespType: 'RESULT' }
+    : { symbol, side: 'BUY', type: 'TAKE_PROFIT_MARKET', stopPrice: stopStr, closePosition: true, workingType: 'MARK_PRICE', newOrderRespType: 'RESULT' }
 
   console.log('[TPM_REQ]', { symbol, stop: stopStr, hedgeMode })
   const r = await api.placeOrder(params)

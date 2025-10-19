@@ -57,7 +57,7 @@ export async function runFinalPicker(input: FinalPickInput): Promise<{ ok: boole
     const cfgRaw = fs.readFileSync(path.resolve('config/decider.json'), 'utf8')
     const cfg = JSON.parse(cfgRaw)
     const fpCfg = cfg?.final_picker || {}
-    const model = fpCfg?.model || 'gpt-5'
+    const model = fpCfg?.model || 'gpt-4o'
     // No timeout needed - let API handle its own timeouts
     const system = fs.readFileSync(resolvePromptPathShort('final_picker.md'), 'utf8')
     const promptHash = crypto.createHash('sha256').update(system).digest('hex')
@@ -75,6 +75,7 @@ export async function runFinalPicker(input: FinalPickInput): Promise<{ ok: boole
           { role: 'system', content: 'Reply with JSON only. No prose. Follow the JSON schema exactly. If unsure, return an empty picks:[]' },
           { role: 'user', content: JSON.stringify(adapted) }
         ],
+        temperature: 0.1,
         response_format: {
           type: 'json_schema',
           json_schema: {

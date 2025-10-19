@@ -12,6 +12,7 @@ import { ErrorPanel } from './components/ErrorPanel';
 import { SettingsDrawer } from './components/SettingsDrawer';
 import { downloadJson } from './utils/downloadJson';
 import { ReportView } from './views/ReportView';
+import { writeClipboard } from './utils/clipboard';
 import { FeaturesPreview } from './components/FeaturesPreview';
 import { DecisionBanner } from './components/DecisionBanner';
 import { SetupsTable } from './components/SetupsTable';
@@ -168,16 +169,45 @@ export const App: React.FC = () => {
   const [loadingSymbol, setLoadingSymbol] = useState<string | null>(null);
   const [rawCoins, setRawCoins] = useState<any[] | null>(null);
   const [rawCoinsTs, setRawCoinsTs] = useState<number | null>(null);
-  const [universeStrategy, setUniverseStrategy] = useState<'volume' | 'gainers'>(() => 'volume');
-  const prevStrategyRef = useRef(universeStrategy)
+  const [selectedUniverses, setSelectedUniverses] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('selected_universes')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed
+      }
+    } catch {}
+    return ['losers']
+  });
+  const [currentRotationIndex, setCurrentRotationIndex] = useState<number>(() => {
+    try {
+      const n = Number(localStorage.getItem('universe_rotation_index'))
+      return Number.isFinite(n) && n >= 0 ? n : 0
+    } catch { return 0 }
+  })
+  const prevStrategyRef = useRef(selectedUniverses[currentRotationIndex] || 'losers')
   useEffect(() => {
-    if (prevStrategyRef.current !== universeStrategy) {
+    const currentStrategy = selectedUniverses[currentRotationIndex] || 'losers'
+    if (prevStrategyRef.current !== currentStrategy) {
+      console.error(`[UNIVERSE_STRATEGY_CHANGED] from=${prevStrategyRef.current} to=${currentStrategy}`)
       setRawCoins(null)
       setRawCoinsTs(null)
       try { localStorage.removeItem('rawCoins') } catch {}
     }
-    prevStrategyRef.current = universeStrategy
-  }, [universeStrategy])
+    prevStrategyRef.current = currentStrategy
+    // Persist to localStorage
+    try { localStorage.setItem('selected_universes', JSON.stringify(selectedUniverses)) } catch {}
+    try { localStorage.setItem('universe_rotation_index', String(currentRotationIndex)) } catch {}
+  }, [selectedUniverses, currentRotationIndex])
+  
+  // Reset rotation index if out of bounds
+  useEffect(() => {
+    if (selectedUniverses.length === 0) {
+      setCurrentRotationIndex(0)
+    } else if (currentRotationIndex >= selectedUniverses.length) {
+      setCurrentRotationIndex(0)
+    }
+  }, [selectedUniverses, currentRotationIndex])
   const [forceCandidates, setForceCandidates] = useState<boolean>(true);
 
   // Hot trading state
@@ -193,6 +223,7 @@ export const App: React.FC = () => {
   const [aiEntryBodies, setAiEntryBodies] = useState<Array<{ symbol: string; body: string; sentAt: string }>>([])
   const [entryStrategies, setEntryStrategies] = useState<EntryStrategyData[]>([])
   const [riskBySymbol, setRiskBySymbol] = useState<Record<string, { decision: 'enter'|'skip'; risk_profile: 'conservative'|'aggressive'|null; prob_success: number|null; conservative_score?: number|null; aggressive_score?: number|null; reasons?: string[] }>>({})
+  const riskBySymbolRef = useRef<Record<string, any>>({})
   const [entryControlsStatus, setEntryControlsStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [coinControls, setCoinControls] = useState<CoinControl[]>([])
   const [currentPrices, setCurrentPrices] = useState<Record<string, number>>({})
@@ -211,8 +242,8 @@ export const App: React.FC = () => {
   const [defaultSide, setDefaultSide] = useState<'LONG'|'SHORT'>(() => {
     try {
       const v = String(localStorage.getItem('ui_side') || '').toUpperCase()
-      return (v === 'SHORT' || v === 'LONG') ? (v as any) : 'LONG'
-    } catch { return 'LONG' }
+      return (v === 'SHORT' || v === 'LONG') ? (v as any) : 'SHORT'
+    } catch { return 'SHORT' }
   })
   const [defaultTPLevel, setDefaultTPLevel] = useState<'tp1'|'tp2'|'tp3'>(() => {
     try {
@@ -238,7 +269,7 @@ export const App: React.FC = () => {
     conservativeBuffer: 0,
     aggressiveBuffer: 0,
     maxPerCoin: 500,
-    maxCoins: 7,  // Zvýšeno z 5 na 7 pro zpracování všech hot picks
+    maxCoins: 40,  // Zvýšeno na 40 pro práci s velkým SHORT univerzem (70 kandidátů)
     defaultStrategy: 'conservative',
     defaultTPLevel: 'tp2',
     defaultLeverage: 15,
@@ -420,11 +451,17 @@ export const App: React.FC = () => {
   
   const columns = 3
   const displayCoins = useMemo(() => {
-    const list = Array.isArray(coinsSource) ? [...coinsSource] : []
-    const base = (sym: string) => {
-      try { return sym.endsWith('USDT') ? sym.slice(0, -4) : sym } catch { return sym }
-    }
-    list.sort((a: any, b: any) => String(base(a?.symbol || '')).localeCompare(String(base(b?.symbol || ''))))
+    // Alt universe = přesně RAW coiny z Copy RAW (vstup do Hot Screeneru)
+    // Trvale vyloučit BTC/ETH z výpisu
+    const list = Array.isArray(coinsSource) && coinsSource.length > 0
+      ? coinsSource
+          .map((c: any) => ({ symbol: String(c?.symbol || '') }))
+          .filter((u: any) => Boolean(u.symbol))
+          .filter((u: any) => {
+            const s = u.symbol.toUpperCase()
+            return s !== 'BTCUSDT' && s !== 'ETHUSDT'
+          })
+      : []
     const rows = Math.ceil(list.length / columns)
     const ordered: any[] = []
     for (let r = 0; r < rows; r++) {
@@ -478,7 +515,11 @@ export const App: React.FC = () => {
 
       // removed: local fetchWithRetry (using module-level helper)
 
-      const snapUrl = `/api/snapshot?topN=50`
+      const currentStrategy = selectedUniverses[currentRotationIndex] || 'losers'
+      const snapUrl = currentStrategy === 'overheat'
+        ? `/api/snapshot_overheat?topN=70&fresh=1`
+        : `/api/snapshot?universe=${currentStrategy}&topN=70`
+      console.error(`[SNAPSHOT_API_CALL] universeStrategy=${currentStrategy}, url=${snapUrl}`)
       const snap = await fetchJsonWithTimeout<MarketRawSnapshot>(snapUrl, { timeoutMs: 300000 }) // 5 minut pro snapshot
       if (!snap.ok) {
         if (snap.json) { setErrorPayload(snap.json); throw new Error((snap.json as any)?.error || `HTTP ${snap.status}`) }
@@ -519,20 +560,30 @@ export const App: React.FC = () => {
       // Candidates preview + canComputeSimPreview flag
       try {
         const sCfg: any = (await import('../../config/signals.json')).default || (signalsCfg as any)
-        const allowPreview = dec.flag === 'NO-TRADE' ? Boolean(sCfg.preview_when_no_trade && forceCandidates) : false
+        // Show candidate preview in NO-TRADE by default unless explicitly turned off in config
+        const allowPreview = dec.flag === 'NO-TRADE' ? ((sCfg.preview_when_no_trade !== false) && forceCandidates) : false
         const candLimit = allowPreview ? (sCfg.preview_limit ?? 5) : (sCfg.max_setups ?? 3)
         const execMode = (() => { try { return localStorage.getItem('execution_mode') === '1' } catch { return false } })()
         // New rule: allow sim preview only for NO-TRADE + success_no_picks + execution_mode=false
         const canComputeSimPreview = (dec.flag === 'NO-TRADE' && finalPickerStatus === 'success_no_picks' && !execMode)
         const candList = selectCandidates(feats, data, {
           decisionFlag: dec.flag as any,
-          allowWhenNoTrade: allowPreview,
-          limit: Math.max(1, Math.min(candLimit, 12)),
+          allowWhenNoTrade: Boolean((sCfg as any)?.allowWhenNoTrade === true) || allowPreview,
+          limit: 50,  // FIXED: přímý limit 50 pro plný downtrend pool
           cfg: { atr_pct_min: sCfg.atr_pct_min, atr_pct_max: sCfg.atr_pct_max, min_liquidity_usdt: sCfg.min_liquidity_usdt },
           canComputeSimPreview,
-          finalPickerStatus
+          finalPickerStatus,
+          universeStrategy: currentStrategy  // Předáme universe strategy do candidate selectoru
         } as any)
         setCandidates(candList)
+        // Pokud je strategie overheat, omez alt universe jen na vybrané kandidáty
+        if (currentStrategy === 'overheat' && snap?.json?.universe) {
+          try {
+            const candSyms = new Set(candList.map(c => c.symbol))
+            const filtered = (snap.json as any).universe.filter((u: any) => candSyms.has(u.symbol))
+            setRawCoins(filtered)
+          } catch {}
+        }
       } catch {}
 
       // Final Picker strict no-fallback
@@ -631,8 +682,9 @@ export const App: React.FC = () => {
             const rp = dec.flag === 'OK' ? 0.5 : dec.flag === 'CAUTION' ? 0.25 : 0
             const bad = picks.find((p:any) => {
               const side = p.side
-              const okOrder = side === 'LONG'
-                ? (p.sl < p.entry && p.entry < p.tp1 && p.tp1 <= p.tp2)
+              // SHORT system - validate SHORT price order
+              const okOrder = side === 'SHORT'
+                ? (p.tp1 <= p.tp2 && p.tp2 < p.entry && p.entry < p.sl)
                 : (p.tp1 <= p.tp2 && p.tp2 < p.entry && p.entry < p.sl)
               const okRisk = Math.abs((p.risk_pct ?? rp) - rp) < 1e-6
               const okLev = (p.leverage_hint ?? 1) <= maxLev
@@ -689,27 +741,9 @@ export const App: React.FC = () => {
 
   const onExportFeatures = () => { if (features) downloadJson(features, 'features') };
 
-  // Safe clipboard write: requires focused document in modern browsers
+  // Use centralized clipboard util everywhere
   const writeClipboardSafely = async (text: string, { requireFocusForAuto = true }: { requireFocusForAuto?: boolean } = {}) => {
-    try {
-      const hasFocus = (() => { try { return typeof document !== 'undefined' && typeof document.hasFocus === 'function' ? document.hasFocus() : true } catch { return true } })()
-      const isVisible = (() => { try { return typeof document !== 'undefined' ? (document.visibilityState === 'visible') : true } catch { return true } })()
-      if ((!hasFocus || !isVisible) && requireFocusForAuto) {
-        try { window.focus() } catch {}
-        await new Promise(res => setTimeout(res, 120))
-        const focusedNow = (() => { try { return typeof document !== 'undefined' && typeof document.hasFocus === 'function' ? document.hasFocus() : true } catch { return true } })()
-        const visibleNow = (() => { try { return typeof document !== 'undefined' ? (document.visibilityState === 'visible') : true } catch { return true } })()
-        if (!(focusedNow && visibleNow)) {
-          const err = new Error('document_not_focused') as any
-          err.code = 'document_not_focused'
-          throw err
-        }
-      }
-      await navigator.clipboard.writeText(text)
-    } catch (e: any) {
-      if (String(e?.code || e?.message || '').includes('document_not_focused')) throw e
-      throw new Error(e?.message || 'write failed')
-    }
+    return writeClipboard(text, { requireFocusForAuto })
   }
 
   const copyCoin = async (symbol: string) => {
@@ -755,11 +789,26 @@ export const App: React.FC = () => {
   }
 
   const copyRawAll = async () => {
+    // Validace: v manuálním režimu může být pouze 1 checkbox zaškrtnutý
+    const isAutoMode = (() => {
+      try { return localStorage.getItem('auto_copy_enabled') === '1' } catch { return false }
+    })()
+    if (!isAutoMode && selectedUniverses.length > 1) {
+      setError('Pro Copy RAW v manuálním režimu může být aktivní pouze 1 strategie. Pro více strategií zapněte Auto Copy RAW.')
+      return
+    }
+    if (selectedUniverses.length === 0) {
+      setError('Vyberte alespoň jednu strategii')
+      return
+    }
+    
     setRawLoading(true)
     // Clear previous UI error state before fresh fetch
     setError(null)
     try {
-      const q = `topN=50`
+      const currentStrategy = selectedUniverses[currentRotationIndex] || 'losers'
+      const uni = encodeURIComponent(currentStrategy)
+      const q = `universe=${uni}&topN=70&side=short`
       const res = await fetchWithRetry(`/api/metrics?${q}`)
       if (!res.ok) {
         setError(`Server error: HTTP ${res.status}`)
@@ -843,6 +892,17 @@ export const App: React.FC = () => {
 
       // Auto-trigger hot screener (pokračuj i když clipboard selže)
       await runHotScreener(coins)
+      
+      // Rotation logic: move to next selected strategy (for auto mode)
+      if (selectedUniverses.length > 1) {
+        const nextIndex = (currentRotationIndex + 1) % selectedUniverses.length
+        setCurrentRotationIndex(nextIndex)
+        console.log('[UNIVERSE_ROTATION]', { 
+          from: selectedUniverses[currentRotationIndex], 
+          to: selectedUniverses[nextIndex],
+          index: nextIndex 
+        })
+      }
     } catch (e: any) {
       setError(`Network error: ${e?.message || 'request failed'}`)
     } finally { 
@@ -885,9 +945,34 @@ export const App: React.FC = () => {
     setSelectedHotSymbols([])
     
     try {
+      const currentStrategy = selectedUniverses[currentRotationIndex] || 'losers'
+      
+      // FRESHNESS VALIDATION: Check if coins data is recent (< 60s old)
+      if (Array.isArray(coins) && coins.length > 0) {
+        const firstCoin = coins[0]
+        if (firstCoin && firstCoin.timestamp) {
+          const now = Date.now()
+          const coinTime = new Date(firstCoin.timestamp).getTime()
+          const ageSeconds = (now - coinTime) / 1000
+          
+          console.info('[HOT_SCREENER_FRONTEND_FRESHNESS]', {
+            age_seconds: ageSeconds.toFixed(1),
+            coins_count: coins.length,
+            strategy: currentStrategy
+          })
+          
+          if (ageSeconds > 60) {
+            console.warn('[HOT_SCREENER_FRONTEND_STALE_DATA]', {
+              age_seconds: ageSeconds.toFixed(1),
+              recommendation: 'Consider refreshing data before calling GPT'
+            })
+          }
+        }
+      }
+      
       const input = {
         coins,
-        strategy: universeStrategy
+        strategy: currentStrategy
       }
 
       const hsBody = JSON.stringify(input)
@@ -940,6 +1025,10 @@ export const App: React.FC = () => {
         .filter((pick: any) => isSuperHotRating(pick.rating))
         .map((pick: any) => String(pick.symbol || ''))
         .filter(Boolean)
+        .filter((sym: string) => {
+          const s = String(sym || '').toUpperCase()
+          return s !== 'BTCUSDT' && s !== 'ETHUSDT'
+        })
 
       const normalize = (s: string): string => {
         try { return String(s || '').toUpperCase().replace('/', '') } catch { return s }
@@ -1049,6 +1138,7 @@ export const App: React.FC = () => {
       const payloadsToCopy: Array<{ symbol: string; asset_data: any }> = []
       const priceMap: Record<string, number> = {}
       const failed: string[] = []
+      const assetDataBySymbol: Record<string, any> = {}  // Local cache for Risk Manager
       
       const symbols = [...baseList]
       // Stabilizace: nižší paralelismus (omezíme front-end concurrency)
@@ -1067,7 +1157,8 @@ export const App: React.FC = () => {
             if (!asset) { failed.push(current); continue }
             payloadsToCopy.push({ symbol: current, asset_data: asset })
             try { const p = Number(asset?.price); if (Number.isFinite(p) && p > 0) priceMap[current] = p } catch {}
-            // Propaguj order_book do entry payloadu (UI beze změn výstupu)
+            // Store asset_data both in state and local cache for immediate Risk Manager access
+            assetDataBySymbol[current] = asset
             setEntryInputsBySymbol(prev => ({ ...prev, [current]: { symbol: current, asset_data: asset } }))
 
             const controller = new AbortController()
@@ -1140,12 +1231,31 @@ export const App: React.FC = () => {
       setEntryStrategies(strategies)
       // Risk Manager per symbol (after strategies computed)
       let newRiskLocal: Record<string, { decision: 'enter'|'skip'; risk_profile: 'conservative'|'aggressive'|null; prob_success: number|null; conservative_score?: number|null; aggressive_score?: number|null; reasons?: string[] }> = {}
+      console.log('[RISK_MANAGER_START]', { strategiesCount: strategies.length, strategies })
       try {
         newRiskLocal = {}
         for (const s of strategies) {
           const cons: any = (s as any).conservative || null
+          const aggr: any = (s as any).aggressive || null
           const isPlan = (p: any) => p && typeof p.entry === 'number' && typeof p.sl === 'number'
-          if (!isPlan(cons)) continue
+          
+          console.log('[RISK_MANAGER_VALIDATE_PLAN]', { 
+            symbol: s.symbol, 
+            cons, 
+            aggr, 
+            consIsValid: isPlan(cons), 
+            aggrIsValid: isPlan(aggr) 
+          })
+          
+          // Risk Manager requires at least one valid plan
+          if (!isPlan(cons) && !isPlan(aggr)) {
+            console.warn('[RISK_MANAGER_SKIP]', { symbol: s.symbol, reason: 'no_valid_plans' })
+            continue
+          }
+          
+          // Get asset_data from local cache (immediate access, not from async state)
+          const assetData = assetDataBySymbol[s.symbol] || null
+          
           const toTp = (p: any) => {
             const tps: Array<{ tag: 'tp1'|'tp2'|'tp3'; price: number; allocation_pct: number }> = []
             const tp1 = Number(p?.tp1)
@@ -1171,14 +1281,23 @@ export const App: React.FC = () => {
             }
             return tps
           }
+          
+          // Build candidates array with BOTH plans (if available)
+          const candidates: any[] = []
+          if (isPlan(cons)) {
+            candidates.push({ style: 'conservative', entry: cons.entry, sl: cons.sl, tp_levels: toTp(cons), reasoning: cons.reasoning || '' })
+          }
+          if (isPlan(aggr)) {
+            candidates.push({ style: 'aggressive', entry: aggr.entry, sl: aggr.sl, tp_levels: toTp(aggr), reasoning: aggr.reasoning || '' })
+          }
+          
           const payload: any = {
             symbol: s.symbol,
             posture: (decision?.flag as any) || 'OK',
-            candidates: [
-              { style: 'conservative', entry: cons.entry, sl: cons.sl, tp_levels: toTp(cons), reasoning: cons.reasoning || '' }
-            ]
+            candidates,
+            asset_data: assetData  // Include full market context (ATR, EMA, RSI, VWAP, support/resistance, liquidity)
           }
-          console.info('[ENTRY_STRATEGY_AGGRESSIVE_SKIPPED] reason:"temporarily disabled"', { context: 'ui_pipeline', symbol: s.symbol })
+          console.log('[RISK_MANAGER_PAYLOAD]', { symbol: s.symbol, candidatesCount: candidates.length, hasAssetData: !!assetData, payload })
           try {
             console.log('[RISK_MANAGER_REQUEST]', { symbol: s.symbol, payload })
             const r = await fetchWithRetry('/api/entry_risk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
@@ -1205,7 +1324,9 @@ export const App: React.FC = () => {
         }
         if (Object.keys(newRiskLocal).length) {
           console.log('[RISK_MANAGER_FINAL]', { totalRisks: Object.keys(newRiskLocal).length, data: newRiskLocal })
-          setRiskBySymbol(prev => ({ ...prev, ...newRiskLocal }))
+          const merged = { ...riskBySymbolRef.current, ...newRiskLocal }
+          riskBySymbolRef.current = merged
+          setRiskBySymbol(merged)
         }
       } catch (e) {
         console.error('[RISK_MANAGER_MAIN_ERROR]', e)
@@ -1302,29 +1423,78 @@ export const App: React.FC = () => {
   }, [defaultSide, placingOrders])
 
   const prepareOrders = async () => {
+    console.log('[PREPARE_ORDERS_START]', { 
+      coinControlsLength: coinControls.length, 
+      riskBySymbolKeys: Object.keys(riskBySymbolRef.current),
+      riskData: riskBySymbolRef.current
+    })
     try {
       setPlacingOrders(true)
       setError(null)
       const includedControls = coinControls.filter(c => c.include)
+      console.log('[PREPARE_ORDERS_INCLUDED]', { 
+        includedCount: includedControls.length, 
+        symbols: includedControls.map(c => c.symbol) 
+      })
       // Risk gate: povol pouze GO (decision==='enter'); NO-GO nikdy neposílej
+      // Debug: uložit riskBySymbol do global scope
+      // CRITICAL FIX: Use ref instead of state to get latest risk decisions (state update is async!)
+      const currentRisk = riskBySymbolRef.current;
+      (window as any).__risk_by_symbol_debug = currentRisk;
+      
       const goControls = includedControls.filter(c => {
-        try { return (riskBySymbol as any)?.[c.symbol]?.decision === 'enter' } catch { return false }
+        const decision = currentRisk?.[c.symbol]?.decision;
+        console.log(`[RISK_CHECK] ${c.symbol}: decision="${decision}", isEnter=${decision === 'enter'}`);
+        try { return decision === 'enter' } catch { return false }
       })
       const noGoControls = includedControls.filter(c => {
-        try { return (riskBySymbol as any)?.[c.symbol]?.decision === 'skip' } catch { return false }
+        try { return currentRisk?.[c.symbol]?.decision === 'skip' } catch { return false }
       })
       console.log('[RISK_GATE]', {
         selected: includedControls.map(c => c.symbol),
         go: goControls.map(c => c.symbol),
-        nogo: noGoControls.map(c => c.symbol)
+        nogo: noGoControls.map(c => c.symbol),
+        riskBySymbol: currentRisk,
+        detailedCheck: includedControls.map(c => ({
+          symbol: c.symbol,
+          riskDecision: currentRisk?.[c.symbol]?.decision,
+          willSend: currentRisk?.[c.symbol]?.decision === 'enter'
+        }))
       })
+      console.warn('[RISK_GATE_GO_COUNT]', { goCount: goControls.length, totalSelected: includedControls.length })
+      
+      // CRITICAL DEBUG ALERT
+      const debugMsg = `
+🔍 RISK GATE DEBUG:
+━━━━━━━━━━━━━━━━━━
+Selected: ${includedControls.length} coins
+GO (enter): ${goControls.length} coins
+NO-GO (skip): ${noGoControls.length} coins
+
+Risk Data:
+${includedControls.map(c => {
+  const dec = currentRisk?.[c.symbol]?.decision;
+  return `${c.symbol}: ${dec || 'MISSING'}`;
+}).join('\n')}
+
+${goControls.length === 0 ? '❌ NO COINS TO SEND!' : '✅ Will send ' + goControls.length + ' orders'}
+      `.trim();
+      
+      console.log(debugMsg);
+      
       if (noGoControls.length > 0) {
         console.warn('[NO_GO_SKIPPED]', noGoControls.map(c => c.symbol))
       }
       if (goControls.length === 0) {
         setPlacingOrders(false)
+        alert(debugMsg + '\n\n⚠️ Žádné mince nemají GO rozhodnutí!\nKontroluj Risk Manager.');
         setError('All selected coins are NO-GO or missing risk decision')
         return
+      }
+      
+      // Show success alert
+      if (goControls.length > 0 && goControls.length < includedControls.length) {
+        alert(debugMsg + '\n\n⚠️ Některé mince byly vynechány (NO-GO)');
       }
       if (includedControls.length === 0) { setError('No coins selected'); return }
       // Pre-validate against MARK price (fail-fast: 5s timeout; server vynutí MARK guard tak jako tak)
@@ -1390,30 +1560,44 @@ export const App: React.FC = () => {
         return ok
       })()
 
-      const mapped = controlsWithPlan.map(c => {
-        const plan = findPlan(c.symbol, c.strategy) as any
-        const entry = Number(plan.entry)
-        const sl = Number(plan.sl)
-        const tpKey = c.tpLevel as 'tp1' | 'tp2' | 'tp3'
-        const tpValRaw = (plan as any)[tpKey]
-        const tpVal = Number(tpValRaw)
-        console.log('[UI_ORDER_MAP]', { symbol: c.symbol, strategy: c.strategy, tpLevel: c.tpLevel, plan: { entry, sl, tp: tpVal } })
-        console.log('[UI_PAYLOAD_VS_DISPLAY]', JSON.stringify({ symbol: c.symbol, payload: { entry, sl, tp: tpVal }, note: 'Check if this matches UI display' }, null, 2))
+      console.log('[MAP_START]', { controlsWithPlanCount: controlsWithPlan.length, symbols: controlsWithPlan.map(c => c.symbol) })
+      const mapped = controlsWithPlan.map((c, idx) => {
+        try {
+          console.log('[MAP_ITEM_START]', { index: idx, symbol: c.symbol, total: controlsWithPlan.length })
+          const plan = findPlan(c.symbol, c.strategy) as any
+          const entry = Number(plan.entry)
+          const sl = Number(plan.sl)
+          const tpKey = c.tpLevel as 'tp1' | 'tp2' | 'tp3'
+          const tpValRaw = (plan as any)[tpKey]
+          const tpVal = Number(tpValRaw)
+          console.log('[UI_ORDER_MAP]', { symbol: c.symbol, strategy: c.strategy, tpLevel: c.tpLevel, plan: { entry, sl, tp: tpVal } })
+          console.log('[UI_PAYLOAD_VS_DISPLAY]', JSON.stringify({ symbol: c.symbol, payload: { entry, sl, tp: tpVal }, note: 'Check if this matches UI display' }, null, 2))
 
-        return {
-          symbol: c.symbol,
-          side: (c.side || 'LONG') as any,
-          strategy: c.strategy,
-          tpLevel: c.tpLevel,
-          orderType: c.orderType || (c.strategy === 'conservative' ? 'limit' : 'stop_limit'),
-          amount: c.amount,
-          leverage: c.leverage,
-          risk_label: String((plan as any)?.risk || ''),
-          entry,
-          sl,
-          tp: tpVal
+          const result = {
+            symbol: c.symbol,
+            side: (() => {
+              if (!c.side) throw new Error(`Missing side for ${c.symbol}`)
+              return c.side as any
+            })(),
+            strategy: c.strategy,
+            tpLevel: c.tpLevel,
+            orderType: c.orderType || (c.strategy === 'conservative' ? 'limit' : 'stop_limit'),
+            amount: c.amount,
+            leverage: c.leverage,
+            risk_label: String((plan as any)?.risk || ''),
+            entry,
+            sl,
+            tp: tpVal,
+            universe: c.strategy  // Přidáno: sledování universe zdroje
+          }
+          console.log('[MAP_ITEM_SUCCESS]', { index: idx, symbol: c.symbol })
+          return result
+        } catch (e: any) {
+          console.error('[MAP_ITEM_ERROR]', { index: idx, symbol: c.symbol, error: e.message, stack: e.stack })
+          throw e
         }
       })
+      console.log('[MAP_COMPLETE]', { mappedCount: mapped.length })
 
       // Validate numeric fields; drop invalid symbols but continue with the rest
       {
@@ -1471,27 +1655,34 @@ export const App: React.FC = () => {
       const uniqMap = new Map<string, any>()
       for (const o of mapped) uniqMap.set(o.symbol, o)
       let orders = Array.from(uniqMap.values())
+      console.log('[MARK_VALIDATION_START]', { ordersCount: orders.length, symbols: orders.map(o => o.symbol) })
       // MARK guards (client-side): pokračuj s validními, chybné vypiš
       const invalid: string[] = []
       const invalidSymbols = new Set<string>()
       for (const o of orders) {
+        console.log('[GET_MARK_START]', { symbol: o.symbol })
         const mark = await getMark(o.symbol)
+        console.log('[GET_MARK_RESULT]', { symbol: o.symbol, mark })
         if (!Number.isFinite(mark as any)) continue
-        const sideLong = (o.side || 'LONG') === 'LONG'
-        if (sideLong) {
-          if (o.tp && !(o.tp > (mark as number))) { invalid.push(`${o.symbol}: TP ${o.tp} ≤ MARK ${(mark as number).toFixed(6)}`); invalidSymbols.add(o.symbol) }
-          if (o.sl && !(o.sl < (mark as number))) { invalid.push(`${o.symbol}: SL ${o.sl} ≥ MARK ${(mark as number).toFixed(6)}`); invalidSymbols.add(o.symbol) }
+        if (!o.side) throw new Error(`Missing side for ${o.symbol}`)
+        // SHORT system - validate SHORT prices
+        const sideShort = o.side === 'SHORT'
+        if (sideShort) {
+          if (o.tp && !(o.tp < (mark as number))) { invalid.push(`${o.symbol}: TP ${o.tp} ≥ MARK ${(mark as number).toFixed(6)}`); invalidSymbols.add(o.symbol) }
+          if (o.sl && !(o.sl > (mark as number))) { invalid.push(`${o.symbol}: SL ${o.sl} ≤ MARK ${(mark as number).toFixed(6)}`); invalidSymbols.add(o.symbol) }
         } else {
           if (o.tp && !(o.tp < (mark as number))) { invalid.push(`${o.symbol}: TP ${o.tp} ≥ MARK ${(mark as number).toFixed(6)}`); invalidSymbols.add(o.symbol) }
           if (o.sl && !(o.sl > (mark as number))) { invalid.push(`${o.symbol}: SL ${o.sl} ≤ MARK ${(mark as number).toFixed(6)}`); invalidSymbols.add(o.symbol) }
         }
       }
+      console.log('[MARK_VALIDATION_DONE]', { invalidCount: invalid.length, validCount: orders.length - invalidSymbols.size })
       if (invalid.length) {
         // Only warn; do NOT filter out orders. Server enforces MARK guards strictly.
         setError(`Upozornění (MARK guard klient):\n${invalid.join('\n')}\nObjednávky odeslány – server zvaliduje přesně.`)
       }
       if (orders.length === 0) return
-
+      
+      console.log('[ROUTING_DECISION]', { useTemporalEntry, useAutoCopy, ordersCount: orders.length })
       if (useTemporalEntry) {
         if (useAutoCopy) {
           // Guard: if Auto Copy already running (known ID or discoverable), do NOT start again
@@ -1649,17 +1840,26 @@ export const App: React.FC = () => {
         onChangeDefaultAmount={(n)=>setDefaultAmount(Math.max(1, Math.floor(n || 0)))}
         defaultLeverage={defaultLeverage}
         onChangeDefaultLeverage={(n)=>setDefaultLeverage(Math.max(1, Math.floor(n || 0)))}
-        universeStrategy={universeStrategy}
-        onChangeUniverse={(u)=>setUniverseStrategy(u)}
+        selectedUniverses={selectedUniverses}
+        onChangeSelectedUniverses={(arr)=>setSelectedUniverses(arr)}
+        currentStrategy={selectedUniverses[currentRotationIndex] || 'losers'}
         onCopyRawAll={copyRawAll}
         rawLoading={rawLoading}
         rawCopied={rawCopied}
         count={(displayCoins as any[]).length}
         onToggleAiPayloads={() => setAiShowPanel(v => !v)}
         onTogglePrompts={() => setPromptsOpen(v => !v)}
+        onToggleAiOverview={() => { window.open('/#/dev/ai-overview', '_blank') }}
         onAutoCopyRawToggle={(enabled)=>{
           // Toggle pouze připojí/odpojí – žádné mock spouštění
           try {
+            if (enabled) {
+              // Validate: at least 1 checkbox must be selected
+              if (selectedUniverses.length === 0) {
+                setError('Musíte vybrat alespoň jednu strategii pro auto režim')
+                return
+              }
+            }
             if (!enabled) {
               if (autoCopyId) {
                 fetch('/api/temporal/auto_copy/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: autoCopyId, cmd: 'cancel' }) })
@@ -1801,24 +2001,10 @@ export const App: React.FC = () => {
           </pre>
         </details>
       )}
-      {Array.isArray(displayCoins) && (displayCoins as any[]).length > 0 && (
+      {Array.isArray(coinsSource) && (coinsSource as any[]).length > 0 && (
         <div className="card" style={{ marginTop: 12, padding: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <strong>Alt universe</strong>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 12, opacity: .8 }}>Universe:</span>
-              <button
-                className={`btn toggle${universeStrategy === 'volume' ? ' active' : ''}`}
-                onClick={() => setUniverseStrategy('volume')}
-                aria-pressed={universeStrategy === 'volume'}
-              >Volume</button>
-              <button
-              className={`btn toggle disabled`}
-              onClick={() => {}}
-              aria-pressed={false}
-              disabled
-            >Gainers 24h (disabled)</button>
-            </div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <button className="btn" style={{ border: '2px solid #333' }} onClick={copyRawAll} aria-label="Copy RAW dataset (all alts)" title={rawCopied ? 'Zkopírováno' : 'Copy RAW dataset'} disabled={rawLoading}>
                 {rawLoading ? 'Stahuji…' : (rawCopied ? 'RAW zkopírováno ✓' : 'Copy RAW (vše)')}
@@ -1863,7 +2049,7 @@ export const App: React.FC = () => {
             <div className="error" style={{ marginTop: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <strong>Final Picker selhal (STRICT NO-FALLBACK)</strong>
-                <button className="btn" onClick={() => { try { const raw = localStorage.getItem('m4FinalPicker'); if (raw) navigator.clipboard.writeText(raw) } catch {} }}>Copy details</button>
+                <button className="btn" onClick={() => { try { const raw = localStorage.getItem('m4FinalPicker'); if (raw) writeClipboard(raw) } catch {} }}>Copy details</button>
               </div>
               <div style={{ fontSize: 12, opacity: .9, marginTop: 4 }}>Code: {finalPickerMeta?.error_code ?? 'unknown'}</div>
             </div>
@@ -1911,13 +2097,17 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* Preview only table when picks are not ready or execution mode is off */}
-      {candidates.length > 0 && (finalPickerStatus !== 'success' || !(localStorage.getItem('execution_mode') === '1')) ? (
+      {/* Always show candidates table (Alt universe preview) or clear empty-state */}
+      {candidates.length > 0 ? (
         <CandidatesPreview list={candidates as any} finalPickerStatus={finalPickerStatus} executionMode={localStorage.getItem('execution_mode') === '1'} />
-      ) : null}
+      ) : (
+        <div className="card" style={{ marginTop: 8, fontSize: 12, opacity: .85 }}>
+          No candidates – Alt universe pool is empty for current filters/posture.
+        </div>
+      )}
 
-      {/* Final picks table (hidden) */}
-      {false ? (
+      {/* Final picks table */}
+      {(finalPickerStatus !== 'idle') ? (
         <>
           <div style={{ height: 8 }} />
           <SetupsTable

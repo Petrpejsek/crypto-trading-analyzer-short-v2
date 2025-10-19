@@ -69,26 +69,79 @@ Startovní limity: `io-binance: 32`, `io-openai: 16–24`, `compute: 8–16`. Tu
 4) Rozdělit task queues, doladit concurrency/rate‑limits, přidat Signals/Queries.
 5) UI integrace (volitelné): ovládání přes Queries/Signals.
 
+### Cluster Isolation (SHORT vs LONG)
+
+**KRITICKÉ: Pro 100% izolaci SHORT a LONG instancí používáme ODDĚLENÉ Temporal clustery:**
+
+#### SHORT Cluster
+- **Port**: 7500 (NIKDY ne 7233/7234!)
+- **Database**: `runtime/temporal_short.db` (SQLite) nebo vlastní PostgreSQL
+- **Namespace**: `trader-short` (povinné)
+- **Queues**: `entry-short`, `io-openai-short`, `io-binance-short`
+- **Start**: `./temporal/start-short-cluster.sh`
+
+#### LONG Cluster (jiný projekt)
+- **Port**: 7600 (úplně jiný)
+- **Database**: vlastní `temporal_long.db`
+- **Namespace**: `trader-long`
+- **Queues**: `entry-long`, `io-openai-long`, `io-binance-long`
+
+#### Bezpečnostní politiky
+
+```bash
+# .env.local (SHORT instance)
+TEMPORAL_ADDRESS=127.0.0.1:7500
+TEMPORAL_NAMESPACE=trader-short
+FORBIDDEN_TEMPORAL_PORTS=7234,7600  # Zakázané porty (LONG instance)
+ALLOWED_TEMPORAL_HOSTS=127.0.0.1,localhost  # Optional whitelist
+```
+
+- `FORBIDDEN_TEMPORAL_PORTS`: CSV seznam portů, které instance **NIKDY** nesmí použít
+- `ALLOWED_TEMPORAL_HOSTS`: CSV seznam povolených hostů (optional)
+
+**Výhody oddělených clusterů:**
+- ✅ Nulová možnost křížení workflows
+- ✅ Oddělené databáze = žádné sdílení historie
+- ✅ Nezávislé restarty/upgrady
+- ✅ Jasná izolace i při fatální chybě v konfiguraci
+
 ### Env & Run
-- Povinné proměnné: `TEMPORAL_ADDRESS` (např. `localhost:7233` nebo cloud endpoint), `TASK_QUEUE` (např. `trader`).
-- Start workeru: `npm run dev:temporal:worker`.
-- Lokální paralelní běh backend + worker: `npm run dev:temporal`.
+
+**Povinné proměnné:**
+- `TEMPORAL_ADDRESS` (format: `HOST:PORT`, např. `127.0.0.1:7500`)
+- `TEMPORAL_NAMESPACE` (pro SHORT: `trader-short`, povinné)
+- `TASK_QUEUE` (pro SHORT: `entry-short`)
+- `TASK_QUEUE_OPENAI` (pro SHORT: `io-openai-short`)
+- `TASK_QUEUE_BINANCE` (pro SHORT: `io-binance-short`)
+- `FORBIDDEN_TEMPORAL_PORTS` (doporučené: `7234,7600`)
+
+**Start:**
+```bash
+# 1. Start SHORT Temporal cluster
+./temporal/start-short-cluster.sh
+
+# 2. Start worker a backend
+./dev.sh
+```
 
 ### PoC run – TradeLifecycleWorkflow
-1) Spusť worker: `TEMPORAL_ADDRESS=localhost:7233 TASK_QUEUE=trader npm run dev:temporal:worker`
-2) Spusť PoC workflow (v jiném shellu):
-   - Příklad LIMIT LONG:
-     `SYMBOL=BTCUSDT SIDE=LONG NOTIONAL_USD=50 LEVERAGE=5 ENTRY_TYPE=LIMIT ENTRY_PRICE=60000 SL=59000 TP=60500 TEMPORAL_ADDRESS=localhost:7233 TASK_QUEUE=trader npm run wf:start:trade`
-   - Příklad MARKET LONG:
-     `SYMBOL=BTCUSDT SIDE=LONG NOTIONAL_USD=50 LEVERAGE=5 ENTRY_TYPE=MARKET SL=1 TP=999999 TEMPORAL_ADDRESS=localhost:7233 TASK_QUEUE=trader npm run wf:start:trade`
+
+1) Spusť SHORT cluster: `./temporal/start-short-cluster.sh`
+2) Spusť worker: `TEMPORAL_ADDRESS=127.0.0.1:7500 TEMPORAL_NAMESPACE=trader-short TASK_QUEUE=entry-short npm run dev:temporal:worker`
+3) Spusť PoC workflow (v jiném shellu):
+   - Příklad LIMIT SHORT:
+     `SYMBOL=BTCUSDT SIDE=SHORT NOTIONAL_USD=50 LEVERAGE=5 ENTRY_TYPE=LIMIT ENTRY_PRICE=60000 SL=61000 TP=59500 TEMPORAL_ADDRESS=127.0.0.1:7500 TASK_QUEUE=entry-short npm run wf:start:trade`
+   - Příklad MARKET SHORT:
+     `SYMBOL=BTCUSDT SIDE=SHORT NOTIONAL_USD=50 LEVERAGE=5 ENTRY_TYPE=MARKET SL=999999 TP=1 TEMPORAL_ADDRESS=127.0.0.1:7500 TASK_QUEUE=entry-short npm run wf:start:trade`
 
 Workflow provede: align leverage → výpočet qty → ENTRY → krátké čekání → založení SL (CP + RO pokud existuje pozice) a TP MARKET → monitoring až do uzavření pozice. Žádné fallbacky, žádná cache tržních dat/pozic.
 
 ### StrategyUpdater – runOnce a 5m loop
+
 - Jednorázové spuštění (runOnce=true):
-  `TEMPORAL_ADDRESS=127.0.0.1:7233 TASK_QUEUE=trader SU_RUN_ONCE=true npm run wf:start:su`
+  `TEMPORAL_ADDRESS=127.0.0.1:7500 TEMPORAL_NAMESPACE=trader-short TASK_QUEUE=entry-short SU_RUN_ONCE=true npm run wf:start:su`
 - Periodický běh (durable 5 min smyčka): spusť bez `SU_RUN_ONCE`, worker udrží timers:
-  `TEMPORAL_ADDRESS=127.0.0.1:7233 TASK_QUEUE=trader SU_RUN_ONCE=false npm run wf:start:su`
+  `TEMPORAL_ADDRESS=127.0.0.1:7500 TEMPORAL_NAMESPACE=trader-short TASK_QUEUE=entry-short SU_RUN_ONCE=false npm run wf:start:su`
 
 ### Data Model (DDL)
 Viz `docs/project-overview/temporal-ddl.sql`.

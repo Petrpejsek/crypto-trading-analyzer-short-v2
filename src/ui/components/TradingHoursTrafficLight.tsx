@@ -36,7 +36,7 @@ export const TradingHoursTrafficLight: React.FC<Props> = ({ floating = false }) 
   }, [])
 
   const current = useMemo(() => currentPeriod(TRADING_PERIODS, nowTs), [nowTs])
-  const hourMap = useMemo(() => hourStatusMap(TRADING_PERIODS), [])
+  const hourMap = useMemo(() => hourStatusMap(TRADING_PERIODS, nowTs), [nowTs])
 
   const header = (() => {
     const p = current
@@ -68,6 +68,12 @@ export const TradingHoursTrafficLight: React.FC<Props> = ({ floating = false }) 
       = Array.from({ length: 24 }, (_, h) => ({ hour: h, p: hourMap[h], now: h === curHour }))
     return { items, curHour }
   }, [hourMap, nowTs])
+
+  const dayName = useMemo(() => {
+    const nowDate = new Date(nowTs)
+    const pragueDay = nowDate.toLocaleDateString('cs-CZ', { timeZone: 'Europe/Prague', weekday: 'long' })
+    return pragueDay.charAt(0).toUpperCase() + pragueDay.slice(1)
+  }, [nowTs])
 
   const dayProgressPct = useMemo(() => {
     const parts = pragueNow()
@@ -141,6 +147,9 @@ export const TradingHoursTrafficLight: React.FC<Props> = ({ floating = false }) 
         })()}
       </button>
       {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, opacity: .7, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{dayName}</span>
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span aria-hidden style={{ fontSize: 16 }}>{header.emoji}</span>
         <span style={{ fontWeight: 700, color: header.color }}>{current?.status || '—'}</span>

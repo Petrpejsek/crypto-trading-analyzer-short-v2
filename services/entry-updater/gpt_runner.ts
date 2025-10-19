@@ -42,7 +42,7 @@ export async function runEntryUpdater(input: EntryUpdaterInput): Promise<{
       timeout: 600000
     } as any)
 
-    const model = 'gpt-5'
+    const model = 'gpt-4o'
     const schema = makeSchema()
     const validate = ajv.compile(schema)
     const promptResult = readPrompt()
@@ -53,6 +53,7 @@ export async function runEntryUpdater(input: EntryUpdaterInput): Promise<{
         { role: 'system', content: promptResult.text },
         { role: 'user', content: JSON.stringify(input) }
       ],
+      temperature: 0.1,
       response_format: { type: 'json_schema', json_schema: { name: 'EntryUpdater', strict: true, schema } as any },
       max_completion_tokens: 8192
     }

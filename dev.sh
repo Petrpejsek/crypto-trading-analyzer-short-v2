@@ -5,6 +5,11 @@ set -euo pipefail
 # - Strict ports (no fallbacks): frontend :4302, backend :8888
 # - Health checks required; fail fast on errors
 # - Cleans runtime logs/PIDs
+#
+# CRITICAL: This script runs in DEVELOPMENT mode with live code reload via tsx.
+# For production deployment, code changes require rebuilding and restarting services.
+# Strategy Updater and other services only reflect code changes when running via dev.sh,
+# NOT when running via PM2 production mode (ecosystem.short.config.cjs).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -42,13 +47,48 @@ stop_ports() {
 
 # Removed: stop_banned_ports function to avoid killing other project's servers
 
+# Check for PM2 conflicts (production instances running)
+check_pm2_conflicts() {
+  if ! command -v pm2 >/dev/null 2>&1; then
+    return 0
+  fi
+  
+  local pm2_list=$(pm2 jlist 2>/dev/null || echo "[]")
+  local has_backend=$(echo "$pm2_list" | grep -c "trader-short-backend" || true)
+  local has_worker=$(echo "$pm2_list" | grep -c "trader-short-worker" || true)
+  
+  if [ "$has_backend" -gt 0 ] || [ "$has_worker" -gt 0 ]; then
+    echo ""
+    warn "⚠️  PM2 production instances detected!"
+    warn "   These will conflict with dev.sh (development mode)"
+    warn "   Found: backend=$has_backend, worker=$has_worker"
+    echo ""
+    warn "   Automatically stopping PM2 instances..."
+    stop_pm2_instances
+    echo ""
+  fi
+}
+
+# Stop and delete PM2 instances
+stop_pm2_instances() {
+  if ! command -v pm2 >/dev/null 2>&1; then
+    return 0
+  fi
+  
+  info "Stopping PM2 instances (trader-short-backend, trader-short-worker)"
+  pm2 stop trader-short-backend trader-short-worker 2>/dev/null || true
+  pm2 delete trader-short-backend trader-short-worker 2>/dev/null || true
+  sleep 1
+}
+
 stop_patterns() {
   info "Stopping dev processes by pattern (vite/tsx)"
   pkill -f "${SCRIPT_DIR}.*(vite|tsx|server/index.ts|npm run dev)" 2>/dev/null || true
 }
 
 stop_worker() {
-  info "Stopping Temporal worker"
+  info "Stopping Temporal worker (all instances)"
+  # Stop by PID file
   if [ -f "$RUNTIME_DIR/worker.pid" ]; then
     pid=$(cat "$RUNTIME_DIR/worker.pid" 2>/dev/null || true)
     if [ -n "${pid:-}" ] && ps -p "$pid" >/dev/null 2>&1; then
@@ -58,13 +98,29 @@ stop_worker() {
     fi
     rm -f "$RUNTIME_DIR/worker.pid"
   fi
-  pkill -f "$SCRIPT_DIR/temporal/worker.ts" 2>/dev/null || true
+  
+  # Aggressive cleanup - kill all worker processes for this project
+  pkill -9 -f "$SCRIPT_DIR/temporal/worker.ts" 2>/dev/null || true
+  pkill -9 -f "trader-short-worker" 2>/dev/null || true
+  
+  # Wait a bit to ensure processes are dead
+  sleep 0.5
 }
 
 clean_runtime() {
   info "Cleaning runtime logs and PIDs"
   mkdir -p "$RUNTIME_DIR"
   rm -f "$RUNTIME_DIR"/*.pid "$RUNTIME_DIR"/*log "$RUNTIME_DIR"/*.out "$RUNTIME_DIR"/*.err 2>/dev/null || true
+}
+
+clean_locks() {
+  info "Cleaning process locks"
+  npm run -s locks:clear 2>/dev/null || true
+}
+
+check_locks() {
+  info "Checking for existing process locks"
+  npm run -s locks:check 2>/dev/null || true
 }
 
 # Remove persisted state files that can be rehydrated and cause stale behavior
@@ -94,6 +150,43 @@ preflight_env() {
   [ -n "$TASK_QUEUE" ] || err "TASK_QUEUE missing in .env.local"
   [ -n "$TASK_QUEUE_OPENAI" ] || err "TASK_QUEUE_OPENAI missing in .env.local"
   [ -n "$TASK_QUEUE_BINANCE" ] || err "TASK_QUEUE_BINANCE missing in .env.local"
+  
+  # ========================================
+  # CRITICAL: STRICT BAN on port 7800 (LONG instance)
+  # SHORT instance MUST ALWAYS use port 7500
+  # ========================================
+  if echo "$TEMPORAL_ADDRESS" | grep -q ":7800"; then
+    echo ""
+    echo "🚨🚨🚨 FATAL ERROR 🚨🚨🚨"
+    echo ""
+    echo "❌ PORT 7800 IS STRICTLY FORBIDDEN!"
+    echo "   Port 7800 is reserved for LONG trading instance"
+    echo "   This is SHORT instance - MUST use port 7500"
+    echo ""
+    echo "   Current: TEMPORAL_ADDRESS=$TEMPORAL_ADDRESS"
+    echo "   Required: TEMPORAL_ADDRESS=127.0.0.1:7500"
+    echo ""
+    echo "🚨 Fix .env.local and try again!"
+    echo ""
+    exit 1
+  fi
+  
+  # Also ban other known LONG ports
+  if echo "$TEMPORAL_ADDRESS" | grep -qE ":7234|:7799|:7801"; then
+    echo ""
+    echo "🚨 FATAL: TEMPORAL_ADDRESS uses LONG instance port!"
+    echo "   SHORT must use port 7500 ONLY"
+    echo "   Current: $TEMPORAL_ADDRESS"
+    echo ""
+    exit 1
+  fi
+  
+  # CRITICAL: Enforce correct port 7500 for SHORT
+  if ! echo "$TEMPORAL_ADDRESS" | grep -q ":7500"; then
+    warn "⚠️  Expected TEMPORAL_ADDRESS to use port 7500 (SHORT)"
+    warn "   Current: $TEMPORAL_ADDRESS"
+  fi
+  
   export TEMPORAL_ADDRESS TASK_QUEUE
   export TASK_QUEUE_OPENAI TASK_QUEUE_BINANCE
   # Export OpenAI creds into environment for both backend and worker
@@ -108,7 +201,18 @@ preflight_temporal() {
   port="${TEMPORAL_ADDRESS##*:}"
   [ -n "$host" ] && [ -n "$port" ] || err "Invalid TEMPORAL_ADDRESS format. Expected host:port"
   if ! nc -z -w 1 "$host" "$port" >/dev/null 2>&1; then
-    err "Temporal server not reachable at $host:$port. Start it first (temporal server start-dev --headless --port $port)."
+    echo ""
+    echo "❌ Temporal server not reachable at $host:$port"
+    echo ""
+    echo "🚀 Start SHORT Temporal cluster first:"
+    echo "   ./temporal/start-short-cluster.sh"
+    echo ""
+    echo "   Or manually:"
+    echo "   temporal server start-dev --headless --port $port --namespace trader-short --db-filename ./runtime/temporal_short.db"
+    echo ""
+    echo "⚠️  NEVER use port 7234 - that's reserved for LONG instance!"
+    echo ""
+    exit 1
   fi
 }
 
@@ -166,9 +270,16 @@ wait_worker() {
   err "Worker startup failed"
 }
 
+clean_vite_cache() {
+  info "Cleaning Vite cache to prevent UI loading issues"
+  rm -rf "$SCRIPT_DIR/node_modules/.vite" 2>/dev/null || true
+}
+
 start_frontend() {
   info "Starting frontend (Vite) on :$FRONTEND_PORT"
   mkdir -p "$RUNTIME_DIR"
+  # Always clean Vite cache before start to prevent stale module issues
+  clean_vite_cache
   VITE_PROXY_TARGET="http://127.0.0.1:${BACKEND_PORT}" \
   nohup npm exec -s vite -- --port "$FRONTEND_PORT" > "$RUNTIME_DIR/frontend_dev.log" 2>&1 & echo $! > "$RUNTIME_DIR/frontend.pid"
 }
@@ -215,19 +326,39 @@ logs() {
 
 usage() {
   cat <<EOF
-Usage: ./dev.sh [start|stop|restart|restart:fresh|status|logs|clean:state]
+Usage: ./dev.sh [start|stop|restart|restart:fresh|status|logs|clean:state|locks:check]
 
 Commands:
-  start    Kill → clean → preflight → start backend+frontend+worker → verify
-  stop     Stop listeners and dev processes including worker; clean runtime
-  restart  stop then start (with preflight)
+  start          Kill → clean → preflight → start backend+frontend+worker → verify
+  stop           Stop listeners and dev processes including worker; clean runtime + locks
+  restart        stop then start (with preflight)
   restart:fresh  restart + purge runtime state JSON before start (no stale rehydrate)
-  status   Show listeners and runtime PIDs
-  logs     Tail recent logs for backend/frontend
+  status         Show listeners and runtime PIDs
+  logs           Tail recent logs for backend/frontend/worker
   clean:state    Purge runtime state JSON only (safe to run while stopped)
+  locks:check    Check process lock status
 
 Environment:
   FRONTEND_PORT (default $FRONTEND_PORT), BACKEND_PORT (default $BACKEND_PORT)
+  
+Process Lock System:
+  - Prevents duplicate instances (backend/worker) from running simultaneously
+  - Locks are automatically acquired on start and released on stop
+  - See docs/PROCESS_LOCK_SYSTEM.md for details
+
+PM2 Conflict Detection:
+  - Automatically detects and stops PM2 production instances before starting dev mode
+  - Prevents conflicts between PM2 (production) and dev.sh (development)
+  - PM2 instances (trader-short-backend/worker) will be stopped and deleted if found
+
+UI Cache Management:
+  - Vite cache is ALWAYS cleaned before frontend start to prevent loading issues
+  - This ensures fresh module resolution and prevents stale UI states
+  
+PORT 7800 STRICTLY BANNED:
+  - Port 7800 is RESERVED for LONG trading instance
+  - SHORT instance MUST use port 7500 for Temporal
+  - Any attempt to use 7800 will fail with fatal error
 EOF
 }
 
@@ -238,7 +369,9 @@ cmd="${1:-}"
 case "${cmd}" in
   start)
     guard_ports
-    stop_ports; stop_patterns; stop_worker; clean_runtime
+    check_pm2_conflicts
+    check_locks
+    stop_ports; stop_patterns; stop_worker; clean_runtime; clean_locks
     preflight_env; preflight_temporal
     start_backend; wait_backend
     start_frontend; wait_frontend
@@ -247,11 +380,14 @@ case "${cmd}" in
     status
     ;;
   stop)
-    stop_ports; stop_patterns; stop_worker; clean_runtime
+    stop_pm2_instances
+    stop_ports; stop_patterns; stop_worker; clean_runtime; clean_locks
     ;;
   restart|"")
     guard_ports
-    stop_ports; stop_patterns; stop_worker; clean_runtime
+    check_pm2_conflicts
+    check_locks
+    stop_ports; stop_patterns; stop_worker; clean_runtime; clean_locks
     preflight_env; preflight_temporal
     start_backend; wait_backend
     start_frontend; wait_frontend
@@ -261,7 +397,9 @@ case "${cmd}" in
     ;;
   restart:fresh)
     guard_ports
-    stop_ports; stop_patterns; stop_worker; clean_runtime; clean_runtime_state
+    check_pm2_conflicts
+    check_locks
+    stop_ports; stop_patterns; stop_worker; clean_runtime; clean_runtime_state; clean_locks
     preflight_env; preflight_temporal
     start_backend; wait_backend
     start_frontend; wait_frontend
@@ -277,6 +415,9 @@ case "${cmd}" in
     ;;
   clean:state)
     clean_runtime_state
+    ;;
+  locks:check)
+    check_locks
     ;;
   *)
     usage; exit 2

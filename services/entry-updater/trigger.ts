@@ -12,7 +12,7 @@ function isEntryUpdaterEnabled(): boolean {
   } catch { return true }
 }
 
-// Build fresh snapshot for one order (LIMIT BUY only)
+// Build fresh snapshot for one order (LIMIT SELL only for SHORT)
 async function buildInputForOrder(order: any): Promise<EntryUpdaterInput | null> {
   try {
     const symbol = String(order?.symbol || '')
@@ -20,7 +20,8 @@ async function buildInputForOrder(order: any): Promise<EntryUpdaterInput | null>
     const clientOrderId = String(order?.clientOrderId || '')
     const entryType = String(order?.type || '')
     const side = String(order?.side || '')
-    if (!symbol || side !== 'BUY' || entryType !== 'LIMIT') return null
+    // SHORT project: entry = SELL
+    if (!symbol || side !== 'SELL' || entryType !== 'LIMIT') return null
     if (order?.reduceOnly || order?.closePosition) return null
 
     const api = getBinanceAPI() as any
@@ -132,6 +133,12 @@ export async function processDueEntryUpdates(): Promise<void> {
           reschedule(rec.orderId)
           if (isAuditEnabled()) appendAudit({ symbol: rec.symbol, phase: 'no_op', orderId: rec.orderId, reason_code: out.reason_code })
         } else if (out.action === 'cancel') {
+          console.warn('[ENTRY_UPDATER_CANCEL_ORDER]', { 
+            symbol: rec.symbol, 
+            orderId: rec.orderId, 
+            reason_code: out.reason_code,
+            reasoning: (out as any)?.reasoning || 'N/A'
+          })
           try { await api.cancelOrder(rec.symbol, rec.orderId) } catch {}
           if (isAuditEnabled()) appendAudit({ symbol: rec.symbol, phase: 'cancel', orderId: rec.orderId, reason_code: out.reason_code })
           try { untrackEntryOrder(rec.orderId) } catch {}
@@ -142,7 +149,8 @@ export async function processDueEntryUpdates(): Promise<void> {
           const price = Number(out.new_plan.entry.price || 0)
           const qty = Number(order?.origQty || order?.origQuantity || order?.quantity || 0)
           const cid = `sv2_eu_${Date.now()}_${rec.symbol.toLowerCase()}`
-          const placed = await api.placeOrder({ symbol: rec.symbol, side: 'BUY', type: 'LIMIT', price, quantity: qty, timeInForce: 'GTC', newClientOrderId: cid })
+          // SHORT: entry = SELL (opening short position)
+          const placed = await api.placeOrder({ symbol: rec.symbol, side: 'SELL', type: 'LIMIT', price, quantity: qty, timeInForce: 'GTC', newClientOrderId: cid })
           markTouchedRecently(rec.orderId)
           try { untrackEntryOrder(rec.orderId) } catch {}
           try { const newId = Number((placed as any)?.orderId || 0); if (Number.isFinite(newId) && newId>0) trackEntryOrder({ symbol: rec.symbol, orderId: newId, clientOrderId: cid, entryPrice: price, sl: null, tpLevels: [] }) } catch {}

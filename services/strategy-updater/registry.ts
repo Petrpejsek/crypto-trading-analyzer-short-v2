@@ -21,8 +21,8 @@ export type StrategyUpdaterEntry = {
 const strategyUpdaterBySymbol: Record<string, StrategyUpdaterEntry> = {}
 const REGISTRY_DIR = path.resolve(process.cwd(), 'runtime')
 const REGISTRY_FILE = path.resolve(REGISTRY_DIR, 'strategy_updater.json')
-const UPDATE_DELAY_MS = 1 * 60 * 1000 // 1 minute between checks
-const INITIAL_DELAY_MS = 1 * 60 * 1000 // first run 1 minute after detection (can be overridden)
+const UPDATE_DELAY_MS = 3 * 60 * 1000 // 3 minutes between checks
+const INITIAL_DELAY_MS = 2 * 60 * 1000 // first run 2 minutes after detection (can be overridden)
 
 // Track orderIds created by Strategy Updater so UI can highlight them reliably
 const strategyUpdaterOrderIds = new Set<number>()
@@ -82,8 +82,10 @@ export function getRiskChosenPlan(symbol: string): RiskPlanRecord | null {
 function persistRegistry(): void {
   try {
     if (!fs.existsSync(REGISTRY_DIR)) fs.mkdirSync(REGISTRY_DIR, { recursive: true })
+    // CRITICAL FIX: Persist both 'waiting' AND 'processing' entries (not just 'waiting')
+    // Otherwise, entries in 'processing' state are lost on server restart
     const payload = Object.values(strategyUpdaterBySymbol)
-      .filter(entry => entry.status === 'waiting')
+      .filter(entry => entry.status === 'waiting' || entry.status === 'processing')
       .sort((a, b) => new Date(a.since).getTime() - new Date(b.since).getTime())
     
     fs.writeFileSync(REGISTRY_FILE, JSON.stringify({

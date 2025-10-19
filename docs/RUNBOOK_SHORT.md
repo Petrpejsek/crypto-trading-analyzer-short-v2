@@ -44,16 +44,53 @@ pm2 reload ecosystem.short.config.cjs
 
 RUNBOOK – SHORT instance
 
-Env checklist (required)
+## Temporal Cluster Isolation
+
+**KRITICKÉ: SHORT instance MUSÍ používat ODDĚLENÝ Temporal cluster!**
+
+### Spuštění SHORT Temporal clusteru
+
+```bash
+# Doporučený způsob (dedikovaný skript)
+./temporal/start-short-cluster.sh
+
+# Nebo manuálně
+temporal server start-dev \
+  --headless \
+  --port 7500 \
+  --db-filename ./runtime/temporal_short.db \
+  --namespace trader-short
+```
+
+⚠️ **NIKDY nepoužívat port 7234** - ten je rezervován pro LONG instance!
+
+### Bezpečnostní politiky
+
+Pro 100% ochranu před kontaminací LONG/SHORT doporučujeme nastavit:
+
+```bash
+# .env.local
+TEMPORAL_ADDRESS=127.0.0.1:7500
+TEMPORAL_NAMESPACE=trader-short
+FORBIDDEN_TEMPORAL_PORTS=7234,7600  # Zakázané porty (LONG instance)
+ALLOWED_TEMPORAL_HOSTS=127.0.0.1,localhost  # Povolené hosty (optional)
+```
+
+- `FORBIDDEN_TEMPORAL_PORTS`: CSV seznam portů, které SHORT **NIKDY** nesmí použít
+- `ALLOWED_TEMPORAL_HOSTS`: CSV seznam povolených hostů (optional whitelist)
+
+## Env checklist (required)
+
 - PM2_NAME=trader-short (procesy se jménem obsahujícím "short")
 - TRADE_SIDE=SHORT
 - PORT=3081 (prod). Lokální dev: 8888.
-- TEMPORAL_ADDRESS=127.0.0.1:7233
-- TEMPORAL_NAMESPACE=trader-short
+- **TEMPORAL_ADDRESS=127.0.0.1:7500** (oddělený cluster, NIKDY ne 7233/7234!)
+- TEMPORAL_NAMESPACE=trader-short (povinné)
 - TASK_QUEUE=entry-short
-- TASK_QUEUE_OPENAI=openai-short
-- TASK_QUEUE_BINANCE=binance-short
+- TASK_QUEUE_OPENAI=io-openai-short
+- TASK_QUEUE_BINANCE=io-binance-short
 - BINANCE_API_KEY, BINANCE_SECRET_KEY
+- FORBIDDEN_TEMPORAL_PORTS=7234,7600 (doporučené)
 
 Vzorek: env/SHORT.env.example
 

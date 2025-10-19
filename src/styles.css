@@ -15,6 +15,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); font-family: Inter, u
 .btn.toggle.active { background: #1f2937; border-color: #3b82f6; color: #e5e7eb; box-shadow: 0 0 0 2px #1d4ed8 inset }
 .spinner { width: 14px; height: 14px; border: 2px solid #0000; border-top-color: white; border-radius: 50%; display: inline-block; animation: spin .7s linear infinite }
 @keyframes spin { to { transform: rotate(360deg) } }
+@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.5 } }
 .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); font-size: 12px }
 .pill.ok { border-color: #065f46; background: #052e2b; color: #a7f3d0 }
 .pill.err { border-color: #7f1d1d; background: #3a0d0d; color: #fecaca }

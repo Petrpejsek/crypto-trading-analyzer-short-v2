@@ -11,7 +11,7 @@ export default function PnlReportPanel() {
 	type ReportData = {
 		startTime: number
 		endTime: number
-		sessions: Array<{ symbol: string; entryTime: number; closeTime: number; entryClientOrderId: string | null; profile: ReportProfile; realizedPnl: number; buyQty: number; sellQty: number; tradesCount: number; buyNotional: number; sellNotional: number; avgBuyPrice: number; avgSellPrice: number; invested: number | null; pnlPct: number | null }>
+		sessions: Array<{ symbol: string; entryTime: number; closeTime: number; entryClientOrderId: string | null; profile: ReportProfile; universe: string; realizedPnl: number; buyQty: number; sellQty: number; tradesCount: number; buyNotional: number; sellNotional: number; avgBuyPrice: number; avgSellPrice: number; invested: number | null; pnlPct: number | null }>
 		agg: { aggressive: { sessions: number; wins: number; pnl: number }; conservative: { sessions: number; wins: number; pnl: number }; unknown: { sessions: number; wins: number; pnl: number } }
 		perSymbol: Record<string, { pnl: number; sessions: number; profileAgg: Record<string, { sessions: number; pnl: number }> }>
 	}
@@ -184,6 +184,7 @@ export default function PnlReportPanel() {
 									<th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>Duration</th>
 									<th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>Symbol</th>
 									<th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>Profile</th>
+									<th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>Universe</th>
 									<th style={{ textAlign: 'right', padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>Session P&L</th>
 									<th style={{ textAlign: 'right', padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>% P&L</th>
 									<th style={{ textAlign: 'right', padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>Invested</th>
@@ -202,6 +203,7 @@ export default function PnlReportPanel() {
 										<td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{formatDuration(s.entryTime, s.closeTime)}</td>
 										<td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{s.symbol}</td>
 										<td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', textTransform: 'capitalize' }}>{s.profile}</td>
+										<td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', textTransform: 'capitalize' }}>{s.universe}</td>
 										<td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', textAlign: 'right', color: ((Number(s.realizedPnl)||0) < 0 ? 'var(--danger)' : (Number(s.realizedPnl)||0) > 0 ? 'var(--ok)' : undefined) }}>{(Number(s.realizedPnl)||0).toFixed(4)}</td>
 										<td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', textAlign: 'right', color: ((displayPct(s)) < 0 ? 'var(--danger)' : (displayPct(s)) > 0 ? 'var(--ok)' : undefined) }}>{displayPct(s).toFixed(2)}%</td>
 										<td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', textAlign: 'right' }}>{displayInvested(s).toFixed(2)}</td>
@@ -214,13 +216,13 @@ export default function PnlReportPanel() {
 								))}
 								{pageRows.length === 0 && (
 									<tr>
-										<td colSpan={8} style={{ padding: '10px 8px', textAlign: 'center', opacity: .8 }}>No sessions</td>
+										<td colSpan={14} style={{ padding: '10px 8px', textAlign: 'center', opacity: .8 }}>No sessions</td>
 									</tr>
 								)}
 							</tbody>
 							<tfoot>
 								<tr>
-									<td colSpan={5} style={{ padding: '6px 8px', borderTop: '1px solid var(--border)', fontWeight: 600 }}>Total</td>
+									<td colSpan={6} style={{ padding: '6px 8px', borderTop: '1px solid var(--border)', fontWeight: 600 }}>Total</td>
 									<td style={{ padding: '6px 8px', borderTop: '1px solid var(--border)', textAlign: 'right', fontWeight: 600, color: (totals.pnl < 0 ? 'var(--danger)' : totals.pnl > 0 ? 'var(--ok)' : undefined) }}>{totals.pnl.toFixed(4)}</td>
 									<td style={{ padding: '6px 8px', borderTop: '1px solid var(--border)', textAlign: 'right', fontWeight: 600, color: (totals.pct < 0 ? 'var(--danger)' : totals.pct > 0 ? 'var(--ok)' : undefined) }}>{totals.pct.toFixed(2)}%</td>
 									<td style={{ padding: '6px 8px', borderTop: '1px solid var(--border)', textAlign: 'right', fontWeight: 600 }}>{totals.invested.toFixed(2)}</td>

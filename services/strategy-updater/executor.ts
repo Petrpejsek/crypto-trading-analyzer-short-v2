@@ -39,7 +39,7 @@ export async function executeStrategyUpdate(
     // 1. Use entry position data directly (avoid fresh REST call inconsistency). Do not block on WS readiness.
     const position = {
       symbol: entry.symbol,
-      positionAmt: entry.side === 'LONG' ? entry.positionSize : -entry.positionSize,
+      positionAmt: entry.side === 'SHORT' ? -entry.positionSize : entry.positionSize,
       entryPrice: entry.entryPrice
     }
     console.info('[SU_USING_ENTRY_DATA]', { symbol, side: entry.side, size: entry.positionSize })
@@ -65,9 +65,10 @@ export async function executeStrategyUpdate(
       const entryStillOpen = (Array.isArray(openOrders) ? openOrders : []).some((order: any) => {
         const id = String(order?.clientOrderId || '')
         const isInternalEntry = /^sv2_e_l_/.test(id)
-        const isBuyLimit = String(order?.side || '').toUpperCase() === 'BUY' && String(order?.type || '').toUpperCase() === 'LIMIT'
+        // SHORT: entry = SELL LIMIT
+        const isSellLimit = String(order?.side || '').toUpperCase() === 'SELL' && String(order?.type || '').toUpperCase() === 'LIMIT'
         const isExitFlag = Boolean(order?.reduceOnly || order?.closePosition)
-        return isInternalEntry && isBuyLimit && !isExitFlag
+        return isInternalEntry && isSellLimit && !isExitFlag
       })
       const hasRealPosition = Math.abs(Number(position?.positionAmt || 0)) > 0
       if (entryStillOpen && !hasRealPosition) {
@@ -75,63 +76,7 @@ export async function executeStrategyUpdate(
       }
     } catch {}
     
-    // 2. CRITICAL: Clean up ALL existing SL/TP orders before creating new ones
-    try {
-      console.info('[STRATEGY_UPDATE_CLEANUP_START]', { symbol })
-      const openOrders = await api.getOpenOrders(symbol)
-      const exitSide = (positionSide === 'LONG' ? 'SELL' : 'BUY') as 'BUY' | 'SELL'
-      
-      // Find all SL and TP orders to cancel - MUST be our orders (sv2_x_* or x_sl_/x_tp_)
-      const ordersToCancel = (Array.isArray(openOrders) ? openOrders : []).filter((o: any) => {
-        try {
-          const sameSymbol = String(o?.symbol) === symbol
-          const sideOk = String(o?.side || '').toUpperCase() === exitSide
-          const t = String(o?.type || '').toUpperCase()
-          const isStopOrTp = t.includes('STOP') || t.includes('TAKE_PROFIT')
-          const cid = String(o?.clientOrderId || '')
-          const isOurOrder = cid.startsWith('sv2_x_') || /^x_(sl|tp)/.test(cid)
-          return sameSymbol && sideOk && isStopOrTp && isOurOrder
-        } catch { return false }
-      })
-      
-      console.info('[STRATEGY_UPDATE_CLEANUP_FOUND]', { 
-        symbol, 
-        ordersToCancel: ordersToCancel.length,
-        orderIds: ordersToCancel.map((o: any) => o.orderId)
-      })
-      
-      // Cancel all existing SL/TP orders
-      for (const order of ordersToCancel) {
-        try {
-          await api.cancelOrder(symbol, Number(order.orderId))
-          cancelledOrderIds.push(Number(order.orderId))
-          console.info('[STRATEGY_UPDATE_CANCELLED]', { 
-            symbol, 
-            orderId: order.orderId, 
-            type: order.type,
-            clientOrderId: order.clientOrderId
-          })
-        } catch (cancelError) {
-          console.warn('[STRATEGY_UPDATE_CANCEL_FAILED]', { 
-            symbol, 
-            orderId: order.orderId, 
-            error: (cancelError as any)?.message 
-          })
-        }
-      }
-      
-      console.info('[STRATEGY_UPDATE_CLEANUP_DONE]', { 
-        symbol, 
-        cancelledCount: cancelledOrderIds.length 
-      })
-    } catch (cleanupError) {
-      console.warn('[STRATEGY_UPDATE_CLEANUP_ERROR]', { 
-        symbol, 
-        error: (cleanupError as any)?.message 
-      })
-    }
-
-    // 3. Create new SL order with updated prefix (with strict monotonic guard)
+    // 2. Create new SL order FIRST (before cancelling old ones) - AI prefix for UI highlighting
     try {
       const disableSl = ((tradingCfg as any)?.DISABLE_SL === true)
       if (disableSl) {
@@ -157,11 +102,12 @@ export async function executeStrategyUpdate(
             const sp = Number(o?.stopPrice || o?.price || 0)
             if (!Number.isFinite(sp) || sp <= 0) return acc
             if (!acc) return { id: Number(o?.orderId), px: sp }
-            if (positionSide === 'LONG') {
+            // For SHORT: prefer higher SL (better protection)
+            if (positionSide === 'SHORT') {
               return sp > acc.px ? { id: Number(o?.orderId), px: sp } : acc
             } else {
-              // For SHORT: prefer higher SL (better protection)
-              return sp > acc.px ? { id: Number(o?.orderId), px: sp } : acc
+              // LONG logic removed - system is SHORT only
+              return acc
             }
           }, null as any)
           if (pick) { currentSlPx = pick.px; currentSlOrderId = pick.id }
@@ -231,21 +177,30 @@ export async function executeStrategyUpdate(
           effectiveSl = proposedSl
         }
       }
-      // GUARD LOGIC COMPLETELY DISABLED - Let AI decide everything
-      // if (hasCurrentSl) {
-      //   const curr = currentSlPx as number
-      //   const violates = (positionSide === 'LONG' && effectiveSl < curr) || (positionSide === 'SHORT' && effectiveSl > curr)
-      //   // Never degrade SL: if proposal degrades, keep current; otherwise use proposal (even if equal)
-      //   effectiveSl = violates ? curr : effectiveSl
-      //   if (violates) console.warn('[STRATEGY_UPDATE_SL_GUARD_KEEP]', { symbol, side: positionSide, currentSL: curr, proposedSL: proposedSl, effectiveSL: effectiveSl })
-      // }
+      // CRITICAL GUARD: Enforce SHORT invariant (newSL ≤ currentSL - never degrade protection)
+      if (hasCurrentSl && effectiveSl !== null) {
+        const curr = currentSlPx as number
+        // For SHORT: SL must NOT move higher (away from profit zone)
+        const violates = (positionSide === 'SHORT' && effectiveSl > curr)
+        if (violates) {
+          console.warn('[STRATEGY_UPDATE_SL_GUARD_REJECT]', { 
+            symbol, 
+            side: positionSide, 
+            currentSL: curr, 
+            proposedSL: proposedSl, 
+            effectiveSL: effectiveSl,
+            action: 'keeping_current_sl'
+          })
+          effectiveSl = curr  // Keep current SL (better protection)
+        }
+      }
 
-      // Immediate exit policy: if AI requested SL at/above mark for LONG (or at/below for SHORT), execute immediate close via MARKET
+      // Immediate exit policy: if AI requested SL at/below mark for SHORT (or at/above for LONG), execute immediate close via MARKET
       try {
         const mark = Number(await api.getMarkPrice(symbol))
         const wantsImmediateExit = Number.isFinite(mark) && Number.isFinite(proposedSl) && (
           (positionSide === 'LONG' && proposedSl >= mark) ||
-          (positionSide === 'SHORT' && proposedSl >= mark)
+          (positionSide === 'SHORT' && proposedSl <= mark)  // SHORT: SL below mark = immediate exit
         )
         if (wantsImmediateExit) {
           const exitSide = (positionSide === 'LONG' ? 'SELL' : 'BUY') as 'BUY' | 'SELL'
@@ -310,8 +265,8 @@ export async function executeStrategyUpdate(
           closePosition: true as const,
           workingType: 'MARK_PRICE' as const,
           ...posSidePayload,
-          // Always create a NEW SL (unique CID), cleanup will cancel the previous
-          newClientOrderId: makeId('x_sl'),
+          // Always create a NEW SL with AI prefix for UI highlighting
+          newClientOrderId: makeId('x_ai_sl'),
           newOrderRespType: 'RESULT' as const
         }
 
@@ -411,8 +366,8 @@ export async function executeStrategyUpdate(
         const qtyNum = Number(d.quantity)
         if (!Number.isFinite(qtyNum) || qtyNum <= 0) continue
           const posSidePayload = includePositionSide ? { positionSide: positionSide as 'LONG' | 'SHORT' } : {}
-          // Always create a NEW TP (unique CID); cleanup phase will remove previous TPs
-          const cid = makeId('x_tp')
+          // Always create a NEW TP with AI prefix for UI highlighting; cleanup phase will remove previous TPs
+          const cid = makeId('x_ai_tp')
         const tpParams = d.marketNow
           ? {
               symbol,
@@ -464,11 +419,30 @@ export async function executeStrategyUpdate(
           if (orderId === newSlOrderId) return false
           if (Array.isArray(newTpOrderIds) && newTpOrderIds.includes(orderId)) return false
           if (String(order?.symbol) !== symbol) return false
-          const sideOk = String(order?.side || '').toUpperCase() === exitSide
+          
+          // KRITICKÁ OCHRANA: NIKDY nerušit SELL ordery (entry ordery pro SHORT)
+          // Entry ordery jsou SELL LIMIT bez reduceOnly/closePosition flags
+          const orderSide = String(order?.side || '').toUpperCase()
+          const orderType = String(order?.type || '').toUpperCase()
+          const isExitFlag = Boolean(order?.closePosition === true || order?.reduceOnly === true)
+          
+          // Pokud je to SELL order bez exit flags, je to pravděpodobně ENTRY order → NIKDY nerušit!
+          if (positionSide === 'SHORT' && orderSide === 'SELL' && !isExitFlag) {
+            console.warn('[STRATEGY_UPDATE_CLEANUP_SKIP_ENTRY]', {
+              symbol,
+              orderId,
+              orderSide,
+              orderType,
+              reason: 'potential_entry_order'
+            })
+            return false
+          }
+          
+          const sideOk = orderSide === exitSide
           const typeStr = String(order?.type || '')
           const isExitType = /stop|take_profit/i.test(typeStr)
-          const hasExitFlags = Boolean(order?.closePosition === true || order?.reduceOnly === true)
-          const isOldPrefix = /^(x_sl_|x_tp1_|x_tp2_|x_tp3_)/.test(String(order?.clientOrderId || ''))
+          const hasExitFlags = isExitFlag
+          const isOldPrefix = /^(x_sl_|x_tp1_|x_tp2_|x_tp3_|x_ai_sl_|x_ai_tp_)/.test(String(order?.clientOrderId || ''))
           // Cancel any previous exit orders for this symbol/side except the ones we just created
           return sideOk && (isExitType || hasExitFlags || isOldPrefix)
         } catch { return false }
@@ -477,16 +451,31 @@ export async function executeStrategyUpdate(
       console.info('[STRATEGY_UPDATE_CLEANUP_OLD]', { 
         symbol, 
         oldOrdersCount: oldOrders.length,
-        orderIds: oldOrders.map((o: any) => o?.orderId)
+        orderIds: oldOrders.map((o: any) => o?.orderId),
+        details: oldOrders.map((o: any) => ({
+          orderId: o?.orderId,
+          side: o?.side,
+          type: o?.type,
+          clientOrderId: o?.clientOrderId,
+          reduceOnly: o?.reduceOnly,
+          closePosition: o?.closePosition
+        }))
       })
 
       for (const oldOrder of oldOrders) {
         try {
           const orderId = Number(oldOrder?.orderId || 0)
           if (orderId > 0) {
+            console.info('[STRATEGY_UPDATE_CANCEL_OLD_ATTEMPT]', { 
+              symbol, 
+              orderId,
+              side: oldOrder?.side,
+              type: oldOrder?.type,
+              clientOrderId: oldOrder?.clientOrderId
+            })
             await cancelOrder(symbol, orderId)
             cancelledOrderIds.push(orderId)
-            console.info('[STRATEGY_UPDATE_CANCEL_OLD]', { symbol, orderId })
+            console.info('[STRATEGY_UPDATE_CANCEL_OLD_SUCCESS]', { symbol, orderId })
           }
         } catch (cancelError: any) {
           console.error('[STRATEGY_UPDATE_CANCEL_ERROR]', {
@@ -558,15 +547,12 @@ export function validateStrategyUpdate(
     const { newSL } = response
 
     // Validate that we're not making position worse
+    // SHORT-only project: LONG should never occur
     if (side === 'LONG') {
-      // Strict monotonic SL for LONG: never allow lower SL than previously set
-      if (entry.currentSL != null && Number.isFinite(entry.currentSL as any) && newSL < entry.currentSL) {
-        return {
-          valid: false,
-          reason: 'sl_monotonicity_violation_long'
-        }
-      }
-    } else if (side === 'SHORT') {
+      throw new Error(`LONG side not allowed in SHORT project: ${entry.symbol}`)
+    }
+    
+    if (side === 'SHORT') {
       // Strict monotonic SL for SHORT: never allow higher SL than previously set
       if (entry.currentSL != null && Number.isFinite(entry.currentSL as any) && newSL > entry.currentSL) {
         return {

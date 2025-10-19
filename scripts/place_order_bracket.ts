@@ -53,7 +53,7 @@ async function main(): Promise<void> {
 
   const payload = {
     orders: [
-      { symbol, side: 'LONG' as const, strategy: 'conservative' as const, tpLevel: 'tp1' as const,
+      { symbol, side: 'SHORT' as const, strategy: 'conservative' as const, tpLevel: 'tp1' as const,
         amount, leverage, useBuffer: false, entry, sl, tp }
     ]
   }

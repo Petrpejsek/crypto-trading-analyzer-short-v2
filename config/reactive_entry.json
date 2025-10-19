@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "min_edge_bps_default": 15,
+  "min_edge_ticks_default": 5,
+  "anchor_vwap_threshold_bps": 200,
+  "anchor_ema50_threshold_bps": 200,
+  "anchor_resistance_age_max_mins": 30,
+  "openai_timeout_ms": 60000,
+  "openai_retry_count": 1,
+  "openai_retry_backoff_ms": 250,
+  "rate_limit_per_minute": 6,
+  "symbol_overrides": {}
+}
+

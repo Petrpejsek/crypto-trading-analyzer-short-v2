@@ -34,6 +34,21 @@ function classifyProfile(clientOrderId: string | null): Profile {
 	return 'unknown'
 }
 
+function extractUniverse(clientOrderId: string | null): string {
+	if (!clientOrderId) return '-'
+	// Formát: sv2_e_{strategy}_{universe}_timestamp
+	// Příklady: sv2_e_l_v_abc123 (conservative/volume), sv2_e_stl_g_xyz789 (aggressive/gainers)
+	const match = clientOrderId.match(/^sv2_e_(?:l|stl|stm|m)_([vglo])_/i)
+	if (match) {
+		const tag = match[1].toLowerCase()
+		if (tag === 'v') return 'volume'
+		if (tag === 'g') return 'gainers'
+		if (tag === 'l') return 'losers'
+		if (tag === 'o') return 'overheat'
+	}
+	return '-' // Legacy orders bez universe značky
+}
+
 // Robust pagination for incomes by adaptive window splitting (covers dense same-timestamp records)
 async function fetchAllIncomes(
 	startTime: number,
@@ -254,7 +269,7 @@ function sumPnl(incomes: any[], start: number, end: number): number {
 export async function buildPnlReport(params: { preset: RangePreset; profile: 'aggressive'|'conservative'|'both' }): Promise<{
     startTime: number
     endTime: number
-		sessions: Array<{ symbol: string; entryTime: number; closeTime: number; entryClientOrderId: string | null; profile: Profile; realizedPnl: number; buyQty: number; sellQty: number; tradesCount: number; buyNotional: number; sellNotional: number; avgBuyPrice: number; avgSellPrice: number; invested: number | null; pnlPct: number | null }>
+		sessions: Array<{ symbol: string; entryTime: number; closeTime: number; entryClientOrderId: string | null; profile: Profile; universe: string; realizedPnl: number; buyQty: number; sellQty: number; tradesCount: number; buyNotional: number; sellNotional: number; avgBuyPrice: number; avgSellPrice: number; invested: number | null; pnlPct: number | null }>
     agg: { aggressive: { sessions: number; wins: number; pnl: number }; conservative: { sessions: number; wins: number; pnl: number }; unknown: { sessions: number; wins: number; pnl: number } }
     perSymbol: Record<string, { pnl: number; sessions: number; profileAgg: Record<string, { sessions: number; pnl: number }> }>
 }> {
@@ -293,7 +308,7 @@ export async function buildPnlReport(params: { preset: RangePreset; profile: 'ag
 	}
 
     const symbols = Object.keys(bySymbolIncome)
-    const sessions: Array<{ symbol: string; entryTime: number; closeTime: number; entryClientOrderId: string | null; profile: Profile; realizedPnl: number; buyQty: number; sellQty: number; tradesCount: number; buyNotional: number; sellNotional: number; avgBuyPrice: number; avgSellPrice: number; invested: number | null; pnlPct: number | null }> = []
+    const sessions: Array<{ symbol: string; entryTime: number; closeTime: number; entryClientOrderId: string | null; profile: Profile; universe: string; realizedPnl: number; buyQty: number; sellQty: number; tradesCount: number; buyNotional: number; sellNotional: number; avgBuyPrice: number; avgSellPrice: number; invested: number | null; pnlPct: number | null }> = []
 
     // Snapshot current leverage per symbol (used as approximation for margin without leverage multiplier)
     const levBySymbol: Record<string, number> = {}
@@ -323,6 +338,7 @@ export async function buildPnlReport(params: { preset: RangePreset; profile: 'ag
             const ord = (s.entryOrderId ? orders.find(o => o.orderId === s.entryOrderId) : null) || null
             const clientId = ord ? (ord.clientOrderId || null) : null
             const prof = classifyProfile(clientId)
+            const univ = extractUniverse(clientId)
             if (profile !== 'both' && prof !== profile) continue
             const pnl = sumPnl(incomes, s.entryTime, s.closeTime)
 			const tradesInSession = trades.filter(t => t.time >= s.entryTime && t.time <= s.closeTime)
@@ -341,7 +357,7 @@ export async function buildPnlReport(params: { preset: RangePreset; profile: 'ag
             const lev = Number(levBySymbol[sym])
             const invested = (Number.isFinite(lev) && lev > 0) ? (buyNotional / lev) : null
             const pnlPct = (Number.isFinite(invested as any) && (invested as number) > 0) ? ((pnl / (invested as number)) * 100) : null
-            sessions.push({ symbol: sym, entryTime: s.entryTime, closeTime: s.closeTime, entryClientOrderId: clientId, profile: prof, realizedPnl: pnl, buyQty: s.buyQty, sellQty: s.sellQty, tradesCount, buyNotional, sellNotional, avgBuyPrice, avgSellPrice, invested, pnlPct })
+            sessions.push({ symbol: sym, entryTime: s.entryTime, closeTime: s.closeTime, entryClientOrderId: clientId, profile: prof, universe: univ, realizedPnl: pnl, buyQty: s.buyQty, sellQty: s.sellQty, tradesCount, buyNotional, sellNotional, avgBuyPrice, avgSellPrice, invested, pnlPct })
         }
     }
 
@@ -398,10 +414,10 @@ export async function buildPnlReportMarkdown(params: { preset: RangePreset; prof
     md.push('')
     md.push('## Sessions')
     md.push('')
-    md.push('| Symbol | Entry time | Close time | Profile | Session P&L | buyQty/sellQty | clientOrderId |')
-    md.push('|---|---|---|---|---:|---:|---|')
+    md.push('| Symbol | Entry time | Close time | Profile | Universe | Session P&L | buyQty/sellQty | clientOrderId |')
+    md.push('|---|---|---|---|---|---:|---:|---|')
     for (const s of sessions) {
-        md.push(`| ${s.symbol} | ${new Date(s.entryTime).toLocaleString()} | ${new Date(s.closeTime).toLocaleString()} | ${s.profile} | ${s.realizedPnl.toFixed(4)} | ${s.buyQty.toFixed(6)}/${s.sellQty.toFixed(6)} | ${(s.entryClientOrderId||'').slice(0,24)} |`)
+        md.push(`| ${s.symbol} | ${new Date(s.entryTime).toLocaleString()} | ${new Date(s.closeTime).toLocaleString()} | ${s.profile} | ${s.universe} | ${s.realizedPnl.toFixed(4)} | ${s.buyQty.toFixed(6)}/${s.sellQty.toFixed(6)} | ${(s.entryClientOrderId||'').slice(0,24)} |`)
     }
     md.push('')
     md.push('Notes: profile determined from first entry clientOrderId prefix; P&L sums Binance REALIZED_PNL in session window.')
