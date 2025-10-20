@@ -333,15 +333,26 @@ export async function executeStrategyUpdate(
 
       const levels = [...response.tp_levels]
 
-      const trancheQtys: string[] = []
-      let allocated = 0
+      // Calculate tranches: each gets exact allocation_pct, then fix rounding error in largest tranche
+      const trancheQtys: number[] = []
       for (let i = 0; i < levels.length; i++) {
         const lvl = levels[i]
-        const baseQty = i < levels.length - 1 ? posSize * lvl.allocation_pct : (posSize - allocated)
+        const baseQty = posSize * lvl.allocation_pct
         const qNum = Math.max(0, quantizeToStep(baseQty, stepSize, 'floor'))
-        allocated += qNum
-        trancheQtys.push(qNum.toFixed(countStepDecimals(stepSize)))
+        trancheQtys.push(qNum)
       }
+      
+      // Fix cumulative rounding error: add difference to largest tranche
+      const totalAllocated = trancheQtys.reduce((sum, q) => sum + q, 0)
+      const diff = posSize - totalAllocated
+      if (Math.abs(diff) > 1e-8) {
+        // Find index of largest tranche (usually TP2 with highest allocation_pct)
+        const largestIdx = trancheQtys.reduce((maxIdx, q, idx, arr) => 
+          q > arr[maxIdx] ? idx : maxIdx, 0)
+        trancheQtys[largestIdx] = Math.max(0, trancheQtys[largestIdx] + diff)
+      }
+      
+      const trancheQtyStrings = trancheQtys.map(q => q.toFixed(countStepDecimals(stepSize)))
 
       // Build desired TP orders spec and detect tranches that are already in-the-money (<= mark)
       const currentMark = Number((await api.getMarkPrice(symbol)) || 0)
@@ -353,7 +364,7 @@ export async function executeStrategyUpdate(
           // Immediate if price already reached TP threshold
           return positionSide === 'LONG' ? (mark >= px) : (mark <= px)
         })()
-        return { tag: lvl.tag, price: px, quantity: trancheQtys[i], marketNow: immediate }
+        return { tag: lvl.tag, price: px, quantity: trancheQtyStrings[i], marketNow: immediate }
       })
 
       // Determine exit side for TP orders

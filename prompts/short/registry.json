@@ -1,80 +1,80 @@
 [
   {
+    "name": "ai_profit_taker",
+    "path": "prompts/short/ai_profit_taker.md",
+    "version": "20251020T0125",
+    "checksum_sha256": "759e62c6df34ed994499259a37d7dbf6dfa5744b2fe4c64ee44232b02f1b7302"
+  },
+  {
     "name": "entry_risk_manager",
     "path": "prompts/short/entry_risk_manager.md",
-    "version": "20251001T2135",
-    "checksum_sha256": "5a6e005ef0180658ca1d913489d7da5954ef17b0395ce5fef3ff998a30e5fcfd"
+    "version": "20251020T0125",
+    "checksum_sha256": "6558a3da2f35fe687d0cc8f48eda8b5fb2eae708ccd62d53232416dba790d284"
   },
   {
     "name": "entry_strategy_aggressive",
     "path": "prompts/short/entry_strategy_aggressive.md",
-    "version": "20251001T2135",
+    "version": "20251020T0125",
     "checksum_sha256": "a909b620099a036d492765948c38bd9ef7ca4e72e443039b22132860119ca601"
   },
   {
     "name": "entry_strategy_conservative",
     "path": "prompts/short/entry_strategy_conservative.md",
-    "version": "20251001T2135",
-    "checksum_sha256": "931141fe2ebf77af1d69e247d1bb2dd5bf6a94294a07a3307051ef352595f812"
+    "version": "20251020T0125",
+    "checksum_sha256": "772b8149367f36ce08764779088b1ddb29cefcccd2024748419f56a7cebf98da"
   },
   {
     "name": "entry_updater",
     "path": "prompts/short/entry_updater.md",
-    "version": "20251001T2135",
-    "checksum_sha256": "8a22d240a02cd9c039390adbffc069a2fb68e67c3b9d5359f27e1d955c1fffce"
+    "version": "20251020T0125",
+    "checksum_sha256": "b4c150b4eb0702abefb24b3636c7fc1924a1dba0edae14d10b8785a3720f1499"
+  },
+  {
+    "name": "health_monitor",
+    "path": "prompts/short/health_monitor.md",
+    "version": "20251020T0125",
+    "checksum_sha256": "b5fa79eb4c324977e89cd331611fa7749bb407d78e309d7735afe2d927bc2c21"
   },
   {
     "name": "hot_screener",
     "path": "prompts/short/hot_screener.md",
-    "version": "20251001T2135",
-    "checksum_sha256": "217b50c94a1a64e0db703c81525ae008872c427ce5ed633f29a8d6ad5924f723"
+    "version": "20251020T0125",
+    "checksum_sha256": "5f0a29ffebc23b2e2232c406a8c09716d5310ea61d2970ff3bed0f82f201a86d"
   },
   {
     "name": "market_decider",
     "path": "prompts/short/market_decider.md",
-    "version": "20251001T2135",
+    "version": "20251020T0125",
     "checksum_sha256": "e9a1f4a255ff6607b7b0cb0c438a95f9fc88f3920eecc3a4f082ea0784dd9e26"
   },
   {
     "name": "profit_taker",
     "path": "prompts/short/profit_taker.md",
-    "version": "20251001T2135",
-    "checksum_sha256": "a6d991bd986b9b6b6cf8b95a23f929c699056a5e26317fa57462b8aacdb00bf1"
+    "version": "20251020T0125",
+    "checksum_sha256": "ddefac90931cc9e8b172aa181fd9bdebc083fae0e7a7d1217e63d306ee0d0b39"
+  },
+  {
+    "name": "reactive_entry_assistant",
+    "path": "prompts/short/reactive_entry_assistant.md",
+    "version": "20251020T0125",
+    "checksum_sha256": "f18bf856b81f0b48e5a99a4ea4179c4eeebc5ccb1ce764c7bc5b7ee3f090611c"
   },
   {
     "name": "strategy_updater",
     "path": "prompts/short/strategy_updater.md",
-    "version": "20251001T2135",
+    "version": "20251020T0125",
     "checksum_sha256": "210403e552b45657af55105ea0c1730bf2d3cf04b083400fdefd16ef956ff2cb"
   },
   {
     "name": "strategy_updater_fixed",
     "path": "prompts/short/strategy_updater_fixed.md",
-    "version": "20251001T2135",
+    "version": "20251020T0125",
     "checksum_sha256": "582ad2dd402de95cc5047194385861b12d9c7ebe7801f68d06d82c83b7ce0543"
   },
   {
     "name": "top_up_executor",
     "path": "prompts/short/top_up_executor.md",
-    "version": "20251001T2135",
+    "version": "20251020T0125",
     "checksum_sha256": "66d122f10ca0ae425d89771d456bf31f4f420bfac54058d8704f00222a491ffa"
-  },
-  {
-    "name": "ai_profit_taker",
-    "path": "prompts/short/ai_profit_taker.md",
-    "version": "20251001T2135",
-    "checksum_sha256": "placeholder"
-  },
-  {
-    "name": "reactive_entry_assistant",
-    "path": "prompts/short/reactive_entry_assistant.md",
-    "version": "20251001T2135",
-    "checksum_sha256": "placeholder"
-  },
-  {
-    "name": "health_monitor",
-    "path": "prompts/short/health_monitor.md",
-    "version": "20251001T2135",
-    "checksum_sha256": "placeholder"
   }
 ]

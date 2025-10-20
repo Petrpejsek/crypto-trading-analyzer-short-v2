@@ -56,7 +56,77 @@ export function useKlinesBatch(
         }
       }
       
-      setData(newData)
+      console.log('[KLINES_BATCH] Received data from API:', {
+        symbols: currentSymbols,
+        results: Object.keys(newData),
+        counts: Object.fromEntries(Object.entries(newData).map(([k, v]) => [k, v.length]))
+      })
+      
+      // 🔥 CRITICAL FIX: Only update state if data actually changed
+      // Compare with current data to prevent unnecessary re-renders
+      setData(prevData => {
+        console.log('[KLINES_BATCH] Comparing data...', {
+          prevKeys: Object.keys(prevData),
+          newKeys: Object.keys(newData)
+        })
+        
+        // If no previous data OR newData is empty, always update (first load)
+        if (Object.keys(prevData).length === 0) {
+          console.log('[KLINES_BATCH] ✅ First load - updating data', {
+            newDataKeys: Object.keys(newData),
+            isEmpty: Object.keys(newData).length === 0
+          })
+          return newData
+        }
+        
+        let hasChanges = false
+        
+        // Check if symbols changed
+        const prevSymbols = Object.keys(prevData)
+        const newSymbols = Object.keys(newData)
+        if (prevSymbols.length !== newSymbols.length) {
+          console.log('[KLINES_BATCH] Symbols count changed, updating...')
+          hasChanges = true
+        }
+        
+        // Check if any symbol's data changed
+        if (!hasChanges) {
+          for (const sym of newSymbols) {
+            const prevKlines = prevData[sym]
+            const newKlines = newData[sym]
+            
+            if (!newKlines || newKlines.length === 0) {
+              console.warn('[KLINES_BATCH] Empty klines for symbol:', sym)
+              continue
+            }
+            
+            // Quick check: compare length and first/last timestamps
+            if (!prevKlines || 
+                prevKlines.length !== newKlines.length ||
+                prevKlines[0]?.openTime !== newKlines[0]?.openTime ||
+                prevKlines[prevKlines.length - 1]?.openTime !== newKlines[newKlines.length - 1]?.openTime) {
+              console.log('[KLINES_BATCH] Data changed for', sym, {
+                prevLen: prevKlines?.length || 0,
+                newLen: newKlines.length,
+                prevFirst: prevKlines?.[0]?.openTime,
+                newFirst: newKlines[0]?.openTime,
+                prevLast: prevKlines?.[prevKlines.length - 1]?.openTime,
+                newLast: newKlines[newKlines.length - 1]?.openTime
+              })
+              hasChanges = true
+              break
+            }
+          }
+        }
+        
+        if (hasChanges) {
+          console.log('[KLINES_BATCH] ✅ Updating data (changes detected)')
+          return newData
+        } else {
+          console.log('[KLINES_BATCH] ⏭️ Skipping update (data unchanged)')
+          return prevData  // Return SAME reference to prevent re-renders
+        }
+      })
     } catch (e: any) {
       setError(e?.message || 'Unknown error')
     } finally {

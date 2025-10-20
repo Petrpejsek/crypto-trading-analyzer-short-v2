@@ -21,19 +21,40 @@ export type StrategyUpdaterEntry = {
 const strategyUpdaterBySymbol: Record<string, StrategyUpdaterEntry> = {}
 const REGISTRY_DIR = path.resolve(process.cwd(), 'runtime')
 const REGISTRY_FILE = path.resolve(REGISTRY_DIR, 'strategy_updater.json')
+const ORDERS_FILE = path.resolve(REGISTRY_DIR, 'strategy_updater_orders.json')
 const UPDATE_DELAY_MS = 3 * 60 * 1000 // 3 minutes between checks
 const INITIAL_DELAY_MS = 2 * 60 * 1000 // first run 2 minutes after detection (can be overridden)
 
 // Track orderIds created by Strategy Updater so UI can highlight them reliably
 const strategyUpdaterOrderIds = new Set<number>()
+
+// CRITICAL: Persist order IDs to disk so they survive server restarts
+function persistOrderIds(): void {
+  try {
+    if (!fs.existsSync(REGISTRY_DIR)) fs.mkdirSync(REGISTRY_DIR, { recursive: true })
+    fs.writeFileSync(ORDERS_FILE, JSON.stringify({
+      ts: new Date().toISOString(),
+      orderIds: Array.from(strategyUpdaterOrderIds)
+    }, null, 2), 'utf8')
+  } catch (e) {
+    console.error('[STRATEGY_UPDATER_PERSIST_ORDERS_ERR]', (e as any)?.message || e)
+  }
+}
+
 export function markStrategyOrders(orderIds: Array<number | undefined | null>): void {
   try {
+    let changed = false
     for (const id of orderIds) {
       const n = Number(id)
-      if (Number.isFinite(n) && n > 0) strategyUpdaterOrderIds.add(n)
+      if (Number.isFinite(n) && n > 0 && !strategyUpdaterOrderIds.has(n)) {
+        strategyUpdaterOrderIds.add(n)
+        changed = true
+      }
     }
+    if (changed) persistOrderIds()
   } catch {}
 }
+
 export function isStrategyOrderId(orderId: number | string | undefined | null): boolean {
   try {
     const n = Number(orderId)
@@ -291,6 +312,30 @@ export async function rehydrateStrategyUpdaterFromDisk(): Promise<void> {
   __rehydrateStarted = true
   
   try {
+    // CRITICAL: Rehydrate order IDs FIRST so they're available immediately
+    if (fs.existsSync(ORDERS_FILE)) {
+      try {
+        const ordersRaw = fs.readFileSync(ORDERS_FILE, 'utf8')
+        const ordersParsed = JSON.parse(ordersRaw)
+        const orderIds: number[] = Array.isArray(ordersParsed?.orderIds) ? ordersParsed.orderIds : []
+        
+        for (const id of orderIds) {
+          const n = Number(id)
+          if (Number.isFinite(n) && n > 0) {
+            strategyUpdaterOrderIds.add(n)
+          }
+        }
+        
+        console.info('[STRATEGY_UPDATER_REHYDRATE_ORDERS]', { 
+          count: strategyUpdaterOrderIds.size,
+          orderIds: Array.from(strategyUpdaterOrderIds).slice(0, 10) // Log first 10
+        })
+      } catch (e) {
+        console.error('[STRATEGY_UPDATER_REHYDRATE_ORDERS_ERR]', (e as any)?.message || e)
+      }
+    }
+    
+    // Then rehydrate entries
     if (!fs.existsSync(REGISTRY_FILE)) return
     
     const raw = fs.readFileSync(REGISTRY_FILE, 'utf8')

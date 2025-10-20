@@ -1308,8 +1308,12 @@ const server = http.createServer(async (req, res) => {
               if (posSide === 'LONG') return true
               
               const idStr = String((o as any)?.C || (o as any)?.c || (o as any)?.clientOrderId || '')
-              const idIsInternal = idStr ? /^(sv2_)?(e_l_|x_sl_|x_tp_)/.test(idStr) : false
+              const idIsInternal = idStr ? /^(sv2_)?(e_l_|x_sl_|x_tp_|x_ai_)/.test(idStr) : false
               if (idIsInternal) return false
+              
+              // Check if it's an AI order by pattern (avoid require cache)
+              if (idStr.includes('x_ai_sl_') || idStr.includes('x_ai_tp_')) return false
+              
               const n = Number(o?.orderId ?? 0)
               const { isStrategyOrderId } = require('../services/strategy-updater/registry')
               if (Number.isFinite(n) && isStrategyOrderId(n)) return false
@@ -2173,8 +2177,12 @@ const server = http.createServer(async (req, res) => {
               if (posSide === 'LONG') return true
               
               const idStr = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-              const idIsInternal = idStr ? /^(sv2_)?(e_l_|x_sl_|x_tp_)/.test(idStr) : false
+              const idIsInternal = idStr ? /^(sv2_)?(e_l_|x_sl_|x_tp_|x_ai_)/.test(idStr) : false
               if (idIsInternal) return false
+              
+              // Check if it's an AI order by pattern (avoid require cache)
+              if (idStr.includes('x_ai_sl_') || idStr.includes('x_ai_tp_')) return false
+              
               const n = Number(o?.orderId ?? 0)
               const { isStrategyOrderId } = require('../services/strategy-updater/registry')
               if (Number.isFinite(n) && isStrategyOrderId(n)) return false
@@ -2185,8 +2193,44 @@ const server = http.createServer(async (req, res) => {
           isStrategyUpdater: ((): boolean => {
             try {
               const n = Number(o?.orderId ?? 0)
+              if (!Number.isFinite(n) || n <= 0) return false
+              
+              // CRITICAL FIX: Import fresh registry instead of using cached require()
+              // require() caches the module, so Set updates aren't reflected
+              // Use dynamic import OR check both registry AND clientOrderId pattern
+              const cid = String(o?.clientOrderId || '')
+              const isAiPattern = cid.includes('x_ai_sl_') || cid.includes('x_ai_tp_')
+              
+              // If clientOrderId matches AI pattern, mark as AI order
+              if (isAiPattern) {
+                // Debug: Log AI TP orders
+                if (String(o?.type || '').includes('TAKE_PROFIT')) {
+                  console.log('[SERVER_ORDER_FLAG] AI TP order (by clientOrderId):', {
+                    orderId: n,
+                    symbol: o?.symbol,
+                    clientOrderId: cid,
+                    type: o?.type,
+                    price: o?.price || o?.stopPrice,
+                    isStrategyUpdater: true
+                  })
+                }
+                return true
+              }
+              
+              // Fallback: check registry (but this may be cached)
               const { isStrategyOrderId } = require('../services/strategy-updater/registry')
-              return Number.isFinite(n) && isStrategyOrderId(n)
+              const result = isStrategyOrderId(n)
+              if (result && String(o?.type || '').includes('TAKE_PROFIT')) {
+                console.log('[SERVER_ORDER_FLAG] AI TP order (by registry):', {
+                  orderId: n,
+                  symbol: o?.symbol,
+                  clientOrderId: cid,
+                  type: o?.type,
+                  price: o?.price || o?.stopPrice,
+                  isStrategyUpdater: true
+                })
+              }
+              return result
             } catch { return false }
           })(),
           createdAt: (() => {
@@ -2202,6 +2246,23 @@ const server = http.createServer(async (req, res) => {
             return Number.isFinite(tt) && tt > 0 ? new Date(tt).toISOString() : null
           })()
         }))
+        
+        // CRITICAL DEBUG: Log AI TP orders being sent to UI
+        const aiTpOrders = openOrdersUi.filter((o: any) => 
+          o.isStrategyUpdater && String(o.type || '').includes('TAKE_PROFIT')
+        )
+        if (aiTpOrders.length > 0) {
+          console.log('[API_ORDERS_AI_TP] Sending', aiTpOrders.length, 'AI TP orders to UI:', 
+            aiTpOrders.map((o: any) => ({
+              orderId: o.orderId,
+              symbol: o.symbol,
+              clientOrderId: o.clientOrderId,
+              price: o.price || o.stopPrice,
+              isStrategyUpdater: o.isStrategyUpdater
+            }))
+          )
+        }
+        
         // Attach leverage and investedUsd per order for complete UI rendering (no extra calls)
         try {
           openOrdersUi = openOrdersUi.map((o: any) => {
@@ -3276,7 +3337,14 @@ const server = http.createServer(async (req, res) => {
         // 1. Validate position exists
         const positions = await api.getPositions()
         const position = (Array.isArray(positions) ? positions : []).find((p: any) => String(p?.symbol) === symbol)
-        const positionAmt = Number(position?.positionAmt || 0)
+        // KRITICKÁ OPRAVA: API vrací "size" ne "positionAmt"!
+        const positionAmt = Number(position?.size || position?.positionAmt || 0)
+        
+        console.info('[MANUAL_SL_POSITION_CHECK]', { 
+          symbol, 
+          position: position ? { size: position.size, positionAmt: position.positionAmt } : null,
+          positionAmt 
+        })
         
         if (Math.abs(positionAmt) === 0) {
           res.statusCode = 400
@@ -3392,7 +3460,14 @@ const server = http.createServer(async (req, res) => {
         // 1. Validate position exists
         const positions = await api.getPositions()
         const position = (Array.isArray(positions) ? positions : []).find((p: any) => String(p?.symbol) === symbol)
-        const positionAmt = Number(position?.positionAmt || 0)
+        // KRITICKÁ OPRAVA: API vrací "size" ne "positionAmt"!
+        const positionAmt = Number(position?.size || position?.positionAmt || 0)
+        
+        console.info('[MANUAL_TP_POSITION_CHECK]', { 
+          symbol, 
+          position: position ? { size: position.size, positionAmt: position.positionAmt } : null,
+          positionAmt 
+        })
         
         if (Math.abs(positionAmt) === 0) {
           res.statusCode = 400

@@ -15,7 +15,7 @@
   "V3_TP_IMMEDIATE_MARKET": false,
   "DISABLE_SL": false,
   "BLOCK_EMERGENCY_SL": true,
-  "ENTRY_DELTA_CANCEL_PCT": 6,
+  "ENTRY_DELTA_CANCEL_PCT": 2.5,
   "COOLDOWN": {
     "enabled": true,
     "consecutiveLosses": 2,

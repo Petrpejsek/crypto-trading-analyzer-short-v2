@@ -27,6 +27,7 @@ type OpenOrderUI = {
   updatedAt: string | null
   clientOrderId?: string | null
   isExternal?: boolean
+  isStrategyUpdater?: boolean  // CRITICAL: Flag for orders created by Strategy Updater
 }
 
 type WaitingOrderUI = {
@@ -833,8 +834,29 @@ export const OrdersPanel: React.FC = () => {
           }
           const isTP = (t: string) => /take_profit/i.test(String(t||''))
           const isSL = (t: string) => /stop/i.test(String(t||'')) && !/take_profit/i.test(String(t||''))
-          const slOrder = symOrders.find(o => isSL(o.type))
-          const tpOrder = symOrders.find(o => isTP(o.type))
+          
+          // CRITICAL FIX: Prioritize Strategy Updater orders (AI), then newest
+          const slOrders = symOrders.filter(o => isSL(o.type))
+          const tpOrders = symOrders.filter(o => isTP(o.type))
+          
+          const slOrder = slOrders.length > 0 ? slOrders.sort((a, b) => {
+            const aIsAi = a.isStrategyUpdater || String(a.clientOrderId || '').includes('x_ai_sl_')
+            const bIsAi = b.isStrategyUpdater || String(b.clientOrderId || '').includes('x_ai_sl_')
+            if (aIsAi !== bIsAi) return aIsAi ? -1 : 1
+            const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0
+            const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0
+            return bTime - aTime
+          })[0] : null
+          
+          const tpOrder = tpOrders.length > 0 ? tpOrders.sort((a, b) => {
+            const aIsAi = a.isStrategyUpdater || String(a.clientOrderId || '').includes('x_ai_tp_')
+            const bIsAi = b.isStrategyUpdater || String(b.clientOrderId || '').includes('x_ai_tp_')
+            if (aIsAi !== bIsAi) return aIsAi ? -1 : 1
+            const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0
+            const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0
+            return bTime - aTime
+          })[0] : null
+          
           const sign = side === 'SHORT' ? -1 : 1
           if (slOrder) {
             const px = exitPxFrom(slOrder)
@@ -1300,28 +1322,104 @@ export const OrdersPanel: React.FC = () => {
                   </div>
                 )
               }
-              // Extract SL/TP from orders
+              // Extract SL/TP from orders - CRITICAL FIX: Prioritize Strategy Updater orders
               const getSlTp = (symbol: string): { sl: number | null; tp: number | null } => {
                 let sl = null
                 let tp = null
+                
+                console.log(`[GET_SL_TP_START] ${symbol}: Total orders in array:`, orders.length)
+                
+                // Collect all SL and TP orders for this symbol
+                const slOrders: OpenOrderUI[] = []
+                const tpOrders: OpenOrderUI[] = []
                 
                 for (const order of orders) {
                   if (order.symbol !== symbol) continue
                   const type = String(order.type || '')
                   const closePos = Boolean(order.closePosition)
                   
+                  console.log(`[GET_SL_TP_ORDER] ${symbol}:`, {
+                    orderId: order.orderId,
+                    type,
+                    closePos,
+                    clientOrderId: order.clientOrderId,
+                    isStrategyUpdater: order.isStrategyUpdater,
+                    price: order.price,
+                    stopPrice: order.stopPrice
+                  })
+                  
                   if (type === 'STOP_MARKET' && closePos) {
-                    sl = Number(order.stopPrice) || null
+                    slOrders.push(order)
                   }
                   if (type.includes('TAKE_PROFIT') && closePos) {
-                    tp = Number(order.stopPrice || order.price) || null
+                    tpOrders.push(order)
+                    console.log(`[GET_SL_TP_TP_FOUND] ${symbol}: Added to tpOrders`, {
+                      orderId: order.orderId,
+                      clientOrderId: order.clientOrderId,
+                      isStrategyUpdater: order.isStrategyUpdater
+                    })
                   }
                 }
+                
+                // Select best SL: prioritize Strategy Updater orders (x_ai_sl_), then newest
+                if (slOrders.length > 0) {
+                  const sorted = slOrders.sort((a, b) => {
+                    // Priority 1: Strategy Updater orders first
+                    const aIsAi = a.isStrategyUpdater || String(a.clientOrderId || '').includes('x_ai_sl_')
+                    const bIsAi = b.isStrategyUpdater || String(b.clientOrderId || '').includes('x_ai_sl_')
+                    if (aIsAi !== bIsAi) return aIsAi ? -1 : 1
+                    
+                    // Priority 2: Newest order (by createdAt)
+                    const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0
+                    const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0
+                    return bTime - aTime  // Descending (newest first)
+                  })
+                  sl = Number(sorted[0].stopPrice) || null
+                  
+                  if (slOrders.length > 1) {
+                    console.log(`[CHART_SL_SELECT] ${symbol}: Found ${slOrders.length} SL orders, selected:`, {
+                      selected: { orderId: sorted[0].orderId, price: sl, clientOrderId: sorted[0].clientOrderId, isAI: sorted[0].isStrategyUpdater },
+                      all: slOrders.map(o => ({ orderId: o.orderId, price: o.stopPrice, clientOrderId: o.clientOrderId, isAI: o.isStrategyUpdater }))
+                    })
+                  }
+                }
+                
+                // Select best TP: prioritize Strategy Updater orders (x_ai_tp_), then newest
+                if (tpOrders.length > 0) {
+                  const sorted = tpOrders.sort((a, b) => {
+                    // Priority 1: Strategy Updater orders first
+                    const aIsAi = a.isStrategyUpdater || String(a.clientOrderId || '').includes('x_ai_tp_')
+                    const bIsAi = b.isStrategyUpdater || String(b.clientOrderId || '').includes('x_ai_tp_')
+                    if (aIsAi !== bIsAi) return aIsAi ? -1 : 1
+                    
+                    // Priority 2: Newest order (by createdAt)
+                    const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0
+                    const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0
+                    return bTime - aTime  // Descending (newest first)
+                  })
+                  tp = Number(sorted[0].stopPrice || sorted[0].price) || null
+                  
+                  if (tpOrders.length > 1) {
+                    console.log(`[CHART_TP_SELECT] ${symbol}: Found ${tpOrders.length} TP orders, selected:`, {
+                      selected: { orderId: sorted[0].orderId, price: tp, clientOrderId: sorted[0].clientOrderId, isAI: sorted[0].isStrategyUpdater },
+                      all: tpOrders.map(o => ({ orderId: o.orderId, price: o.stopPrice || o.price, clientOrderId: o.clientOrderId, isAI: o.isStrategyUpdater }))
+                    })
+                  }
+                }
+                
+                console.log(`[GET_SL_TP_RESULT] ${symbol}:`, {
+                  slOrders: slOrders.length,
+                  tpOrders: tpOrders.length,
+                  selectedSL: sl,
+                  selectedTP: tp
+                })
                 
                 return { sl, tp }
               }
               
               const { sl, tp } = getSlTp(p.symbol)
+              
+              console.log(`[CHART_PROPS] ${p.symbol}: Passing to chart:`, { sl, tp })
               
               // Calculate age in minutes
               const ageMinutes = (() => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react'
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import * as LightweightCharts from 'lightweight-charts'
 import type { 
   IChartApi, 
@@ -79,9 +79,6 @@ const TradingViewChartComponent: React.FC<TradingViewChartProps> = ({
   const ema100DataRef = useRef<Array<{time: UTCTimestamp, value: number}>>([])
   
   // Drag & Drop state
-  const [isDragging, setIsDragging] = useState(false)
-  const [isHoveringLine, setIsHoveringLine] = useState(false)
-  const dragTargetRef = useRef<'tp' | 'sl' | null>(null)
   const [draggedTpPrice, setDraggedTpPrice] = useState<number | null>(null)
   const [draggedSlPrice, setDraggedSlPrice] = useState<number | null>(null)
   
@@ -103,6 +100,16 @@ const TradingViewChartComponent: React.FC<TradingViewChartProps> = ({
   const [showProfitTakerModal, setShowProfitTakerModal] = useState(false)
   const [profitTakerResult, setProfitTakerResult] = useState<any>(null)
   
+  // Context menu state
+  const [showContextMenu, setShowContextMenu] = useState(false)
+  const [contextMenuX, setContextMenuX] = useState(0)
+  const [contextMenuY, setContextMenuY] = useState(0)
+  const [contextMenuPrice, setContextMenuPrice] = useState<number | null>(null)
+  
+  // Price alerts state
+  const [priceAlerts, setPriceAlerts] = useState<Array<{ id: string; price: number }>>([])
+  const alertLinesRef = useRef<Array<any>>([])
+  
   // Local SL/TP state (can be updated from drag or API)
   const [slPrice, setSlPrice] = useState(slPriceProp ?? null)
   const [tpPrice, setTpPrice] = useState(tpPriceProp ?? null)
@@ -121,7 +128,21 @@ const TradingViewChartComponent: React.FC<TradingViewChartProps> = ({
   
   // Fetch klines
   const { data, loading, error, refetch } = useKlinesBatch([symbol], interval, 500)
-  const klines = data[symbol] || []
+  
+  // 🔥 CRITICAL FIX: Stabilize klines array reference to prevent unnecessary re-renders
+  // useMemo ensures klines only changes when actual data changes, not on every render
+  const klines = useMemo(() => {
+    const rawKlines = data[symbol] || []
+    console.log('[KLINES_MEMO] 🔄 Computing klines array:', {
+      symbol,
+      dataKeys: Object.keys(data),
+      hasSymbolInData: symbol in data,
+      length: rawKlines.length,
+      first: rawKlines[0]?.openTime,
+      last: rawKlines[rawKlines.length - 1]?.openTime
+    })
+    return rawKlines
+  }, [data, symbol])
   
   // DEBUG: Log klines data (pouze když se mění počet)
   useEffect(() => {
@@ -412,12 +433,17 @@ const TradingViewChartComponent: React.FC<TradingViewChartProps> = ({
   }, [symbol, interval])
   
   // 1️⃣ INICIÁLNÍ NAČTENÍ - setData() (kompletní replace)
+  // CRITICAL FIX: Track last loaded data to prevent unnecessary setData() calls
+  const lastLoadedDataRef = useRef<{symbol: string, count: number, firstTime: number} | null>(null)
+  
   useEffect(() => {
-    console.log('[TRADING_CHART] Load data effect triggered:', {
+    console.log('[TRADING_CHART] 🔍 Load data effect triggered:', {
       symbol,
       seriesReady,
       hasSeries: !!candlestickSeriesRef.current,
-      klinesLength: klines.length
+      klinesLength: klines.length,
+      klinesFirst: klines[0]?.openTime,
+      lastLoaded: lastLoadedDataRef.current
     })
     
     // CRITICAL: Wait for series to be fully initialized before loading data
@@ -429,6 +455,37 @@ const TradingViewChartComponent: React.FC<TradingViewChartProps> = ({
       console.warn('[TRADING_CHART] ⚠️ No klines data available for', symbol)
       return
     }
+    
+    // 🔥 CRITICAL FIX: Only call setData() if data actually changed!
+    // Check if we already loaded this exact dataset
+    const firstKlineTime = klines[0]?.openTime || 0
+    const lastKlineTime = klines[klines.length - 1]?.openTime || 0
+    const lastLoaded = lastLoadedDataRef.current
+    
+    console.log('[TRADING_CHART] 🔍 Data comparison:', {
+      symbol,
+      current: { count: klines.length, first: firstKlineTime, last: lastKlineTime },
+      cached: lastLoaded,
+      match: lastLoaded && 
+             lastLoaded.symbol === symbol && 
+             lastLoaded.count === klines.length &&
+             lastLoaded.firstTime === firstKlineTime
+    })
+    
+    if (lastLoaded && 
+        lastLoaded.symbol === symbol && 
+        lastLoaded.count === klines.length &&
+        lastLoaded.firstTime === firstKlineTime) {
+      console.log('[TRADING_CHART] ✅ SKIPPING setData() - data unchanged, preventing zoom reset!')
+      return
+    }
+    
+    console.warn('[TRADING_CHART] ⚠️ DATA CHANGED - calling setData() (will reset zoom):', {
+      reason: !lastLoaded ? 'first_load' :
+              lastLoaded.symbol !== symbol ? 'symbol_changed' :
+              lastLoaded.count !== klines.length ? 'count_changed' :
+              lastLoaded.firstTime !== firstKlineTime ? 'firstTime_changed' : 'unknown'
+    })
     
     console.log('[TRADING_CHART] 🎯 Loading', klines.length, 'candles into chart (FULL REFRESH)...')
     
@@ -446,6 +503,13 @@ const TradingViewChartComponent: React.FC<TradingViewChartProps> = ({
     
     // Uložit do cache pro soft updates
     candlesRef.current = candleData
+    
+    // 🔥 Track what we just loaded to prevent re-loading same data
+    lastLoadedDataRef.current = {
+      symbol,
+      count: klines.length,
+      firstTime: firstKlineTime
+    }
     
     console.log('[TRADING_CHART] 📦 Cached', candleData.length, 'candles for soft updates')
     
@@ -572,182 +636,267 @@ const TradingViewChartComponent: React.FC<TradingViewChartProps> = ({
       } else {
         console.log('[PRICE_LINES] ⏭️ Skipping TP line (invalid price)')
       }
+      
+      // Alert lines (price alerts)
+      // Remove old alert lines
+      alertLinesRef.current.forEach(line => {
+        try { series.removePriceLine(line) } catch {}
+      })
+      alertLinesRef.current = []
+      
+      // Create new alert lines
+      priceAlerts.forEach(alert => {
+        try {
+          const alertLine = series.createPriceLine({
+            price: alert.price,
+            color: '#cbd5e1', // Šedá barva
+            lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle.Dotted,
+            axisLabelVisible: true,
+            title: `🔔 ${alert.price.toFixed(6)}`
+          })
+          alertLinesRef.current.push(alertLine)
+          console.log('[PRICE_LINES] ✅ Alert line created:', alert.price)
+        } catch (e) {
+          console.error('[ALERT_LINE_ERROR]', e)
+        }
+      })
     } catch (e) {
       console.error('[PRICE_LINES_ERROR]', e)
     }
-  }, [seriesReady, entryPrice, slPrice, tpPrice])
+  }, [seriesReady, entryPrice, slPrice, tpPrice, priceAlerts])
+  
+  // Context Menu Handler
+  const handleContextMenu = useCallback((e: MouseEvent) => {
+    e.preventDefault() // CRITICAL - zablokuje nativní menu
+    e.stopPropagation()
+    
+    if (!containerRef.current || !candlestickSeriesRef.current) return
+    
+    try {
+      const rect = containerRef.current.getBoundingClientRect()
+      const y = e.clientY - rect.top
+      
+      // Převod Y→cena pomocí lightweight-charts API
+      const priceAtY = candlestickSeriesRef.current.coordinateToPrice(y)
+      
+      if (priceAtY === null || !Number.isFinite(priceAtY)) return
+      
+      console.log('[CONTEXT_MENU]', { priceAtY, clientX: e.clientX, clientY: e.clientY })
+      
+      // Zavři všechny modály
+      setShowTpModal(false)
+      setShowSlModal(false)
+      setShowScaleInModal(false)
+      
+      // Zobraz context menu
+      setContextMenuX(e.clientX)
+      setContextMenuY(e.clientY)
+      setContextMenuPrice(priceAtY)
+      setShowContextMenu(true)
+    } catch (err) {
+      console.error('[CONTEXT_MENU_ERROR]', err)
+    }
+  }, [])
   
   // Drag & Drop Handlers
   useEffect(() => {
-    if (!containerRef.current || !candlestickSeriesRef.current || !chartRef.current) return
+    if (!containerRef.current || !candlestickSeriesRef.current || !seriesReady) {
+      console.log('[DRAG_DROP_INIT] ⏳ Waiting for chart to be ready...', {
+        hasContainer: !!containerRef.current,
+        hasSeries: !!candlestickSeriesRef.current,
+        seriesReady
+      })
+      return
+    }
     
     const container = containerRef.current
     const series = candlestickSeriesRef.current
-    const chart = chartRef.current
-    let isPointerDown = false
     
-    console.log('[DRAG_DROP] Initializing drag & drop handlers', { 
-      hasContainer: !!container, 
-      hasSeries: !!series, 
-      hasChart: !!chart,
-      tpPrice,
-      slPrice
+    console.log('[DRAG_DROP_INIT] ✅ Setting up drag & drop handlers', {
+      hasContainer: !!container,
+      hasSeries: !!series,
+      seriesReady,
+      slPrice,
+      tpPrice
     })
     
+    // Local variables for drag tracking (not React state)
+    let isPointerDown = false
+    let lastPointerPrice: number | null = null
+    let dragTarget: 'tp' | 'sl' | null = null
+    
     const handleMouseDown = (e: MouseEvent) => {
-      if (!series || !chart) return
-      
-      const rect = container.getBoundingClientRect()
-      const y = e.clientY - rect.top
-      
-      console.log('[DRAG_MOUSEDOWN] Click detected at Y:', y)
+      // Only handle left click for dragging (button 0), ignore right click (button 2)
+      if (e.button !== 0) return
       
       try {
-        // FIXED: Use chart.priceScale() instead of series.coordinateToPrice()
-        const priceScale = chart.priceScale()
-        if (!priceScale) {
-          console.warn('[DRAG_MOUSEDOWN] Price scale not available')
+        const rect = container.getBoundingClientRect()
+        const y = e.clientY - rect.top
+        
+        // Use series API to convert coordinate to price
+        const priceAtY = series.coordinateToPrice(y)
+        
+        if (priceAtY === null || !Number.isFinite(priceAtY)) return
+        
+        // Reset all drag states first - CRITICAL!
+        isPointerDown = false
+        lastPointerPrice = null
+        dragTarget = null
+        setDraggedSlPrice(null)
+        setDraggedTpPrice(null)
+        
+        // Calculate distances to both lines
+        let slDistance = Infinity
+        let tpDistance = Infinity
+        
+        if (slPrice && Number.isFinite(slPrice)) {
+          slDistance = Math.abs(priceAtY - slPrice)
+        }
+        
+        if (tpPrice && Number.isFinite(tpPrice)) {
+          tpDistance = Math.abs(priceAtY - tpPrice)
+        }
+        
+        const tolerance = Math.abs(priceAtY * 0.005) // 0.5% tolerance
+        
+        console.log('[DRAG_CHECK]', { 
+          priceAtY, 
+          slDistance, 
+          tpDistance, 
+          tolerance,
+          closest: slDistance < tpDistance ? 'SL' : 'TP'
+        })
+        
+        // Only drag the CLOSEST line if within tolerance
+        if (slDistance < tpDistance && slDistance < tolerance) {
+          // SL is closer - ONLY drag SL
+          isPointerDown = true
+          lastPointerPrice = priceAtY
+          dragTarget = 'sl'
+          console.log('[SL_DRAG_START_ONLY]')
+          e.preventDefault()
+          e.stopPropagation()
+          return
+        } else if (tpDistance < tolerance) {
+          // TP is closer - ONLY drag TP
+          isPointerDown = true
+          lastPointerPrice = priceAtY
+          dragTarget = 'tp'
+          console.log('[TP_DRAG_START_ONLY]')
+          e.preventDefault()
+          e.stopPropagation()
           return
         }
-        
-        const priceAtY = priceScale.coordinateToPrice(y)
-        if (!priceAtY || !Number.isFinite(priceAtY)) {
-          console.warn('[DRAG_MOUSEDOWN] Invalid price at Y:', priceAtY)
-          return
-        }
-        
-        console.log('[DRAG_MOUSEDOWN] Price at Y:', priceAtY, 'TP:', tpPrice, 'SL:', slPrice)
-        
-        // Tolerance ±0.5%
-        const tpTol = (tpPrice ?? 0) * 0.005
-        const slTol = (slPrice ?? 0) * 0.005
-        
-        const tpDistance = tpPrice ? Math.abs(priceAtY - tpPrice) : Infinity
-        const slDistance = slPrice ? Math.abs(priceAtY - slPrice) : Infinity
-        
-        console.log('[DRAG_MOUSEDOWN] Distances - TP:', tpDistance, '(tol:', tpTol, ') SL:', slDistance, '(tol:', slTol, ')')
-        
-        if (tpPrice && tpDistance <= tpTol) {
-          console.log('[DRAG_MOUSEDOWN] ✅ TP line grabbed!')
-          dragTargetRef.current = 'tp'
-          isPointerDown = true
-          setIsDragging(true)
-        } else if (slPrice && slDistance <= slTol) {
-          console.log('[DRAG_MOUSEDOWN] ✅ SL line grabbed!')
-          dragTargetRef.current = 'sl'
-          isPointerDown = true
-          setIsDragging(true)
-        } else {
-          console.log('[DRAG_MOUSEDOWN] ❌ No line close enough to grab')
-        }
-      } catch (e) {
-        console.error('[DRAG_MOUSEDOWN_ERROR]', e)
+        // If not near any line, do nothing
+      } catch (err) {
+        console.error('[DRAG_ERROR]', err)
       }
     }
     
     const handleMouseMove = (e: MouseEvent) => {
-      if (!series || !chart) return
+      if (!isPointerDown || !dragTarget) return
       
-      const rect = container.getBoundingClientRect()
-      const y = e.clientY - rect.top
-      
-      // FIXED: Use chart.priceScale() for hover detection too
       try {
-        const priceScale = chart.priceScale()
-        if (!priceScale) return
+        const rect = container.getBoundingClientRect()
+        const y = e.clientY - rect.top
         
-        const priceAtY = priceScale.coordinateToPrice(y)
-        if (!priceAtY || !Number.isFinite(priceAtY)) return
+        // Use series API to convert coordinate to price
+        const priceAtY = series.coordinateToPrice(y)
         
-        // If dragging, update the line
-        if (isPointerDown && dragTargetRef.current) {
-          console.log('[DRAG_MOUSEMOVE] Dragging', dragTargetRef.current, 'to price:', priceAtY)
-          
-          // Update visual line (thicker, solid)
-          if (dragTargetRef.current === 'tp') {
-            if (tpLineRef.current) {
-              try { series.removePriceLine(tpLineRef.current) } catch {}
-            }
-            tpLineRef.current = series.createPriceLine({
-              price: priceAtY,
-              color: '#10b981',
-              lineWidth: 3,
-              lineStyle: LightweightCharts.LineStyle.Solid,
-              axisLabelVisible: true,
-              title: `TP: ${priceAtY.toFixed(6)} (dragging)`
-            })
-            setDraggedTpPrice(priceAtY)
-          } else if (dragTargetRef.current === 'sl') {
-            if (slLineRef.current) {
-              try { series.removePriceLine(slLineRef.current) } catch {}
-            }
-            slLineRef.current = series.createPriceLine({
-              price: priceAtY,
-              color: '#ef4444',
-              lineWidth: 3,
-              lineStyle: LightweightCharts.LineStyle.Solid,
-              axisLabelVisible: true,
-              title: `SL: ${priceAtY.toFixed(6)} (dragging)`
-            })
-            setDraggedSlPrice(priceAtY)
-          }
-        } else {
-          // Hover detection for cursor feedback
-          const tpTol = (tpPrice ?? 0) * 0.005
-          const slTol = (slPrice ?? 0) * 0.005
-          
-          const nearTp = tpPrice && Math.abs(priceAtY - tpPrice) <= tpTol
-          const nearSl = slPrice && Math.abs(priceAtY - slPrice) <= slTol
-          
-          if (nearTp || nearSl) {
-            if (!isHoveringLine) {
-              setIsHoveringLine(true)
-              container.style.cursor = 'ns-resize'
-            }
-          } else {
-            if (isHoveringLine) {
-              setIsHoveringLine(false)
-              container.style.cursor = 'default'
-            }
-          }
+        if (priceAtY === null || !Number.isFinite(priceAtY)) return
+        
+        lastPointerPrice = priceAtY
+        
+        // ONLY update the line that is being dragged
+        if (dragTarget === 'sl' && slLineRef.current) {
+          // Update ONLY SL line
+          series.removePriceLine(slLineRef.current)
+          const newSlLine = series.createPriceLine({
+            price: priceAtY,
+            color: '#ef4444', // Red during drag
+            lineWidth: 3,
+            lineStyle: 0, // Solid during drag
+            axisLabelVisible: true,
+            title: `SL: ${priceAtY.toFixed(5)} (dragging)`,
+          })
+          slLineRef.current = newSlLine
+          setDraggedSlPrice(priceAtY)
+          setDraggedTpPrice(null) // Ensure TP drag price is null
+          e.preventDefault()
+        } else if (dragTarget === 'tp' && tpLineRef.current) {
+          // Update ONLY TP line
+          series.removePriceLine(tpLineRef.current)
+          const newTpLine = series.createPriceLine({
+            price: priceAtY,
+            color: '#10b981',
+            lineWidth: 3,
+            lineStyle: 0, // Solid during drag
+            axisLabelVisible: true,
+            title: `TP: ${priceAtY.toFixed(5)} (dragging)`,
+          })
+          tpLineRef.current = newTpLine
+          setDraggedTpPrice(priceAtY)
+          setDraggedSlPrice(null) // Ensure SL drag price is null
+          e.preventDefault()
         }
-      } catch (e) {
-        console.error('[DRAG_MOUSEMOVE_ERROR]', e)
+      } catch (err) {
+        console.error('[MOVE_ERROR]', err)
       }
     }
     
-    const handleMouseUp = () => {
-      if (!isPointerDown) return
+    const handleMouseUp = (e: MouseEvent) => {
+      // Only handle left click release for mouseup, always handle mouseleave
+      if (e.type === 'mouseup' && e.button !== 0) return
+      if (!isPointerDown || !dragTarget) return
       
-      console.log('[DRAG_MOUSEUP] Released', dragTargetRef.current, 'TP:', draggedTpPrice, 'SL:', draggedSlPrice)
+      console.log('[DRAG_END]', { dragTarget, lastPointerPrice })
       
+      // Store what was being dragged before resetting
+      const wasDraggingTp = dragTarget === 'tp'
+      const wasDraggingSl = dragTarget === 'sl'
+      const finalPrice = lastPointerPrice
+      
+      // Reset all drag states
       isPointerDown = false
-      setIsDragging(false)
-      container.style.cursor = 'default'
-      setIsHoveringLine(false)
+      lastPointerPrice = null
+      dragTarget = null
+      setDraggedSlPrice(null)
+      setDraggedTpPrice(null)
       
-      if (dragTargetRef.current === 'tp' && draggedTpPrice) {
-        console.log('[DRAG_MOUSEUP] ✅ Opening TP modal')
-        setShowTpModal(true)
-      } else if (dragTargetRef.current === 'sl' && draggedSlPrice) {
-        console.log('[DRAG_MOUSEUP] ✅ Opening SL modal')
+      // Open ONLY the appropriate modal
+      if (wasDraggingSl && finalPrice && Number.isFinite(finalPrice)) {
+        console.log('[OPENING_SL_MODAL_ONLY]', { price: finalPrice })
+        setDraggedSlPrice(finalPrice)
+        setDraggedTpPrice(null)
+        setShowTpModal(false)
         setShowSlModal(true)
+      } else if (wasDraggingTp && finalPrice && Number.isFinite(finalPrice)) {
+        console.log('[OPENING_TP_MODAL_ONLY]', { price: finalPrice })
+        setDraggedTpPrice(finalPrice)
+        setDraggedSlPrice(null)
+        setShowSlModal(false)
+        setShowTpModal(true)
       }
-      
-      dragTargetRef.current = null
     }
     
     container.addEventListener('mousedown', handleMouseDown)
     container.addEventListener('mousemove', handleMouseMove)
     container.addEventListener('mouseup', handleMouseUp)
+    container.addEventListener('mouseleave', handleMouseUp) // Handle mouse leaving container
+    container.addEventListener('contextmenu', handleContextMenu) // Right-click context menu
+    
+    console.log('[DRAG_DROP_INIT] ✅ Event listeners attached!')
     
     return () => {
+      console.log('[DRAG_DROP_CLEANUP] Removing event listeners')
       container.removeEventListener('mousedown', handleMouseDown)
       container.removeEventListener('mousemove', handleMouseMove)
       container.removeEventListener('mouseup', handleMouseUp)
-      container.style.cursor = 'default'
+      container.removeEventListener('mouseleave', handleMouseUp)
+      container.removeEventListener('contextmenu', handleContextMenu)
     }
-  }, [slPrice, tpPrice, draggedTpPrice, draggedSlPrice, isHoveringLine])
+  }, [seriesReady, slPrice, tpPrice, handleContextMenu])
   
   // Auto-refresh interval (když Auto: ON)
   useEffect(() => {
@@ -769,9 +918,82 @@ const TradingViewChartComponent: React.FC<TradingViewChartProps> = ({
     }
   }, [autoUpdate, softUpdateLastCandle])
   
+  // Price Alert Management
+  const removeAlert = (alertId: string) => {
+    setPriceAlerts(prev => prev.filter(a => a.id !== alertId))
+    console.log('[PRICE_ALERT_REMOVED]', { alertId })
+  }
+  
+  // Context Menu Action Handlers
+  const handleSetTpFromContext = (e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    e?.preventDefault()
+    setShowContextMenu(false)
+    
+    if (contextMenuPrice && Number.isFinite(contextMenuPrice)) {
+      setDraggedTpPrice(contextMenuPrice)
+      setShowSlModal(false)
+      setShowTpModal(true)
+      console.log('[CONTEXT_MENU_TP]', { price: contextMenuPrice })
+    }
+  }
+  
+  const handleSetSlFromContext = (e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    e?.preventDefault()
+    setShowContextMenu(false)
+    
+    if (contextMenuPrice && Number.isFinite(contextMenuPrice)) {
+      setDraggedSlPrice(contextMenuPrice)
+      setShowTpModal(false)
+      setShowSlModal(true)
+      console.log('[CONTEXT_MENU_SL]', { price: contextMenuPrice })
+    }
+  }
+  
+  const handleSetBuyLimitFromContext = (e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    e?.preventDefault()
+    setShowContextMenu(false)
+    
+    if (contextMenuPrice && Number.isFinite(contextMenuPrice)) {
+      // Use scale-in modal with 10% default
+      setScaleInPct(10)
+      setShowScaleInModal(true)
+      console.log('[CONTEXT_MENU_BUY_LIMIT]', { price: contextMenuPrice })
+    }
+  }
+  
+  const handleSetPriceAlertFromContext = (e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    e?.preventDefault()
+    setShowContextMenu(false)
+    
+    if (contextMenuPrice && Number.isFinite(contextMenuPrice)) {
+      const newAlert = {
+        id: `alert_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        price: contextMenuPrice
+      }
+      setPriceAlerts(prev => [...prev, newAlert])
+      console.log('[PRICE_ALERT_CREATED]', newAlert)
+    }
+  }
+  
+  // Auto-close context menu when clicking anywhere
+  useEffect(() => {
+    if (!showContextMenu) return
+    
+    const handleClick = () => setShowContextMenu(false)
+    window.addEventListener('click', handleClick)
+    
+    return () => window.removeEventListener('click', handleClick)
+  }, [showContextMenu])
+  
   // API Handlers
   const handleConfirmTp = async () => {
     if (!draggedTpPrice) return
+    
+    console.log('[TP_CONFIRM] Sending request:', { symbol, tpPrice: draggedTpPrice })
     
     try {
       const res = await fetch('/api/manual_tp', {
@@ -780,22 +1002,30 @@ const TradingViewChartComponent: React.FC<TradingViewChartProps> = ({
         body: JSON.stringify({ symbol, tpPrice: draggedTpPrice })
       })
       
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      
       const json = await res.json()
-      if (!json.ok) throw new Error(json.error || 'Unknown error')
+      console.log('[TP_CONFIRM] Response:', { status: res.status, json })
+      
+      if (!res.ok || !json.ok) {
+        const errorMsg = json.error || `HTTP ${res.status}`
+        console.error('[TP_CONFIRM] Error:', errorMsg)
+        throw new Error(errorMsg)
+      }
       
       // Success
+      console.log('[TP_CONFIRM] ✅ Success:', json)
       setTpPrice(draggedTpPrice)
       setShowTpModal(false)
       setDraggedTpPrice(null)
     } catch (e: any) {
+      console.error('[TP_CONFIRM] Exception:', e)
       alert(`TP Change Error: ${e?.message || 'Unknown error'}`)
     }
   }
   
   const handleConfirmSl = async () => {
     if (!draggedSlPrice) return
+    
+    console.log('[SL_CONFIRM] Sending request:', { symbol, slPrice: draggedSlPrice })
     
     try {
       const res = await fetch('/api/manual_sl', {
@@ -804,16 +1034,22 @@ const TradingViewChartComponent: React.FC<TradingViewChartProps> = ({
         body: JSON.stringify({ symbol, slPrice: draggedSlPrice })
       })
       
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      
       const json = await res.json()
-      if (!json.ok) throw new Error(json.error || 'Unknown error')
+      console.log('[SL_CONFIRM] Response:', { status: res.status, json })
+      
+      if (!res.ok || !json.ok) {
+        const errorMsg = json.error || `HTTP ${res.status}`
+        console.error('[SL_CONFIRM] Error:', errorMsg)
+        throw new Error(errorMsg)
+      }
       
       // Success
+      console.log('[SL_CONFIRM] ✅ Success:', json)
       setSlPrice(draggedSlPrice)
       setShowSlModal(false)
       setDraggedSlPrice(null)
     } catch (e: any) {
+      console.error('[SL_CONFIRM] Exception:', e)
       alert(`SL Change Error: ${e?.message || 'Unknown error'}`)
     }
   }
@@ -1372,6 +1608,72 @@ const TradingViewChartComponent: React.FC<TradingViewChartProps> = ({
         <span><span style={{ color: '#f97316' }}>━</span> EMA 50</span>
         <span><span style={{ color: '#a78bfa' }}>━</span> EMA 100</span>
       </div>
+      
+      {/* Price Alerts Panel */}
+      {priceAlerts.length > 0 && (
+        <div style={{
+          padding: '8px 12px',
+          borderTop: '1px solid #1e293b',
+          background: '#0f172a'
+        }}>
+          <div style={{ 
+            fontSize: 10, 
+            color: '#64748b', 
+            marginBottom: 6,
+            fontWeight: 600 
+          }}>
+            🔔 Price Alerts:
+          </div>
+          <div style={{ 
+            display: 'flex', 
+            flexWrap: 'wrap', 
+            gap: 6 
+          }}>
+            {priceAlerts.map(alert => (
+              <div 
+                key={alert.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: '#1e293b',
+                  padding: '4px 8px',
+                  borderRadius: 4,
+                  border: '1px solid #334155',
+                  fontSize: 11
+                }}
+              >
+                <span style={{ color: '#cbd5e1', fontWeight: 500 }}>
+                  {alert.price.toFixed(5)}
+                </span>
+                <button
+                  onClick={() => removeAlert(alert.id)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    padding: 0,
+                    width: 14,
+                    height: 14,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 11,
+                    lineHeight: 1,
+                    transition: 'color 0.2s'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
+                  onMouseLeave={(e) => e.currentTarget.style.color = '#94a3b8'}
+                  title="Remove alert"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       
       {/* AI Action Buttons */}
       <div style={{
@@ -2058,6 +2360,154 @@ const TradingViewChartComponent: React.FC<TradingViewChartProps> = ({
               }}
             >
               Zavřít
+            </button>
+          </div>
+        </div>
+      )}
+      
+      {/* Context Menu */}
+      {showContextMenu && contextMenuPrice && (
+        <div
+          style={{
+            position: 'fixed',
+            left: contextMenuX,
+            top: contextMenuY,
+            background: '#1e293b',
+            border: '1px solid #475569',
+            borderRadius: 6,
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
+            zIndex: 10000,
+            minWidth: 200,
+            overflow: 'hidden'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Price header */}
+          <div style={{
+            padding: '8px 12px',
+            background: '#0f172a',
+            borderBottom: '1px solid #334155',
+            fontSize: 11,
+            color: '#94a3b8',
+            fontWeight: 600
+          }}>
+            Price: {contextMenuPrice.toFixed(6)}
+          </div>
+          
+          {/* Menu items */}
+          <div>
+            <button
+              onClick={handleSetTpFromContext}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                background: 'transparent',
+                border: 'none',
+                textAlign: 'left',
+                color: '#10b981',
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'background 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(16, 185, 129, 0.15)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <span>🟢</span>
+              <span>Set Take Profit here</span>
+            </button>
+            
+            <button
+              onClick={handleSetSlFromContext}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                background: 'transparent',
+                border: 'none',
+                textAlign: 'left',
+                color: '#ef4444',
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'background 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <span>🔴</span>
+              <span>Set Stop Loss here</span>
+            </button>
+            
+            <button
+              onClick={handleSetBuyLimitFromContext}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                background: 'transparent',
+                border: 'none',
+                textAlign: 'left',
+                color: '#3b82f6',
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'background 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(59, 130, 246, 0.15)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <span>🔵</span>
+              <span>Buy Limit Order here</span>
+            </button>
+            
+            <button
+              onClick={handleSetPriceAlertFromContext}
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                background: 'transparent',
+                border: 'none',
+                textAlign: 'left',
+                color: '#cbd5e1',
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'background 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(203, 213, 225, 0.15)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              <span>🔔</span>
+              <span>Set Price Alert here</span>
+            </button>
+            
+            <div style={{ height: 1, background: '#334155', margin: '4px 0' }} />
+            
+            <button
+              onClick={() => setShowContextMenu(false)}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                background: 'transparent',
+                border: 'none',
+                textAlign: 'center',
+                color: '#64748b',
+                fontSize: 12,
+                cursor: 'pointer'
+              }}
+            >
+              Cancel
             </button>
           </div>
         </div>
