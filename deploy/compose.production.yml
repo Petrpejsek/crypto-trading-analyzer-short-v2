@@ -55,7 +55,7 @@ services:
     ports:
       - "7500:7233"  # Expose Temporal gRPC
     environment:
-      - DB=postgresql
+      - DB=postgres12_pgx
       - DB_PORT=5432
       - POSTGRES_USER=${POSTGRES_USER:-temporal_short}
       - POSTGRES_PWD=${POSTGRES_PASSWORD}
