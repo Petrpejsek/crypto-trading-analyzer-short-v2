@@ -13,7 +13,7 @@ export type Candidate = {
   rsiH1?: number
   tier: 'SCOUT' | 'WATCH' | 'ALERT' | 'HOT'
   // New fields for 70±10 universe system
-  archetype?: 'loser_cont' | 'loser_fade' | 'overbought_blowoff' | 'mixed'
+  archetype?: 'loser_cont' | 'loser_fade' | 'overbought_blowoff' | 'losers_overheat_relief' | 'mixed'
   basket?: 'Prime' | 'Strong Watch' | 'Speculative'
   reason?: string
   // Additional key metrics for debugging
@@ -93,6 +93,8 @@ function generateReason(c: CoinRow, archetype: string, uiLang: string = 'cs'): s
     } else if (archetype === 'overbought_blowoff') {
       const crowding = (fundingZ >= 0 || oiChg > 0) ? ', crowding detected' : ''
       return `Overbought blow-off: RSI M15:${rsiM15.toFixed(0)} H1:${rsiH1.toFixed(0)}, ${(vwapRel * 100).toFixed(1)}% above VWAP${crowding}`
+    } else if (archetype === 'losers_overheat_relief') {
+      return `Overheat relief: ${ret24.toFixed(1)}% 24h loss, RSI M15:${rsiM15.toFixed(0)} H1:${rsiH1.toFixed(0)}, exhaustion bounce fade`
     } else {
       return `Mixed signals: ${ret24.toFixed(1)}% 24h, RSI ${rsiM15.toFixed(0)}, monitoring`
     }
@@ -106,13 +108,111 @@ function generateReason(c: CoinRow, archetype: string, uiLang: string = 'cs'): s
   } else if (archetype === 'overbought_blowoff') {
     const crowding = (fundingZ >= 0 || oiChg > 0) ? ', crowding detekován' : ''
     return `Překoupený blow-off: RSI M15:${rsiM15.toFixed(0)} H1:${rsiH1.toFixed(0)}, ${(vwapRel * 100).toFixed(1)}% nad VWAP${crowding}`
+  } else if (archetype === 'losers_overheat_relief') {
+    return `Přehřátý relief: ${ret24.toFixed(1)}% 24h ztráta, RSI M15:${rsiM15.toFixed(0)} H1:${rsiH1.toFixed(0)}, fade vyčerpání bounce`
   } else {
     return `Smíšené signály: ${ret24.toFixed(1)}% 24h, RSI ${rsiM15.toFixed(0)}, sledování`
   }
 }
 
+// Score for losers_overheat_relief archetype (0-100 scale)
+function scoreLosersOverheatRelief(c: CoinRow): { score: number; breakdown: any } {
+  const rsiM15 = Number((c as any).RSI_M15 || 50)
+  const rsiH1 = Number((c as any).RSI_H1 || 50)
+  const px = Number(c.price || 0)
+  const vwapM15 = Number((c as any).vwap_m15 || NaN)
+  const ema20M15 = Number((c as any).ema20_M15 || NaN)
+  const ema50M15 = Number((c as any).ema50_M15 || NaN)
+  const ema20H1 = Number((c as any).ema20_H1 || NaN)
+  const ema50H1 = Number((c as any).ema50_H1 || NaN)
+  const atrM15 = Number((c as any).atr_m15 || 0)
+  const volume24h = Number(c.volume24h_usd || 0)
+  const ret1h = Number((c as any).ret_60m_pct || 0)
+  const ret15m = Number((c as any).ret_15m_pct || 0)
+  const ret5m = Number((c as any).ret_5m_pct || 0)
+  
+  // Ask/bid walls for orderbook absorption (if available)
+  const askWall = Number((c as any).ask_wall_3pct || 0)
+  const bidWall = Number((c as any).bid_wall_3pct || 0)
+  
+  // 1) RSI OVERHEAT (25% weight)
+  // RSI.m15: 70-100 → score 0-100
+  // RSI.h1: 60-100 → bonus
+  const rsiM15Score = Math.max(0, Math.min(100, (rsiM15 - 70) / 0.30)) // 70-100 → 0-100
+  const rsiH1Bonus = rsiH1 >= 60 ? Math.min(20, (rsiH1 - 60) / 0.40 * 20) : 0
+  const rsiScore = Math.min(100, rsiM15Score + rsiH1Bonus)
+  
+  // 2) VZDÁLENOST OD VWAP/EMA (25% weight)
+  // Price > VWAP + 0.5×ATR → score increases
+  // EMA20 >> EMA50 → bonus
+  let distanceScore = 0
+  if (Number.isFinite(vwapM15) && atrM15 > 0 && px > 0) {
+    const vwapDist = (px - vwapM15) / atrM15
+    distanceScore = Math.max(0, Math.min(100, (vwapDist - 0.5) / 1.0 * 100))
+  }
+  
+  let emaSpreadBonus = 0
+  if (Number.isFinite(ema20M15) && Number.isFinite(ema50M15) && ema50M15 > 0) {
+    const emaSpread = (ema20M15 - ema50M15) / ema50M15 * 100
+    emaSpreadBonus = Math.min(30, Math.max(0, emaSpread * 10))
+  }
+  distanceScore = Math.min(100, distanceScore + emaSpreadBonus)
+  
+  // 3) LIKVIDITA + VOLUME (20% weight)
+  // Volume > 1M USD → baseline
+  // Higher volume → higher score (up to 50M USD)
+  const volumeScore = Math.max(0, Math.min(100, (volume24h - 1_000_000) / 49_000_000 * 100))
+  
+  // 4) MOMENTUM (20% weight) - zpomalení růstu
+  // Chceme: ret_1h positive ale ret_15m/ret_5m slowing down
+  // Perfect: ret_1h > 0 but ret_15m < ret_1h/4
+  let momentumScore = 0
+  if (ret1h > 0) {
+    // Positive 1h momentum
+    momentumScore += 40
+    
+    // Bonus if slowing down
+    if (ret15m < ret1h / 4) momentumScore += 30
+    if (ret5m < ret15m / 2) momentumScore += 30
+  }
+  momentumScore = Math.min(100, momentumScore)
+  
+  // 5) ORDERBOOK ABSORPCE (10% weight)
+  // Ratio ask_wall / bid_wall → vyšší ask wall = více resistance
+  let orderbookScore = 50 // Neutral baseline
+  if (askWall > 0 && bidWall > 0) {
+    const ratio = askWall / (bidWall + askWall)
+    orderbookScore = ratio * 100 // Higher ask wall % → higher score
+  }
+  
+  // WEIGHTED FINAL SCORE (0-100)
+  const finalScore = (
+    rsiScore * 0.25 +
+    distanceScore * 0.25 +
+    volumeScore * 0.20 +
+    momentumScore * 0.20 +
+    orderbookScore * 0.10
+  )
+  
+  return {
+    score: finalScore / 100, // Normalize to 0-1 for compatibility
+    breakdown: {
+      rsi: Number(rsiScore.toFixed(1)),
+      distance: Number(distanceScore.toFixed(1)),
+      volume: Number(volumeScore.toFixed(1)),
+      momentum: Number(momentumScore.toFixed(1)),
+      orderbook: Number(orderbookScore.toFixed(1)),
+      final: Number(finalScore.toFixed(1))
+    }
+  }
+}
+
 // Score a coin with new 0-1 system
-function scoreCandidate(c: CoinRow, archetype: 'loser_cont' | 'loser_fade' | 'overbought_blowoff' | 'mixed'): { score: number; breakdown: any } {
+function scoreCandidate(c: CoinRow, archetype: 'loser_cont' | 'loser_fade' | 'overbought_blowoff' | 'losers_overheat_relief' | 'mixed'): { score: number; breakdown: any } {
+  // Special scoring for losers_overheat_relief
+  if (archetype === 'losers_overheat_relief') {
+    return scoreLosersOverheatRelief(c)
+  }
   const ret24 = Number((c as any).ret_24h_pct || 0)
   const ret60 = Number((c as any).ret_60m_pct || 0)
   const ret180 = Number((c as any).ret_180m_pct || 0)
@@ -241,6 +341,73 @@ export function selectCandidates(
     return ret24 < 0
   })
 
+  // A0) LOSERS OVERHEAT RELIEF - přehřáté relief rally na 24h losers
+  // Aktivní pouze když je v konfigu enabled
+  const losersOverheatCfg = (candCfg as any)?.losers_overheat_relief || {}
+  const losersOverheatEnabled = Boolean(losersOverheatCfg.enabled)
+  
+  console.error(`[CAND_SELECT_NEW] 🔥 LOSERS_OVERHEAT_RELIEF archetype: enabled=${losersOverheatEnabled}, losersBase=${losersBase.length}`)
+  
+  const losersOverheat = losersOverheatEnabled ? losersBase.filter(c => {
+    const rsiM15 = Number((c as any).RSI_M15 || 50)
+    const rsiH1 = Number((c as any).RSI_H1 || 50)
+    const px = Number(c.price || 0)
+    const vwapM15 = Number((c as any).vwap_m15 || NaN)
+    const ema20M15 = Number((c as any).ema20_M15 || NaN)
+    const ema50M15 = Number((c as any).ema50_M15 || NaN)
+    const ema20H1 = Number((c as any).ema20_H1 || NaN)
+    const ema50H1 = Number((c as any).ema50_H1 || NaN)
+    const atrM15 = Number((c as any).atr_m15 || 0)
+    const spreadBps = Number((c as any).spread_bps || 0)
+    const liquidityUsd = Number(c.volume24h_usd || 0)
+    const ret1h = Number((c as any).ret_60m_pct || 0)
+    
+    // ✅ MUST HAVE kritéria
+    // 1) RSI.m15 ≥ 70
+    if (rsiM15 < 70) return false
+    
+    // 2) EMA20.m15 výrazně nad EMA50.m15 (min 0.5% spread)
+    if (!Number.isFinite(ema20M15) || !Number.isFinite(ema50M15) || ema50M15 <= 0) return false
+    const emaSpreadPct = (ema20M15 - ema50M15) / ema50M15 * 100
+    if (emaSpreadPct < 0.5) return false
+    
+    // 3) Price > VWAP + 0.5×ATR
+    if (!Number.isFinite(vwapM15) || atrM15 <= 0 || px <= 0) return false
+    const vwapDist = (px - vwapM15) / atrM15
+    if (vwapDist < 0.5) return false
+    
+    // 4) Volume a liquidity vysoké (> 1M USD)
+    if (liquidityUsd < 1_000_000) return false
+    
+    // 5) RSI.h1 ≥ 60
+    if (rsiH1 < 60) return false
+    
+    // 6) EMA20.h1 ≈ EMA50.h1 (tolerance ±3%)
+    if (Number.isFinite(ema20H1) && Number.isFinite(ema50H1) && ema50H1 > 0) {
+      const emaH1Spread = Math.abs(ema20H1 - ema50H1) / ema50H1 * 100
+      if (emaH1Spread > 3.0) return false
+    }
+    
+    // ❌ MUST NOT have (guardrails)
+    // 1) Spread_bps > 400
+    if (Number.isFinite(spreadBps) && spreadBps > 400) return false
+    
+    // 2) liquidity_usd < 50k (already filtered by 1M above, but double check)
+    if (liquidityUsd < 50_000) return false
+    
+    // 3) price < ema20.m15 (cena musí být nad EMA20)
+    if (Number.isFinite(ema20M15) && px > 0 && px < ema20M15) return false
+    
+    // 4) price_change_1h < 0 (chceme positive 1h momentum)
+    if (ret1h < 0) return false
+    
+    return true
+  }) : []
+  
+  if (losersOverheatEnabled) {
+    console.error(`[CAND_SELECT_NEW] 🔥 LOSERS_OVERHEAT_RELIEF filtered: ${losersOverheat.length} candidates passed strict criteria`)
+  }
+
   // A1) Continuation-down
   const losersCont = losersBase.filter(c => {
     const ret60 = Number((c as any).ret_60m_pct || 0)
@@ -334,13 +501,14 @@ export function selectCandidates(
   const losersContFiltered = losersCont.filter(c => !antiLateDump(c))
   const losersFadeFiltered = losersFade.filter(c => !antiLateDump(c))
   const overboughtFiltered = overbought.filter(c => !antiParabolic(c))
+  const losersOverheatFiltered = losersOverheat  // No additional filter needed
 
-  console.error(`[CAND_SELECT_NEW] Branch counts: loser_cont=${losersContFiltered.length}, loser_fade=${losersFadeFiltered.length}, overbought=${overboughtFiltered.length}`)
+  console.error(`[CAND_SELECT_NEW] Branch counts: loser_cont=${losersContFiltered.length}, loser_fade=${losersFadeFiltered.length}, overbought=${overboughtFiltered.length}, losers_overheat_relief=${losersOverheatFiltered.length}`)
 
   // Score all candidates
   type ScoredCandidate = {
     coin: CoinRow
-    archetype: 'loser_cont' | 'loser_fade' | 'overbought_blowoff' | 'mixed'
+    archetype: 'loser_cont' | 'loser_fade' | 'overbought_blowoff' | 'losers_overheat_relief' | 'mixed'
     score: number
     breakdown: any
   }
@@ -360,6 +528,11 @@ export function selectCandidates(
   for (const c of overboughtFiltered) {
     const s = scoreCandidate(c, 'overbought_blowoff')
     scored.push({ coin: c, archetype: 'overbought_blowoff', score: s.score, breakdown: s.breakdown })
+  }
+
+  for (const c of losersOverheatFiltered) {
+    const s = scoreCandidate(c, 'losers_overheat_relief')
+    scored.push({ coin: c, archetype: 'losers_overheat_relief', score: s.score, breakdown: s.breakdown })
   }
 
   // Sort by score descending
@@ -492,7 +665,7 @@ export function selectCandidates(
   })
 
   console.error(`[CAND_SELECT_NEW] Breakdown: Prime=${candidates.filter(c => c.basket === 'Prime').length}, Strong=${candidates.filter(c => c.basket === 'Strong Watch').length}, Speculative=${candidates.filter(c => c.basket === 'Speculative').length}`)
-  console.error(`[CAND_SELECT_NEW] Archetype breakdown: loser_cont=${candidates.filter(c => c.archetype === 'loser_cont').length}, loser_fade=${candidates.filter(c => c.archetype === 'loser_fade').length}, overbought=${candidates.filter(c => c.archetype === 'overbought_blowoff').length}, mixed=${candidates.filter(c => c.archetype === 'mixed').length}`)
+  console.error(`[CAND_SELECT_NEW] Archetype breakdown: loser_cont=${candidates.filter(c => c.archetype === 'loser_cont').length}, loser_fade=${candidates.filter(c => c.archetype === 'loser_fade').length}, overbought=${candidates.filter(c => c.archetype === 'overbought_blowoff').length}, losers_overheat_relief=${candidates.filter(c => c.archetype === 'losers_overheat_relief').length}, mixed=${candidates.filter(c => c.archetype === 'mixed').length}`)
 
   return candidates
 }

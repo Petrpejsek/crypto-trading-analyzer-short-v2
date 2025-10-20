@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import tradingCfg from '../../config/trading.json'
 import { wrapBinanceFuturesApi } from '../exchange/binance/safeSender'
 import { noteApiCall, setBanUntilMs } from '../../server/lib/rateLimits'
+import { applyEntryMultiplier } from '../lib/entry_price_adjuster'
 
 // SAFE_BOOT log pro identifikaci procesu
 console.log('[SAFE_BOOT]', { pid: process.pid, file: __filename })
@@ -366,12 +367,16 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
 
       // ENTRY - respektuj orderType z requestu
       const isMarketEntry = (order.orderType === 'market')
+      // Aplikuj ENTRY_PRICE_MULTIPLIER před odesláním na burzu (s tickSize + precision zaokrouhlením)
+      const tickSize = filters.tickSize && Number.isFinite(filters.tickSize) ? filters.tickSize : undefined
+      const pricePrecision = filters.pricePrecision && Number.isFinite(filters.pricePrecision) ? filters.pricePrecision : undefined
+      const adjustedEntryPx = applyEntryMultiplier(Number(order.entry), tickSize, pricePrecision)
       // SHORT: entry = SELL (opening short position)
       const entryParams: OrderParams & { __engine?: string } = {
         symbol: order.symbol,
         side: 'SELL',
         type: isMarketEntry ? 'MARKET' : 'LIMIT',
-        ...(isMarketEntry ? {} : { price: String(order.entry), timeInForce: 'GTC' }),
+        ...(isMarketEntry ? {} : { price: String(adjustedEntryPx), timeInForce: 'GTC' }),
         quantity: qty,
         closePosition: false,
         positionSide,
@@ -379,7 +384,7 @@ export async function executeHotTradingOrdersV2(request: PlaceOrdersRequest): Pr
         __engine: 'v2_batch_safe'
       }
 
-      // Prepare PAYLOAD snapshot before any API calls
+      // Prepare PAYLOAD snapshot before any API calls (zobraz původní cenu pro logging)
       const entryPayload = { type: 'LIMIT' as string | null, price: Number(order.entry), timeInForce: 'GTC' as string | null }
       const slPayload = { type: 'STOP_MARKET' as string | null, stopPrice: Number(order.sl), workingType: String(workingType), closePosition: true as boolean | null }
       const tpPayload = (tpMode === 'LIMIT_ON_FILL')

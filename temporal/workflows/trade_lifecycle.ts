@@ -1,5 +1,6 @@
 import { proxyActivities, sleep, workflowInfo } from '@temporalio/workflow'
 import type { Activities } from '../activities/types'
+import { applyEntryMultiplier } from '../../services/lib/entry_price_adjuster'
 
 export interface TradeLifecycleParams {
   symbol: string
@@ -34,11 +35,28 @@ export async function TradeLifecycleWorkflow(params: TradeLifecycleParams): Prom
   // SHORT-only project: reject LONG trades
   if (params.side === 'LONG') throw new Error('LONG trades not allowed in SHORT project')
   if (params.side !== 'SHORT') throw new Error(`Invalid side: ${params.side} - must be SHORT`)
+  
   const a = makeActivities(params.binanceQueue)
   const symbol = params.symbol.toUpperCase()
   const isLong = false  // Always false in SHORT project
   const positionSide = 'SHORT'
   const workingType = params.workingType === 'CONTRACT_PRICE' ? 'CONTRACT_PRICE' : 'MARK_PRICE'
+
+  // Získej tickSize a pricePrecision pro správné zaokrouhlení entry ceny
+  let tickSize: number | undefined = undefined
+  let pricePrecision: number | undefined = undefined
+  try {
+    const symbolInfo = await a.binanceGetSymbolInfo(symbol)
+    const priceFilter = (symbolInfo?.filters || []).find((f: any) => f?.filterType === 'PRICE_FILTER')
+    if (priceFilter && Number.isFinite(Number(priceFilter.tickSize))) {
+      tickSize = Number(priceFilter.tickSize)
+    }
+    if (symbolInfo && Number.isFinite(Number(symbolInfo.pricePrecision))) {
+      pricePrecision = Number(symbolInfo.pricePrecision)
+    }
+  } catch (e) {
+    console.warn('[TRADE_LIFECYCLE] Failed to get symbol filters, proceeding without rounding:', e)
+  }
 
   // 1) Align leverage
   if (Number.isFinite(params.leverage) && params.leverage > 0) {
@@ -68,17 +86,22 @@ export async function TradeLifecycleWorkflow(params: TradeLifecycleParams): Prom
     }
     if (params.entryType === 'LIMIT') {
       if (!Number.isFinite(params.entryPrice as any)) throw new Error('LIMIT entry requires entryPrice')
-      return { ...commonEntry, type: 'LIMIT', price: String(params.entryPrice), timeInForce: 'GTC' as const, quantity: qty }
+      // Aplikuj ENTRY_PRICE_MULTIPLIER před odesláním na burzu (s tickSize + precision zaokrouhlením)
+      const adjustedPrice = applyEntryMultiplier(params.entryPrice!, tickSize, pricePrecision)
+      return { ...commonEntry, type: 'LIMIT', price: String(adjustedPrice), timeInForce: 'GTC' as const, quantity: qty }
     }
     if (params.entryType === 'STOP_MARKET') {
       // SHORT: stopPrice should be below current price
-      const stopPrice = params.entryPrice && Number.isFinite(params.entryPrice) ? String(params.entryPrice) : String(refPrice * 0.999)
-      return { ...commonEntry, type: 'STOP_MARKET', stopPrice, quantity: qty, workingType }
+      const baseStopPrice = params.entryPrice && Number.isFinite(params.entryPrice) ? params.entryPrice : refPrice * 0.999
+      const adjustedStopPrice = applyEntryMultiplier(baseStopPrice, tickSize, pricePrecision)
+      return { ...commonEntry, type: 'STOP_MARKET', stopPrice: String(adjustedStopPrice), quantity: qty, workingType }
     }
     // STOP (stop-limit)
-    const price = params.entryPrice && Number.isFinite(params.entryPrice) ? String(params.entryPrice) : String(refPrice)
-    const stopPrice = String(refPrice * 0.999)  // SHORT: below current price
-    return { ...commonEntry, type: 'STOP' as const, price, stopPrice, timeInForce: 'GTC' as const, quantity: qty, workingType }
+    const basePrice = params.entryPrice && Number.isFinite(params.entryPrice) ? params.entryPrice : refPrice
+    const adjustedPrice = applyEntryMultiplier(basePrice, tickSize, pricePrecision)
+    const baseStopPrice = refPrice * 0.999  // SHORT: below current price
+    const adjustedStopPrice = applyEntryMultiplier(baseStopPrice, tickSize, pricePrecision)
+    return { ...commonEntry, type: 'STOP' as const, price: String(adjustedPrice), stopPrice: String(adjustedStopPrice), timeInForce: 'GTC' as const, quantity: qty, workingType }
   })()
 
   await a.binancePlaceOrder({ ...entryParams, __engine: 'temporal_lifecycle' })

@@ -76,6 +76,39 @@ try {
   process.exit(1)
 }
 
+// ========================================
+// GLOBAL ERROR HANDLERS: Prevent server crashes
+// ========================================
+// Handler pro nezachycené Promise rejections (KRITICKÝ!)
+process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  console.error('[UNHANDLED_REJECTION] Uncaught Promise rejection detected!')
+  console.error('[UNHANDLED_REJECTION] Reason:', {
+    message: reason?.message || String(reason),
+    name: reason?.name || 'Unknown',
+    stack: reason?.stack || 'No stack trace',
+    code: reason?.code || null
+  })
+  console.error('[UNHANDLED_REJECTION] Promise:', promise)
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  // NEPADÁME - logujeme a pokračujeme (preventivní monitoring)
+})
+
+// Tento handler už je v processLock.ts, ale přidáváme i zde pro jistotu
+process.on('uncaughtException', (err: Error) => {
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  console.error('[UNCAUGHT_EXCEPTION] Fatal error detected!')
+  console.error('[UNCAUGHT_EXCEPTION] Error:', {
+    message: err.message,
+    name: err.name,
+    stack: err.stack,
+    code: (err as any).code || null
+  })
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  // Exit s krátkou prodlevou pro flush logů
+  setTimeout(() => process.exit(1), 100)
+})
+
 setGlobalDispatcher(new Agent({ keepAliveTimeout: 60_000, keepAliveMaxTimeout: 60_000, pipelining: 10 }))
 
 // Basic warning if API key is missing/invalid
@@ -337,7 +370,9 @@ async function sweepStaleOrdersOnce(): Promise<number> {
             if (isTpType && isInternalTp) return true
             if (isSlType && isInternalSl) return true
             // B) Původní pravidlo pro orphan exity se "stop" nebo "take_profit" s exit flagy
-            return side==='SELL' && isExitType && (reduceOnly || closePosition)
+            // KRITICKÁ OPRAVA: Pro SHORT system jsou SL ordery BUY STOP_MARKET!
+            // Nemůžeme filtrovat pouze SELL side - musíme čistit všechny exit ordery bez pozice
+            return isExitType && (reduceOnly || closePosition)
           }
           return false
         } catch { return false }
@@ -503,11 +538,136 @@ async function sweepStaleOrdersOnce(): Promise<number> {
 function startOrderSweeper(): void {
   if (__sweeperTimer) return
   const ms = Number((tradingCfg as any)?.OPEN_ORDERS_SWEEP_MS ?? 10000)
-  __sweeperTimer = setInterval(() => { sweepStaleOrdersOnce().catch(()=>{}) }, ms)
+  __sweeperTimer = setInterval(() => { 
+    sweepStaleOrdersOnce().catch((e) => {
+      console.error('[ORDER_SWEEPER_ERROR]', {
+        message: e?.message || String(e),
+        stack: e?.stack || 'No stack trace'
+      })
+    }) 
+  }, ms)
 }
 
 // KRITICKÁ OCHRANA: Continuous SL monitoring
 let __slMonitorTimer: NodeJS.Timeout | null = null
+const __pendingEmergencySL = new Set<string>()
+
+// Emergency SL Recovery System
+export async function createEmergencySLFromWatchdog(symbol: string, position: any): Promise<boolean> {
+  return createEmergencySL(symbol, position)
+}
+
+async function createEmergencySL(symbol: string, position: any, retries = 3): Promise<boolean> {
+  // Check if emergency SL is blocked in config
+  if ((tradingCfg as any)?.BLOCK_EMERGENCY_SL === true) {
+    console.warn('[EMERGENCY_SL_BLOCKED_BY_CONFIG]', { symbol })
+    return false
+  }
+  
+  // Check if SL is globally disabled
+  if ((tradingCfg as any)?.DISABLE_SL === true) {
+    console.info('[EMERGENCY_SL_SKIP_DISABLED]', { symbol })
+    return false
+  }
+  
+  // Anti-duplicate check
+  if (__pendingEmergencySL.has(symbol)) {
+    console.info('[EMERGENCY_SL_SKIP_DUPLICATE]', { symbol })
+    return false
+  }
+  
+  __pendingEmergencySL.add(symbol)
+  
+  try {
+    const api = getBinanceAPI() as any
+    
+    // Get position details
+    const entryPrice = Number(position?.entryPrice || 0)
+    const positionAmt = Number(position?.positionAmt || 0)
+    const isShort = positionAmt < 0
+    
+    if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
+      throw new Error('invalid_entry_price')
+    }
+    
+    // Calculate emergency SL price (5% from entry for SHORT = above entry)
+    const emergencyPct = Number((tradingCfg as any)?.EMERGENCY_SL_PCT) || 0.05
+    const emergencySlPrice = isShort 
+      ? entryPrice * (1 + emergencyPct)  // SHORT: SL above entry
+      : entryPrice * (1 - emergencyPct)  // LONG: SL below entry (not used but for completeness)
+    
+    // Get symbol info for tick size
+    const symbolInfo = await api.getSymbolInfo(symbol)
+    const priceFilter = (symbolInfo?.filters || []).find((f: any) => f?.filterType === 'PRICE_FILTER')
+    const tickSize = priceFilter ? Number(priceFilter.tickSize) : 0.01
+    
+    // Quantize to tick size
+    const roundToTick = (price: number, tick: number): number => {
+      const s = String(tick)
+      const idx = s.indexOf('.')
+      const decimals = idx >= 0 ? (s.length - idx - 1) : 0
+      return Number((Math.round(price / tick) * tick).toFixed(decimals))
+    }
+    
+    const slPrice = roundToTick(emergencySlPrice, tickSize)
+    
+    // Determine hedge mode
+    const isHedgeMode = await api.getHedgeMode()
+    
+    // Create SL order (SHORT: BUY to close)
+    const slParams: any = {
+      symbol,
+      side: isShort ? 'BUY' : 'SELL',
+      type: 'STOP_MARKET',
+      stopPrice: String(slPrice),
+      closePosition: true,
+      workingType: 'MARK_PRICE',
+      newClientOrderId: `x_sl_em_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      newOrderRespType: 'RESULT',
+      __engine: 'emergency_sl_recovery'
+    }
+    
+    if (isHedgeMode) {
+      slParams.positionSide = isShort ? 'SHORT' : 'LONG'
+    }
+    
+    // Retry logic
+    let lastError: any = null
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        console.info('[EMERGENCY_SL_ATTEMPT]', { symbol, attempt, slPrice, isShort, entryPrice })
+        const result = await api.placeOrder(slParams)
+        console.warn('[EMERGENCY_SL_CREATED]', { 
+          symbol, 
+          orderId: result?.orderId, 
+          stopPrice: slPrice, 
+          side: slParams.side,
+          entryPrice,
+          emergencyPct: `${emergencyPct * 100}%`
+        })
+        return true
+      } catch (err: any) {
+        lastError = err
+        console.error('[EMERGENCY_SL_ATTEMPT_FAILED]', { 
+          symbol, 
+          attempt, 
+          error: err?.message || String(err) 
+        })
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt)) // Exponential backoff
+        }
+      }
+    }
+    
+    throw lastError || new Error('emergency_sl_failed_all_retries')
+  } catch (err: any) {
+    console.error('[EMERGENCY_SL_FAILED]', { symbol, error: err?.message || String(err) })
+    return false
+  } finally {
+    __pendingEmergencySL.delete(symbol)
+  }
+}
+
 async function slProtectionMonitor(): Promise<void> {
   try {
     if (!hasRealBinanceKeysGlobal()) return
@@ -523,21 +683,29 @@ async function slProtectionMonitor(): Promise<void> {
         const size = Math.abs(Number(pos?.positionAmt || 0))
         if (!symbol || size === 0) continue
         
+        // SHORT system: look for BUY STOP orders (closing SHORT position)
+        const positionAmt = Number(pos?.positionAmt || 0)
+        const isShort = positionAmt < 0
+        const slSide = isShort ? 'BUY' : 'SELL'
+        
         const slOrders = ordersList.filter(o => 
           String(o?.symbol) === symbol && 
-          String(o?.side) === 'SELL' && 
+          String(o?.side) === slSide && 
           String(o?.type).includes('STOP')
         )
         
         if (slOrders.length === 0) {
           console.error('[CRITICAL_NO_SL_FOR_POSITION]', { 
             symbol, 
-            positionSize: size, 
+            positionSize: size,
+            positionAmt,
+            isShort,
             entryPrice: pos?.entryPrice,
             unrealizedPnl: pos?.unRealizedProfit 
           })
-          // TODO: Auto-create emergency SL based on position entry price - 5%
-          // Pro NMR: pokud entry ~19, emergency SL na 18.05 (5% ztráta)
+          
+          // Create emergency SL immediately
+          await createEmergencySL(symbol, pos)
         }
       } catch (e: any) {
         console.error('[SL_MONITOR_ERR]', { symbol: pos?.symbol, error: e?.message })
@@ -550,7 +718,14 @@ async function slProtectionMonitor(): Promise<void> {
 
 function startSlProtectionMonitor(): void {
   if (__slMonitorTimer) return
-  __slMonitorTimer = setInterval(() => { slProtectionMonitor().catch(()=>{}) }, 30_000) // every 30s
+  __slMonitorTimer = setInterval(() => { 
+    slProtectionMonitor().catch((e) => {
+      console.error('[SL_PROTECTION_MONITOR_ERROR]', {
+        message: e?.message || String(e),
+        stack: e?.stack || 'No stack trace'
+      })
+    }) 
+  }, 30_000) // every 30s
 }
 
 // BACKGROUND AUTOPILOT - běží identicky jako UI pipeline podle posledních UI kritérií
@@ -680,7 +855,14 @@ function startBackgroundTrading(): void {
   }
   if (__backgroundTimer) return
   console.info('[BACKGROUND_START]', { interval_ms: intervalMs, source: 'ui_auto_copy_settings' })
-  __backgroundTimer = setInterval(() => { backgroundTradingCycle().catch(()=>{}) }, intervalMs)
+  __backgroundTimer = setInterval(() => { 
+    backgroundTradingCycle().catch((e) => {
+      console.error('[BACKGROUND_CYCLE_ERROR]', {
+        message: e?.message || String(e),
+        stack: e?.stack || 'No stack trace'
+      })
+    }) 
+  }, intervalMs)
 }
 
 let __lastUiAutoCopyInterval: number | null = null
@@ -744,6 +926,7 @@ try { startStrategyUpdaterTimer() } catch {}
 
 // Start Binance user-data WS to capture cancel/filled events into audit log
 try {
+  try { initCooldownsFromDisk() } catch {}
   startBinanceUserDataWs({
     audit: async (evt) => {
       try {
@@ -769,6 +952,14 @@ try {
               ])
               const pos = (Array.isArray(positions) ? positions : []).find((p: any) => String(p?.symbol) === sym)
               const size = (() => { try { const n = Number(pos?.size ?? pos?.positionAmt ?? 0); return Number.isFinite(n) ? Math.abs(n) : 0 } catch { return 0 } })()
+              // Cooldown hook: position open/close
+              try {
+                if (size > 0) {
+                  notePositionOpened(sym)
+                } else {
+                  await notePositionClosedFromIncomes(sym)
+                }
+              } catch {}
               const hasPos = size > 0
               const noEntryOpen = (() => {
                 try {
@@ -778,27 +969,44 @@ try {
                     const reduceOnly = Boolean(o?.reduceOnly)
                     const closePosition = Boolean(o?.closePosition)
                     const clientId = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
-                    const isInternalEntry = /^e_l_/.test(clientId)
-                    return isInternalEntry && side === 'BUY' && type === 'LIMIT' && !(reduceOnly || closePosition)
+                    const isInternalEntry = /^e_l_|^sv2_e_l_/.test(clientId)
+                    // CRITICAL FIX: SHORT system uses SELL for entry, not BUY!
+                    return isInternalEntry && side === 'SELL' && type === 'LIMIT' && !(reduceOnly || closePosition)
                   })
                 } catch { return true }
               })()
 
               if (!hasPos && noEntryOpen) {
-                // Zruš interní TP/SL (x_tp_* / x_sl_*) pro daný symbol, max 3 kusy, audituj
+                // SAFETY: Only cleanup if no position AND no entry for reasonable time (5s+ since fill)
+                const timeSinceFill = Date.now() - new Date(evt.payload?.T || Date.now()).getTime()
+                const safeToCleanup = timeSinceFill > 5000
+                
+                if (!safeToCleanup) {
+                  console.info('[CLEANUP_SKIP_TOO_SOON]', { symbol: sym, timeSinceFillMs: timeSinceFill })
+                  return
+                }
+                
+                console.info('[CLEANUP_ON_POS_CLOSE]', { symbol: sym, hasPos, noEntryOpen, timeSinceFillMs: timeSinceFill })
+                
+                // Zruš VŠECHNY exit ordery (TP/SL) pro daný symbol - nejen interní (x_tp_*/x_sl_*)
+                // OPRAVA: Pro SHORT systém musíme mazat i BUY STOP ordery (SL pro SHORT)
                 const internalExits = (Array.isArray(orders) ? orders : []).filter((o: any) => {
                   try {
                     const cid = String((o as any)?.clientOrderId || (o as any)?.C || (o as any)?.c || '')
                     const type = String(o?.type || '').toUpperCase()
                     const isExit = type.includes('TAKE_PROFIT') || type.includes('STOP')
+                    const hasExitFlag = Boolean(o?.reduceOnly || o?.closePosition)
+                    // Maž všechny exit ordery - buď s našim prefixem nebo s exit flags
                     const isInternal = /^x_tp_|^x_sl_/.test(cid)
-                    return String(o?.symbol) === sym && isExit && isInternal
+                    const shouldClean = isExit && (isInternal || hasExitFlag)
+                    return String(o?.symbol) === sym && shouldClean
                   } catch { return false }
-                }).slice(0, 3)
+                }).slice(0, 5) // Zvýšeno z 3 na 5 pro jistotu
 
                 for (const o of internalExits) {
                   try {
                     await cancelOrder(sym, Number(o?.orderId))
+                    console.info('[CLEANUP_CANCELLED]', { symbol: sym, orderId: o?.orderId, clientOrderId: o?.clientOrderId, type: o?.type })
                     try { pushAudit({ ts: new Date().toISOString(), type: 'cancel', source: 'server', symbol: sym, orderId: Number(o?.orderId)||undefined, reason: 'cleanup_on_pos_close_internal_exit' }) } catch {}
                   } catch (e) {
                     try { console.error('[CLEANUP_ON_CLOSE_ERR]', { symbol: sym, orderId: o?.orderId, error: (e as any)?.message || e }) } catch {}
@@ -817,6 +1025,62 @@ try {
           waitingTpProcessPassFromPositions(positions).catch(()=>{})
         }
       } catch {}
+      // Immediate SL verification after entry fill
+      try {
+        if (evt.type === 'filled' && evt.symbol) {
+          const side = String(evt.side || '').toUpperCase()
+          const isEntryFill = side === 'SELL' && !Boolean(evt.payload?.R ?? evt.payload?.reduceOnly ?? false)
+          
+          if (isEntryFill) {
+            // After entry fill, verify SL exists (2.5s delay for sync)
+            setTimeout(async () => {
+              try {
+                const sym = String(evt.symbol)
+                console.info('[IMMEDIATE_SL_CHECK]', { symbol: sym, trigger: 'entry_fill' })
+                
+                const api = getBinanceAPI() as any
+                const [positions, orders] = await Promise.all([
+                  api.getPositions(),
+                  api.getOpenOrders(sym)
+                ])
+                
+                const position = (Array.isArray(positions) ? positions : []).find(
+                  (p: any) => String(p?.symbol) === sym
+                )
+                const positionAmt = Number(position?.positionAmt || 0)
+                const hasPosition = Math.abs(positionAmt) > 0
+                
+                if (hasPosition) {
+                  const isShort = positionAmt < 0
+                  const slSide = isShort ? 'BUY' : 'SELL'
+                  const hasSL = (Array.isArray(orders) ? orders : []).some((o: any) => 
+                    String(o?.side) === slSide && String(o?.type).includes('STOP')
+                  )
+                  
+                  if (!hasSL) {
+                    console.error('[IMMEDIATE_SL_CHECK_MISSING]', { 
+                      symbol: sym, 
+                      positionAmt, 
+                      isShort,
+                      entryPrice: position?.entryPrice 
+                    })
+                    // Trigger emergency SL creation
+                    await createEmergencySL(sym, position)
+                  } else {
+                    console.info('[IMMEDIATE_SL_CHECK_OK]', { symbol: sym, hasPosition, hasSL })
+                  }
+                }
+              } catch (err: any) {
+                console.error('[IMMEDIATE_SL_CHECK_ERR]', { 
+                  symbol: evt.symbol, 
+                  error: err?.message 
+                })
+              }
+            }, 2500) // 2.5s delay for position sync
+          }
+        }
+      } catch {}
+      
       // Strategy updater: trigger pouze na WebSocket filled events (izolovaně od waiting TP systému)
       try {
         if (evt.type === 'filled' && evt.symbol) {
@@ -1172,6 +1436,75 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+    
+    // GET /api/config/trading - Získat aktuální hodnoty z config/trading.json
+    if (url.pathname === '/api/config/trading' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        const configPath = path.join(process.cwd(), 'config', 'trading.json')
+        const configStr = fs.readFileSync(configPath, 'utf8')
+        const config = JSON.parse(configStr)
+        
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, config }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    
+    // PATCH /api/config/trading - Upravit ENTRY_PRICE_MULTIPLIER v config/trading.json
+    if (url.pathname === '/api/config/trading' && req.method === 'PATCH') {
+      res.setHeader('Cache-Control', 'no-store')
+      try {
+        const chunks: Buffer[] = []
+        for await (const ch of req) chunks.push(ch as Buffer)
+        const bodyStr = Buffer.concat(chunks).toString('utf8')
+        let parsed: any = null
+        try { parsed = bodyStr ? JSON.parse(bodyStr) : null } catch { parsed = null }
+        
+        const multiplier = Number(parsed?.ENTRY_PRICE_MULTIPLIER)
+        
+        // Validace: multiplier musí být v rozsahu 95.0 - 105.0
+        const MIN_MULTIPLIER = 95.0
+        const MAX_MULTIPLIER = 105.0
+        if (!Number.isFinite(multiplier) || multiplier < MIN_MULTIPLIER || multiplier > MAX_MULTIPLIER) {
+          res.statusCode = 400
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ 
+            ok: false, 
+            error: `ENTRY_PRICE_MULTIPLIER must be between ${MIN_MULTIPLIER} and ${MAX_MULTIPLIER}` 
+          }))
+          return
+        }
+        
+        // Načti config/trading.json
+        const configPath = path.join(process.cwd(), 'config', 'trading.json')
+        const configStr = fs.readFileSync(configPath, 'utf8')
+        const config = JSON.parse(configStr)
+        
+        // Aktualizuj hodnotu
+        config.ENTRY_PRICE_MULTIPLIER = multiplier
+        
+        // Zapiš zpět s formátováním
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8')
+        
+        console.info('[CONFIG_UPDATED]', { ENTRY_PRICE_MULTIPLIER: multiplier })
+        
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, value: multiplier }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+      }
+      return
+    }
+    
     if (url.pathname === '/api/order' && req.method === 'DELETE') {
       res.setHeader('Cache-Control', 'no-store')
       try {
@@ -1358,22 +1691,7 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
-    // GET /api/config/trading - vrátí trading config
-    if (url.pathname === '/api/config/trading' && req.method === 'GET') {
-      try {
-        const cfg = JSON.parse(await fs.promises.readFile(
-          path.join(process.cwd(), 'config/trading.json'), 'utf8'
-        ))
-        res.statusCode = 200
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify(cfg))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ error: 'Failed to read config' }))
-      }
-      return
-    }
+    // DELETED: Duplicitní endpoint - použij ten na řádku ~1435
     // POST /api/config/trading - uloží partial update trading configu
     if (url.pathname === '/api/config/trading' && req.method === 'POST') {
       try {
@@ -1420,7 +1738,12 @@ const server = http.createServer(async (req, res) => {
     // Manual trigger to run background pipeline once (useful for validation/tests)
     if (url.pathname === '/api/background/run_once' && req.method === 'POST') {
       try {
-        backgroundTradingCycle().catch(()=>{})
+        backgroundTradingCycle().catch((e) => {
+          console.error('[BACKGROUND_RUN_ONCE_ERROR]', {
+            message: e?.message || String(e),
+            stack: e?.stack || 'No stack trace'
+          })
+        })
         res.statusCode = 202
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ ok: true }))
@@ -5497,6 +5820,42 @@ const server = http.createServer(async (req, res) => {
     res.statusCode = 500
     res.setHeader('content-type', 'application/json')
     res.end(JSON.stringify({ error: e?.message ?? 'Internal error' }))
+  }
+})
+
+// ========================================
+// HTTP SERVER ERROR HANDLER: Prevence pádu při server errors
+// ========================================
+server.on('error', (err: NodeJS.ErrnoException) => {
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  console.error('[SERVER_ERROR] HTTP server error detected!')
+  console.error('[SERVER_ERROR] Error:', {
+    message: err.message,
+    name: err.name,
+    code: err.code || null,
+    stack: err.stack
+  })
+  console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+  
+  // Pokud je to EADDRINUSE, nemůžeme pokračovat
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[SERVER_ERROR] Port ${PORT} is already in use!`)
+    console.error('[SERVER_ERROR] Cannot start server. Exiting...')
+    process.exit(1)
+  }
+  
+  // Pro ostatní chyby - logujeme, ale nepřerušujeme
+})
+
+server.on('clientError', (err: Error, socket: any) => {
+  // Zachytáváme chyby od klientů (např. špatné requesty)
+  console.warn('[CLIENT_ERROR]', {
+    message: err.message,
+    code: (err as any).code || null
+  })
+  // Uzavři socket, pokud je ještě otevřený
+  if (socket?.writable) {
+    socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
   }
 })
 

@@ -1,5 +1,6 @@
 import { proxyActivities, sleep, setHandler, condition, defineQuery, defineSignal } from '@temporalio/workflow'
 import type { Activities } from '../activities/types'
+import { applyEntryMultiplier } from '../../services/lib/entry_price_adjuster'
 
 export type EntryAssistantInput = {
   symbol: string
@@ -53,7 +54,7 @@ export async function EntryAssistantWorkflow(input: EntryAssistantInput): Promis
     retry: { initialInterval: '5s', backoffCoefficient: 2, maximumAttempts: 3, maximumInterval: '1 minute' }
   })
   const bx = proxyActivities<Pick<Activities,
-    'binanceCalculateQuantity' | 'binancePlaceOrder' | 'binanceGetMarkPrice' | 'binanceSetLeverage'
+    'binanceCalculateQuantity' | 'binancePlaceOrder' | 'binanceGetMarkPrice' | 'binanceSetLeverage' | 'binanceGetSymbolInfo'
   >>({
     taskQueue: input.binanceQueue,
     startToCloseTimeout: '5 minutes',
@@ -87,14 +88,32 @@ export async function EntryAssistantWorkflow(input: EntryAssistantInput): Promis
     const positionSide = 'SHORT'
     const workingType = 'MARK_PRICE'
 
+    // Získej tickSize a pricePrecision pro správné zaokrouhlení entry ceny
+    let tickSize: number | undefined = undefined
+    let pricePrecision: number | undefined = undefined
+    try {
+      const symbolInfo = await bx.binanceGetSymbolInfo(input.symbol)
+      const priceFilter = (symbolInfo?.filters || []).find((f: any) => f?.filterType === 'PRICE_FILTER')
+      if (priceFilter && Number.isFinite(Number(priceFilter.tickSize))) {
+        tickSize = Number(priceFilter.tickSize)
+      }
+      if (symbolInfo && Number.isFinite(Number(symbolInfo.pricePrecision))) {
+        pricePrecision = Number(symbolInfo.pricePrecision)
+      }
+    } catch (e) {
+      console.warn('[ENTRY_ASSISTANT] Failed to get symbol filters, proceeding without rounding:', e)
+    }
+
     const entryParams: any = (() => {
       const ot = String(input.orderType || (input.strategy === 'aggressive' ? 'stop_limit' : 'limit'))
+      // Aplikuj ENTRY_PRICE_MULTIPLIER na cenu před odesláním na burzu (s tickSize + precision zaokrouhlením)
+      const adjustedEntryPx = applyEntryMultiplier(Number(entryPx), tickSize, pricePrecision)
       // SHORT: entry always = SELL
       if (ot === 'market') return { symbol: input.symbol, side: 'SELL', type: 'MARKET', quantity: qty, positionSide }
-      if (ot === 'limit') return { symbol: input.symbol, side: 'SELL', type: 'LIMIT', price: String(entryPx), timeInForce: 'GTC', quantity: qty, positionSide }
+      if (ot === 'limit') return { symbol: input.symbol, side: 'SELL', type: 'LIMIT', price: String(adjustedEntryPx), timeInForce: 'GTC', quantity: qty, positionSide }
       // SHORT: entry always = SELL
-      if (ot === 'stop') return { symbol: input.symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(entryPx), quantity: qty, positionSide, workingType }
-      return { symbol: input.symbol, side: 'SELL', type: 'STOP', price: String(entryPx), stopPrice: String(entryPx), timeInForce: 'GTC', quantity: qty, positionSide, workingType }
+      if (ot === 'stop') return { symbol: input.symbol, side: 'SELL', type: 'STOP_MARKET', stopPrice: String(adjustedEntryPx), quantity: qty, positionSide, workingType }
+      return { symbol: input.symbol, side: 'SELL', type: 'STOP', price: String(adjustedEntryPx), stopPrice: String(adjustedEntryPx), timeInForce: 'GTC', quantity: qty, positionSide, workingType }
     })()
 
     // SHORT: SL/TP = BUY (closing short position)

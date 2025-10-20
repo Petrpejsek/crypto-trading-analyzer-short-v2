@@ -120,6 +120,44 @@
       "knot_pattern": 0.10,
       "near_resistance": 0.05
     }
+  },
+  "losers_overheat_relief": {
+    "enabled": true,
+    "description": "Přehřáté relief rally na 24h losers - fade exhaustion bounce",
+    "target_candidates": {
+      "min": 25,
+      "max": 60,
+      "ideal": 40
+    },
+    "must_have": {
+      "ret_24h_pct_max": 0,
+      "rsi_m15_min": 70,
+      "rsi_h1_min": 60,
+      "ema20_m15_above_ema50_pct_min": 0.5,
+      "price_above_vwap_atr_min": 0.5,
+      "volume_24h_usd_min": 1000000,
+      "ret_1h_pct_min": 0,
+      "ema20_h1_ema50_h1_diff_max_pct": 3.0
+    },
+    "guardrails": {
+      "spread_bps_max": 400,
+      "liquidity_usd_min": 50000,
+      "price_must_be_above_ema20_m15": true,
+      "ret_1h_must_be_positive": true
+    },
+    "scoring_weights": {
+      "rsi_overheat": 0.25,
+      "distance_vwap_ema": 0.25,
+      "liquidity_volume": 0.20,
+      "momentum_slowdown": 0.20,
+      "orderbook_absorption": 0.10
+    },
+    "refresh_interval_minutes": 15,
+    "notes": [
+      "Timeframe: M15 + H1 pouze (M5 ignoruj)",
+      "Max 25-60 kandidátů",
+      "Nepoužívat predikce, pouze situational probability"
+    ]
   }
 }
 

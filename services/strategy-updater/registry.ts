@@ -22,8 +22,8 @@ const strategyUpdaterBySymbol: Record<string, StrategyUpdaterEntry> = {}
 const REGISTRY_DIR = path.resolve(process.cwd(), 'runtime')
 const REGISTRY_FILE = path.resolve(REGISTRY_DIR, 'strategy_updater.json')
 const ORDERS_FILE = path.resolve(REGISTRY_DIR, 'strategy_updater_orders.json')
-const UPDATE_DELAY_MS = 3 * 60 * 1000 // 3 minutes between checks
-const INITIAL_DELAY_MS = 2 * 60 * 1000 // first run 2 minutes after detection (can be overridden)
+const UPDATE_DELAY_MS = 1 * 60 * 1000 // 1 minute between checks
+const INITIAL_DELAY_MS = 1 * 60 * 1000 // first run 1 minute after detection (can be overridden)
 
 // Track orderIds created by Strategy Updater so UI can highlight them reliably
 const strategyUpdaterOrderIds = new Set<number>()

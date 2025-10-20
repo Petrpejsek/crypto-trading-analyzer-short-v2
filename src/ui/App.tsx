@@ -45,6 +45,7 @@ import OrdersPanel from './components/OrdersPanel';
 import PnlReportPanel from './components/PnlReportPanel'
 import TradingHoursTrafficLight from './components/TradingHoursTrafficLight'
 import FearGreedWidget from './components/FearGreedWidget'
+import EntryPriceMultiplierWidget from './components/EntryPriceMultiplierWidget'
 import { AiPayloadsPanel } from './components/AiPayloadsPanel'
 import { PromptsModal } from './components/PromptsModal'
 // Lightweight inline ActiveEntries Panel (detail + cancel)
@@ -1487,14 +1488,14 @@ ${goControls.length === 0 ? '❌ NO COINS TO SEND!' : '✅ Will send ' + goContr
       }
       if (goControls.length === 0) {
         setPlacingOrders(false)
-        alert(debugMsg + '\n\n⚠️ Žádné mince nemají GO rozhodnutí!\nKontroluj Risk Manager.');
+        // NO-GO modal removed - info is in console and UI banner
         setError('All selected coins are NO-GO or missing risk decision')
         return
       }
       
-      // Show success alert
+      // Partial NO-GO - info is in console, no modal needed
       if (goControls.length > 0 && goControls.length < includedControls.length) {
-        alert(debugMsg + '\n\n⚠️ Některé mince byly vynechány (NO-GO)');
+        console.warn('[PARTIAL_NO_GO]', { sent: goControls.length, skipped: noGoControls.length })
       }
       if (includedControls.length === 0) { setError('No coins selected'); return }
       // Pre-validate against MARK price (fail-fast: 5s timeout; server vynutí MARK guard tak jako tak)
@@ -1937,6 +1938,9 @@ ${goControls.length === 0 ? '❌ NO COINS TO SEND!' : '✅ Will send ' + goContr
       <div style={{ position: 'fixed', top: 150, right: 8, display: 'flex', gap: 8, zIndex: 1000 }}>
         <FearGreedWidget />
       </div>
+      
+      {/* Entry Price Multiplier widget - below Fear & Greed */}
+      <EntryPriceMultiplierWidget />
       {/* Last results history under WF panel */}
       {autoCopyStatus && (
         <div className="card" style={{ marginTop: 6, padding: 10 }}>

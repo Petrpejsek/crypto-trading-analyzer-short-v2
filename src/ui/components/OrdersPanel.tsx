@@ -660,10 +660,21 @@ export const OrdersPanel: React.FC = () => {
   useEffect(() => {
     fetch('/api/config/trading')
       .then(r => r.ok ? r.json() : null)
-      .then(cfg => {
-        if (cfg?.ENTRY_DELTA_CANCEL_PCT) setCancelDelta(Number(cfg.ENTRY_DELTA_CANCEL_PCT))
+      .then(data => {
+        // STRICT: Načti ze správné struktury { ok: true, config: {...} }
+        if (data?.ok && data?.config?.ENTRY_DELTA_CANCEL_PCT !== undefined) {
+          const val = Number(data.config.ENTRY_DELTA_CANCEL_PCT)
+          if (Number.isFinite(val)) {
+            setCancelDelta(val)
+            console.log('[DELTA_LOADED]', val)
+          }
+        } else {
+          console.warn('[DELTA_LOAD_FAILED] Invalid API response:', data)
+        }
       })
-      .catch(() => {})
+      .catch((e) => {
+        console.error('[DELTA_LOAD_ERROR]', e)
+      })
   }, [])
 
   const fmtNum = (n: number | null | undefined, dp = 6): string => {
@@ -1351,12 +1362,15 @@ export const OrdersPanel: React.FC = () => {
                   if (type === 'STOP_MARKET' && closePos) {
                     slOrders.push(order)
                   }
-                  if (type.includes('TAKE_PROFIT') && closePos) {
+                  // CRITICAL FIX: TP orders don't always have closePosition=true (e.g. TAKE_PROFIT with quantity)
+                  // Accept TP orders if they have closePosition OR if type includes TAKE_PROFIT
+                  if (type.includes('TAKE_PROFIT')) {
                     tpOrders.push(order)
                     console.log(`[GET_SL_TP_TP_FOUND] ${symbol}: Added to tpOrders`, {
                       orderId: order.orderId,
                       clientOrderId: order.clientOrderId,
-                      isStrategyUpdater: order.isStrategyUpdater
+                      isStrategyUpdater: order.isStrategyUpdater,
+                      closePos
                     })
                   }
                 }

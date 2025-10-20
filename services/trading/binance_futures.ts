@@ -7,6 +7,7 @@ import { isCooldownActive } from '../risk/cooldown'
 import { noteApiCall, setBanUntilMs } from '../../server/lib/rateLimits'
 import { binanceCache } from '../../server/lib/apiCache'
 import { requestCoalescer } from '../../server/lib/requestCoalescer'
+import { applyEntryMultiplier } from '../lib/entry_price_adjuster'
 
 // SAFE_BOOT log pro identifikaci procesu
 console.log('[SAFE_BOOT]', { pid: process.pid, file: __filename })
@@ -1731,6 +1732,14 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       }
       const stopTriggerStr = String(stopTriggerNum)
 
+      // Aplikuj ENTRY_PRICE_MULTIPLIER před odesláním na burzu (s tickSize + precision zaokrouhlením)
+      const validTickSize = Number.isFinite(tickSize) && tickSize > 0 ? tickSize : undefined
+      const validPricePrecision = Number.isFinite(symbolFilters.pricePrecision as any) ? symbolFilters.pricePrecision as number : undefined
+      const adjustedEntryNum = applyEntryMultiplier(Number(entryStr), validTickSize, validPricePrecision)
+      const adjustedEntryStr = String(adjustedEntryNum)
+      const adjustedStopTriggerNum = applyEntryMultiplier(stopTriggerNum, validTickSize, validPricePrecision)
+      const adjustedStopTriggerStr = String(adjustedStopTriggerNum)
+
       const entryParams: OrderParams & { __engine?: string } = (() => {
         if (isAggressive && (ot === 'stop_limit' || ot === 'stop-limit')) {
           // Spread: limit price at desired entry, trigger above mark/entry by small buffer
@@ -1738,8 +1747,8 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
             symbol: order.symbol,
             side: isShort ? 'SELL' : 'BUY',
             type: 'STOP',
-            price: entryStr,
-            stopPrice: stopTriggerStr,
+            price: adjustedEntryStr,
+            stopPrice: adjustedStopTriggerStr,
             timeInForce: 'GTC',
             quantity: qty,
             closePosition: false,
@@ -1756,7 +1765,7 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
             symbol: order.symbol,
             side: isShort ? 'SELL' : 'BUY',
             type: 'STOP_MARKET',
-            stopPrice: stopTriggerStr,
+            stopPrice: adjustedStopTriggerStr,
             quantity: qty,
             closePosition: false,
             workingType,
@@ -1783,7 +1792,7 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
           symbol: order.symbol,
           side: isShort ? 'SELL' : 'BUY',
           type: 'LIMIT',
-          price: entryStr,
+          price: adjustedEntryStr,
           quantity: qty,
           timeInForce: 'GTC',
           closePosition: false,
@@ -2266,19 +2275,56 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
   }
 
   const exitSettledRaw = await Promise.allSettled(exitPromises)
-  const combined: Record<string, { sl: any; tp: any; errors: string[] }> = {}
+  const combined: Record<string, { sl: any; tp: any; errors: string[]; slRetries?: number }> = {}
   for (let i = 0; i < exitSettledRaw.length; i += 1) {
     const r = exitSettledRaw[i]
     const idx = exitIndex[i]
     const symbol = idx?.symbol || 'UNKNOWN'
     const kind = idx?.kind || 'SL'
-    if (!combined[symbol]) combined[symbol] = { sl: null, tp: null, errors: [] }
+    if (!combined[symbol]) combined[symbol] = { sl: null, tp: null, errors: [], slRetries: 0 }
     if (r.status === 'fulfilled') {
       if (kind === 'SL') combined[symbol].sl = r.value
       else combined[symbol].tp = r.value
     } else {
       const msg = (r as any)?.reason?.message || 'unknown'
       combined[symbol].errors.push(`${kind}:${msg}`)
+      
+      // CRITICAL: Retry failed SL orders immediately (max 2 retries)
+      if (kind === 'SL' && (combined[symbol].slRetries || 0) < 2) {
+        const retryCount = (combined[symbol].slRetries || 0) + 1
+        combined[symbol].slRetries = retryCount
+        console.warn('[V3_SL_RETRY]', { symbol, attempt: retryCount, error: msg })
+        
+        // Find the prepared order for this symbol
+        const preparedOrder = prepared.find(p => p.symbol === symbol)
+        if (preparedOrder) {
+          try {
+            await new Promise(resolve => setTimeout(resolve, 500 * retryCount)) // Backoff
+            
+            const slParams: OrderParams & { __engine?: string } = {
+              symbol: preparedOrder.symbol,
+              side: String(preparedOrder.order?.side).toUpperCase() === 'SHORT' ? 'BUY' : 'SELL',
+              type: 'STOP_MARKET',
+              stopPrice: preparedOrder.rounded.sl,
+              closePosition: true,
+              workingType,
+              positionSide: preparedOrder.positionSide,
+              newClientOrderId: makeDeterministicClientId('x_sl_retry', { symbol: preparedOrder.symbol, stopPrice: preparedOrder.rounded.sl, attempt: retryCount }),
+              newOrderRespType: 'RESULT',
+              __engine: 'v3_batch_2s_retry'
+            }
+            
+            const retryResult = await api.placeOrder(slParams)
+            combined[symbol].sl = retryResult
+            // Remove error if retry succeeded
+            combined[symbol].errors = combined[symbol].errors.filter(e => !e.startsWith('SL:'))
+            console.info('[V3_SL_RETRY_SUCCESS]', { symbol, attempt: retryCount, orderId: retryResult?.orderId })
+          } catch (retryErr: any) {
+            console.error('[V3_SL_RETRY_FAILED]', { symbol, attempt: retryCount, error: retryErr?.message })
+            // Keep original error
+          }
+        }
+      }
     }
   }
   const exitSettled: Array<any> = Object.entries(combined).map(([symbol, v]) => ({ symbol, ok: v.errors.length === 0, sl: v.sl ?? null, tp: v.tp ?? null, error: v.errors.length ? v.errors.join('; ') : null }))
@@ -2302,6 +2348,77 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
     const status = (!r.entry_error && !r.exit_error) ? 'executed' : 'error'
     results.push({ symbol: r.symbol, status, entry_order: r.entry_order, sl_order: r.sl_order, tp_order: r.tp_order, error: r.entry_error || r.exit_error || null })
   })
+
+  // POST-EXECUTION VERIFICATION GATE: Verify all positions have SL before declaring success
+  const disableSl = (tradingCfg as any)?.DISABLE_SL === true
+  if (!disableSl) {
+    try {
+      console.info('[V3_POST_EXEC_VERIFICATION]', { symbolCount: prepared.length })
+      const [postPositions, postOrders] = await Promise.all([
+        fetchPositions(),
+        fetchAllOpenOrders()
+      ])
+      
+      const positionsWithoutSL: string[] = []
+      for (const r of results) {
+        if (r.status !== 'executed' || !r.entry_order) continue
+        
+        const symbol = r.symbol
+        const position = (Array.isArray(postPositions) ? postPositions : []).find(
+          (p: any) => String(p?.symbol) === symbol
+        )
+        
+        if (!position || Math.abs(Number(position?.positionAmt || 0)) === 0) {
+          // No position yet - skip verification
+          continue
+        }
+        
+        const positionAmt = Number(position?.positionAmt || 0)
+        const isShort = positionAmt < 0
+        const slSide = isShort ? 'BUY' : 'SELL'
+        
+        const hasSL = (Array.isArray(postOrders) ? postOrders : []).some((o: any) => 
+          String(o?.symbol) === symbol && 
+          String(o?.side) === slSide && 
+          String(o?.type).includes('STOP')
+        )
+        
+        if (!hasSL) {
+          console.error('[V3_POST_EXEC_MISSING_SL]', { 
+            symbol, 
+            positionAmt, 
+            isShort,
+            entryPrice: position?.entryPrice 
+          })
+          positionsWithoutSL.push(symbol)
+          
+          // Mark result as having SL verification issue
+          r.sl_verified = false
+          
+          // Trigger emergency SL creation
+          try {
+            const { createEmergencySLFromWatchdog } = await import('../../server/index')
+            await createEmergencySLFromWatchdog(symbol, position)
+          } catch (emergErr) {
+            console.error('[V3_POST_EXEC_EMERGENCY_SL_ERR]', { symbol, error: String(emergErr) })
+          }
+        } else {
+          r.sl_verified = true
+        }
+      }
+      
+      if (positionsWithoutSL.length > 0) {
+        console.error('[V3_POST_EXEC_SL_VERIFICATION_FAILED]', { 
+          symbols: positionsWithoutSL,
+          count: positionsWithoutSL.length 
+        })
+      } else {
+        console.info('[V3_POST_EXEC_SL_VERIFICATION_OK]', { verifiedCount: results.length })
+      }
+    } catch (verifyErr: any) {
+      console.error('[V3_POST_EXEC_VERIFICATION_ERROR]', { error: verifyErr?.message })
+    }
+  }
 
   const success = results.every(r => r.status === 'executed')
   return { success, orders: results, timestamp: new Date().toISOString(), engine: 'v3_batch_2s', price_logs: priceLogs }

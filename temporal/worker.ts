@@ -17,6 +17,39 @@ async function run(): Promise<void> {
     process.exit(1);
   }
 
+  // ========================================
+  // GLOBAL ERROR HANDLERS: Prevent worker crashes
+  // ========================================
+  // Handler pro nezachycené Promise rejections (KRITICKÝ!)
+  process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.error('[WORKER_UNHANDLED_REJECTION] Uncaught Promise rejection detected!');
+    console.error('[WORKER_UNHANDLED_REJECTION] Reason:', {
+      message: reason?.message || String(reason),
+      name: reason?.name || 'Unknown',
+      stack: reason?.stack || 'No stack trace',
+      code: reason?.code || null
+    });
+    console.error('[WORKER_UNHANDLED_REJECTION] Promise:', promise);
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    // NEPADÁME - logujeme a pokračujeme (preventivní monitoring)
+  });
+
+  // Handler pro uncaught exceptions
+  process.on('uncaughtException', (err: Error) => {
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.error('[WORKER_UNCAUGHT_EXCEPTION] Fatal error detected!');
+    console.error('[WORKER_UNCAUGHT_EXCEPTION] Error:', {
+      message: err.message,
+      name: err.name,
+      stack: err.stack,
+      code: (err as any).code || null
+    });
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    // Exit s krátkou prodlevou pro flush logů
+    setTimeout(() => process.exit(1), 100);
+  });
+
   const env = loadEnv();
   const namespace = String(process.env.TEMPORAL_NAMESPACE || 'default');
   

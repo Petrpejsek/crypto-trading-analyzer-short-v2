@@ -220,6 +220,10 @@ start_backend() {
   info "Starting backend on :$BACKEND_PORT"
   mkdir -p "$RUNTIME_DIR"
   # Enforce dev identity for this project: SHORT side and dev env (override any .env.local)
+  # Trading Engine: V3 Batch (executeHotTradingOrdersV3_Batch2s)
+  #   - Hard-coded in: services/trading/binance_futures.ts:1082
+  #   - Flow: Batch all entries → wait 3s → batch all exits (SL/TP)
+  #   - V2 engine is DEPRECATED and will throw error if attempted
   NODE_ENV="development" \
   TRADE_SIDE="SHORT" \
   PORT="$BACKEND_PORT" \
@@ -354,6 +358,12 @@ PM2 Conflict Detection:
 UI Cache Management:
   - Vite cache is ALWAYS cleaned before frontend start to prevent loading issues
   - This ensures fresh module resolution and prevents stale UI states
+
+Trading Engine (V3 Batch):
+  - Engine: executeHotTradingOrdersV3_Batch2s (hard-coded in binance_futures.ts:1082)
+  - Flow: Batch entries → wait 3s → batch exits (SL/TP)
+  - V2 engine is deprecated and will error if used
+  - Engine selection is in CODE, not configurable via env vars
   
 PORT 7800 STRICTLY BANNED:
   - Port 7800 is RESERVED for LONG trading instance

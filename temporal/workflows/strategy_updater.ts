@@ -18,7 +18,7 @@ export async function StrategyUpdaterWorkflow(params: StrategyUpdaterParams): Pr
   setHandler(pauseSignal, () => { paused = true })
   setHandler(resumeSignal, () => { paused = false })
 
-  const intervalMs = 5 * 60 * 1000
+  const intervalMs = 1 * 60 * 1000
 
   const runOnce = params?.runOnce === true
   do {
