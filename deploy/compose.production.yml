@@ -60,7 +60,6 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-temporal_short}
       - POSTGRES_PWD=${POSTGRES_PASSWORD}
       - POSTGRES_SEEDS=postgres-short
-      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
       - ENABLE_ES=false
       - ES_SEEDS=""
       - DEFAULT_NAMESPACE=trader-short
