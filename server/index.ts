@@ -5895,8 +5895,8 @@ server.on('clientError', (err: Error, socket: any) => {
   }
 })
 
-server.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`)
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server listening on http://0.0.0.0:${PORT}`)
   try { startOrderSweeper() } catch (e) { console.error('[SWEEPER_START_ERR]', (e as any)?.message || e) }
   try { startSlProtectionMonitor() } catch (e) { console.error('[SL_MONITOR_START_ERR]', (e as any)?.message || e) }
   try { loadBackgroundCriteria() } catch {}
