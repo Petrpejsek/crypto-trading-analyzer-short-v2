@@ -68,11 +68,11 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "tctl", "--namespace", "trader-short", "namespace", "describe"]
-      interval: 15s
+      test: ["CMD-SHELL", "curl -f http://localhost:7233 || exit 1"]
+      interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 30s
+      retries: 10
+      start_period: 60s
 
   # Temporal Web UI
   temporal-short-web:
