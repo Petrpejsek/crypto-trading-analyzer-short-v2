@@ -1,114 +1,190 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Idempotent deploy script for trader app (backend + frontend build)
-# Usage examples:
-#   ./scripts/deploy.sh --dir /srv/trader --branch main
-#   ./scripts/deploy.sh --dir /srv/trader --commit abcdef1
-#   ./scripts/deploy.sh --dir /srv/trader --tag v1.2.3 --dry-run
+# =============================================================================
+# Production Deployment Script for trader-short-v2
+# =============================================================================
+# This script prepares and deploys the trading system to production
+# 
+# Prerequisites:
+#   - .env.production file with all credentials
+#   - Docker and Docker Compose V2 installed
+#   - Domain DNS pointing to server IP
+#   - Ports 80, 443 open on firewall
+#
+# Usage:
+#   ./scripts/deploy.sh
+# =============================================================================
 
-APP_DIR=""
-REF_TYPE="branch"  # branch|commit|tag
-REF_VALUE="main"
-PM2_NAME="trader-backend"
-NODE_REQUIRED="18"
-DRY_RUN=false
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_ROOT"
 
-log() { echo "[DEPLOY] $*"; }
-fail() { echo "[DEPLOY][ERROR] $*" >&2; exit 1; }
+COMPOSE_FILE="deploy/compose.production.yml"
+ENV_FILE=".env.production"
+GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+IMAGE_TAG="trader-short-v2"
 
-need_cmd() { command -v "$1" >/dev/null 2>&1 || fail "Missing command: $1"; }
+echo "=============================================="
+echo "🚀 trader-short-v2 Production Deployment"
+echo "=============================================="
+echo "Git commit: $GIT_HASH"
+echo "Project root: $PROJECT_ROOT"
+echo ""
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --dir) APP_DIR="$2"; shift 2;;
-    --branch) REF_TYPE="branch"; REF_VALUE="$2"; shift 2;;
-    --commit) REF_TYPE="commit"; REF_VALUE="$2"; shift 2;;
-    --tag) REF_TYPE="tag"; REF_VALUE="$2"; shift 2;;
-    --pm2-name) PM2_NAME="$2"; shift 2;;
-    --dry-run) DRY_RUN=true; shift 1;;
-    *) fail "Unknown arg: $1";;
-  esac
+# =============================================================================
+# Step 1: Pre-flight checks
+# =============================================================================
+echo "📋 Step 1/6: Pre-flight checks..."
+
+if [ ! -f "$ENV_FILE" ]; then
+  echo "❌ ERROR: $ENV_FILE not found!"
+  echo ""
+  echo "Please create $ENV_FILE from env.production.template:"
+  echo "  cp env.production.template .env.production"
+  echo "  vim .env.production  # Fill in your credentials"
+  exit 1
+fi
+
+# Check for required env vars
+REQUIRED_VARS=(
+  "BINANCE_API_KEY"
+  "BINANCE_SECRET_KEY"
+  "OPENAI_API_KEY"
+  "POSTGRES_PASSWORD"
+)
+
+source "$ENV_FILE"
+
+missing_vars=0
+for var in "${REQUIRED_VARS[@]}"; do
+  if [ -z "${!var:-}" ] || [[ "${!var:-}" == *"your_"* ]] || [[ "${!var:-}" == *"CHANGE_THIS"* ]]; then
+    echo "❌ ERROR: $var is not set or contains placeholder value"
+    missing_vars=1
+  fi
 done
 
-[[ -z "$APP_DIR" ]] && fail "--dir is required (server checkout directory)"
-
-# Preflight checks
-need_cmd git
-need_cmd node
-need_cmd npm
-need_cmd pm2
-
-# Check Node version
-NODE_MAJOR=$(node -v | sed -E 's/^v([0-9]+).*/\1/')
-if [[ "$NODE_MAJOR" -lt "$NODE_REQUIRED" ]]; then
-  fail "Node >=$NODE_REQUIRED required, found $(node -v)"
+if [ $missing_vars -eq 1 ]; then
+  echo ""
+  echo "Please update $ENV_FILE with real credentials"
+  exit 1
 fi
 
-# .env sanity
-if [[ -f "$APP_DIR/.env" ]]; then
-  log "Found .env"
-else
-  log "Warning: .env not found in $APP_DIR (will rely on environment variables)"
+if ! command -v docker >/dev/null 2>&1; then
+  echo "❌ ERROR: Docker is not installed"
+  exit 1
 fi
 
-run() {
-  if $DRY_RUN; then
-    echo "+ $*"
-  else
-    eval "$@"
+if ! docker compose version >/dev/null 2>&1; then
+  echo "❌ ERROR: Docker Compose V2 is not installed"
+  exit 1
+fi
+
+echo "✅ Pre-flight checks passed"
+echo ""
+
+# =============================================================================
+# Step 2: Build frontend
+# =============================================================================
+echo "📦 Step 2/6: Building frontend..."
+
+if ! npm run build; then
+  echo "❌ ERROR: Frontend build failed"
+  exit 1
+fi
+
+echo "✅ Frontend built successfully"
+echo ""
+
+# =============================================================================
+# Step 3: Build Docker image
+# =============================================================================
+echo "🐳 Step 3/6: Building Docker image..."
+
+docker build -t "${IMAGE_TAG}:latest" -t "${IMAGE_TAG}:${GIT_HASH}" -f Dockerfile .
+
+echo "✅ Docker image built: ${IMAGE_TAG}:latest, ${IMAGE_TAG}:${GIT_HASH}"
+echo ""
+
+# =============================================================================
+# Step 4: Start services
+# =============================================================================
+echo "🚀 Step 4/6: Starting services..."
+
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+
+echo "✅ Services started"
+echo ""
+
+# =============================================================================
+# Step 5: Wait for health checks
+# =============================================================================
+echo "🏥 Step 5/6: Waiting for health checks..."
+
+max_wait=60
+elapsed=0
+health_ok=0
+
+while [ $elapsed -lt $max_wait ]; do
+  if docker compose -f "$COMPOSE_FILE" ps | grep -q "healthy"; then
+    # Check specifically for backend health
+    if docker inspect shortv2-backend-prod 2>/dev/null | grep -q '"Status": "healthy"'; then
+      health_ok=1
+      break
+    fi
   fi
-}
+  
+  echo -n "."
+  sleep 2
+  elapsed=$((elapsed + 2))
+done
 
-# Fetch code
-log "Updating repo at $APP_DIR"
-run "cd '$APP_DIR'"
-run "git fetch --all --tags"
-case "$REF_TYPE" in
-  branch)
-    run "git checkout '$REF_VALUE'"
-    run "git pull --ff-only"
-    ;;
-  commit)
-    run "git fetch origin"
-    run "git checkout '$REF_VALUE'"
-    ;;
-  tag)
-    run "git checkout 'tags/$REF_VALUE'"
-    ;;
-esac
+echo ""
 
-# Install deps and build
-log "Installing dependencies"
-run "npm ci"
-
-log "Typecheck & build frontend"
-run "npm run -s build"
-
-# Restart backend via PM2
-if $DRY_RUN; then
-  log "DRY RUN: pm2 startOrReload ecosystem.config.js --only '$PM2_NAME'"
+if [ $health_ok -eq 0 ]; then
+  echo "⚠️  WARNING: Services did not become healthy within ${max_wait}s"
+  echo "Check logs with: docker compose -f $COMPOSE_FILE logs"
 else
-  if pm2 list | grep -q "$PM2_NAME"; then
-    log "Reloading PM2 app: $PM2_NAME"
-    pm2 reload "$PM2_NAME" || pm2 restart "$PM2_NAME"
-  else
-    log "Starting PM2 app: $PM2_NAME"
-    pm2 start ecosystem.config.js --only "$PM2_NAME"
-  fi
-  pm2 save || true
+  echo "✅ Health checks passed"
 fi
 
-# Health-check
-HC_URL="http://127.0.0.1:8888/api/trading/settings"
-log "Health-check: $HC_URL"
-if $DRY_RUN; then
-  echo "+ curl -fsS $HC_URL | jq ."
-else
-  curl -fsS "$HC_URL" >/dev/null || fail "Health-check failed"
-fi
+echo ""
 
-log "Done"
+# =============================================================================
+# Step 6: Display status and next steps
+# =============================================================================
+echo "📊 Step 6/6: Deployment status"
+echo ""
 
+docker compose -f "$COMPOSE_FILE" ps
 
-
+echo ""
+echo "=============================================="
+echo "✅ Deployment complete!"
+echo "=============================================="
+echo ""
+echo "🔍 Monitoring commands:"
+echo "  - View all logs:        docker compose -f $COMPOSE_FILE logs -f"
+echo "  - Backend logs:         docker logs -f shortv2-backend-prod"
+echo "  - Worker logs:          docker logs -f shortv2-worker-prod"
+echo "  - Temporal logs:        docker logs -f temporal-short-prod"
+echo ""
+echo "🌐 Access points:"
+echo "  - Trading UI:           https://goozy.store"
+echo "  - Backend API:          https://goozy.store/api/trading/settings"
+echo "  - Temporal Web UI:      http://YOUR_SERVER_IP:8501"
+echo ""
+echo "🔧 Management commands:"
+echo "  - Stop all:             docker compose -f $COMPOSE_FILE down"
+echo "  - Restart backend:      docker compose -f $COMPOSE_FILE restart shortv2-backend"
+echo "  - Restart worker:       docker compose -f $COMPOSE_FILE restart shortv2-worker"
+echo "  - View service status:  docker compose -f $COMPOSE_FILE ps"
+echo ""
+echo "💾 Backup commands:"
+echo "  - Backup runtime DB:    docker cp shortv2-backend-prod:/app/runtime/temporal_short.db ./backup_\$(date +%Y%m%d_%H%M%S).db"
+echo ""
+echo "📝 Next steps:"
+echo "  1. Verify HTTPS works:  curl -I https://goozy.store"
+echo "  2. Check backend API:   curl https://goozy.store/api/trading/settings"
+echo "  3. Monitor logs for any errors"
+echo "  4. Test a small trade to verify system functionality"
+echo ""

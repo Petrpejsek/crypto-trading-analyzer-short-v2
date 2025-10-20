@@ -30,9 +30,15 @@ COPY --from=builder /app/services ./services
 COPY --from=builder /app/temporal ./temporal
 COPY --from=builder /app/types ./types
 COPY --from=builder /app/config ./config
+COPY --from=builder /app/prompts ./prompts
+COPY --from=builder /app/schemas ./schemas
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/vite.config.mts ./vite.config.mts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
+
+# Create runtime directories for SQLite DB, logs, and cache
+# These will be mounted as volumes in production
+RUN mkdir -p /app/runtime /app/logs/short /app/runtime/locks /app/runtime/prompts
 
 ENV NODE_ENV=production
 ENV PORT=8888

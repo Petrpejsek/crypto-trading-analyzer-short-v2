@@ -1,0 +1,219 @@
+version: '3.9'
+
+# Production deployment for trader-short-v2 on goozy.store
+# Includes: Temporal cluster, PostgreSQL, Backend, Worker, Caddy HTTPS proxy
+# 
+# Usage:
+#   docker compose -f deploy/compose.production.yml up -d --build
+#
+# Prerequisites:
+#   - .env.production file with all credentials
+#   - Domain DNS pointing to server IP
+#   - Ports 80, 443 open on firewall
+
+networks:
+  trader-short-prod:
+    driver: bridge
+
+volumes:
+  postgres-short-data:
+    driver: local
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
+  runtime-data:
+    driver: local
+
+services:
+  # PostgreSQL database for Temporal cluster
+  postgres-short:
+    image: postgres:15-alpine
+    container_name: postgres-short-prod
+    networks:
+      - trader-short-prod
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-temporal_short}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-temporal_short}
+    volumes:
+      - postgres-short-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-temporal_short}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Temporal server cluster
+  temporal-short:
+    image: temporalio/auto-setup:latest
+    container_name: temporal-short-prod
+    networks:
+      - trader-short-prod
+    ports:
+      - "7500:7233"  # Expose Temporal gRPC
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-temporal_short}
+      - POSTGRES_PWD=${POSTGRES_PASSWORD}
+      - POSTGRES_SEEDS=postgres-short
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+      - ENABLE_ES=false
+      - ES_SEEDS=""
+      - DEFAULT_NAMESPACE=trader-short
+    depends_on:
+      postgres-short:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "tctl", "--namespace", "trader-short", "namespace", "describe"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Temporal Web UI
+  temporal-short-web:
+    image: temporalio/web:latest
+    container_name: temporal-short-web-prod
+    networks:
+      - trader-short-prod
+    ports:
+      - "8501:8080"  # Web UI for monitoring
+    environment:
+      - TEMPORAL_GRPC_ENDPOINT=temporal-short:7233
+      - TEMPORAL_PERMIT_WRITE_API=true
+    depends_on:
+      temporal-short:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Trading backend (API + frontend serving)
+  shortv2-backend:
+    image: trader-short-v2:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: shortv2-backend-prod
+    networks:
+      - trader-short-prod
+    environment:
+      - NODE_ENV=production
+      - PORT=8888
+      - TRADE_SIDE=${TRADE_SIDE:-SHORT}
+      
+      # Binance API
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_SECRET_KEY=${BINANCE_SECRET_KEY}
+      - BINANCE_RECV_WINDOW_MS=${BINANCE_RECV_WINDOW_MS:-120000}
+      
+      # OpenAI
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_ORG_ID=${OPENAI_ORG_ID}
+      - OPENAI_PROJECT=${OPENAI_PROJECT}
+      
+      # Temporal
+      - TEMPORAL_ADDRESS=temporal-short:7233
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-trader-short}
+      - TASK_QUEUE=${TASK_QUEUE:-entry-short}
+      - TASK_QUEUE_OPENAI=${TASK_QUEUE_OPENAI:-openai-short}
+      - TASK_QUEUE_BINANCE=${TASK_QUEUE_BINANCE:-binance-short}
+      
+      # Trading config
+      - STRATEGY_UPDATER_MODEL=${STRATEGY_UPDATER_MODEL:-gpt-4o}
+      - STRATEGY_UPDATER_ENABLED=${STRATEGY_UPDATER_ENABLED:-1}
+      - STRATEGY_UPDATER_AUDIT=${STRATEGY_UPDATER_AUDIT:-1}
+      - MAX_SLIPPAGE_PCT=${MAX_SLIPPAGE_PCT:-0.05}
+      
+      # Health monitor
+      - HEALTH_MONITOR_PROVIDER=${HEALTH_MONITOR_PROVIDER:-server}
+      - HEALTH_MONITOR_MODEL=${HEALTH_MONITOR_MODEL:-gpt-4o-mini}
+    volumes:
+      - runtime-data:/app/runtime
+      - runtime-data:/app/logs
+    depends_on:
+      temporal-short:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8888/api/trading/settings >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Temporal worker (workflows and activities)
+  shortv2-worker:
+    image: trader-short-v2:latest
+    container_name: shortv2-worker-prod
+    networks:
+      - trader-short-prod
+    command: ["tsx", "temporal/worker.ts"]
+    environment:
+      - NODE_ENV=production
+      - TRADE_SIDE=${TRADE_SIDE:-SHORT}
+      
+      # Binance API
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_SECRET_KEY=${BINANCE_SECRET_KEY}
+      - BINANCE_RECV_WINDOW_MS=${BINANCE_RECV_WINDOW_MS:-120000}
+      
+      # OpenAI
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_ORG_ID=${OPENAI_ORG_ID}
+      - OPENAI_PROJECT=${OPENAI_PROJECT}
+      
+      # Temporal
+      - TEMPORAL_ADDRESS=temporal-short:7233
+      - TEMPORAL_NAMESPACE=${TEMPORAL_NAMESPACE:-trader-short}
+      - TASK_QUEUE=${TASK_QUEUE:-entry-short}
+      - TASK_QUEUE_OPENAI=${TASK_QUEUE_OPENAI:-openai-short}
+      - TASK_QUEUE_BINANCE=${TASK_QUEUE_BINANCE:-binance-short}
+      
+      # Trading config
+      - STRATEGY_UPDATER_MODEL=${STRATEGY_UPDATER_MODEL:-gpt-4o}
+      - STRATEGY_UPDATER_ENABLED=${STRATEGY_UPDATER_ENABLED:-1}
+      - STRATEGY_UPDATER_AUDIT=${STRATEGY_UPDATER_AUDIT:-1}
+      - MAX_SLIPPAGE_PCT=${MAX_SLIPPAGE_PCT:-0.05}
+      
+      # Health monitor
+      - HEALTH_MONITOR_PROVIDER=${HEALTH_MONITOR_PROVIDER:-server}
+      - HEALTH_MONITOR_MODEL=${HEALTH_MONITOR_MODEL:-gpt-4o-mini}
+    volumes:
+      - runtime-data:/app/runtime
+      - runtime-data:/app/logs
+    depends_on:
+      temporal-short:
+        condition: service_healthy
+      shortv2-backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Caddy reverse proxy with automatic HTTPS
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy-shortv2-prod
+    networks:
+      - trader-short-prod
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      shortv2-backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
