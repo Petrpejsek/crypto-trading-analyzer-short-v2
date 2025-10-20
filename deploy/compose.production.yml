@@ -149,7 +149,7 @@ services:
     container_name: shortv2-worker-prod
     networks:
       - trader-short-prod
-    command: ["tsx", "temporal/worker.ts"]
+    command: ["node", "./node_modules/.bin/tsx", "temporal/worker.ts"]
     environment:
       - NODE_ENV=production
       - TRADE_SIDE=${TRADE_SIDE:-SHORT}
