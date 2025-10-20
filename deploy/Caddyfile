@@ -10,10 +10,6 @@ goozy.store, www.goozy.store {
 
   # Static frontend is served by backend at '/'
   reverse_proxy shortv2-backend:8888
-
-  tls {
-    # Automatic Let's Encrypt via Caddy
-  }
 }
 
 
