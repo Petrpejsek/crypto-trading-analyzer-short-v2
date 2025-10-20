@@ -5814,6 +5814,42 @@ const server = http.createServer(async (req, res) => {
       return
     }
 
+    // Serve static files from dist/ (production frontend)
+    if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
+      const distPath = path.join(process.cwd(), 'dist')
+      let filePath = path.join(distPath, url.pathname === '/' ? 'index.html' : url.pathname)
+      
+      // If file doesn't exist, serve index.html (SPA fallback)
+      if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+        filePath = path.join(distPath, 'index.html')
+      }
+      
+      try {
+        const ext = path.extname(filePath).toLowerCase()
+        const contentTypeMap: Record<string, string> = {
+          '.html': 'text/html',
+          '.js': 'application/javascript',
+          '.css': 'text/css',
+          '.json': 'application/json',
+          '.png': 'image/png',
+          '.jpg': 'image/jpeg',
+          '.svg': 'image/svg+xml',
+          '.ico': 'image/x-icon'
+        }
+        
+        const contentType = contentTypeMap[ext] || 'application/octet-stream'
+        const content = fs.readFileSync(filePath)
+        
+        res.statusCode = 200
+        res.setHeader('content-type', contentType)
+        res.setHeader('cache-control', ext === '.html' ? 'no-cache' : 'public, max-age=31536000')
+        res.end(content)
+        return
+      } catch (err) {
+        // Fall through to 404
+      }
+    }
+
     res.statusCode = 404
     res.end('Not found')
   } catch (e: any) {
