@@ -86,21 +86,22 @@ export async function TradeLifecycleWorkflow(params: TradeLifecycleParams): Prom
     }
     if (params.entryType === 'LIMIT') {
       if (!Number.isFinite(params.entryPrice as any)) throw new Error('LIMIT entry requires entryPrice')
-      // Aplikuj ENTRY_PRICE_MULTIPLIER před odesláním na burzu (s tickSize + precision zaokrouhlením)
-      const adjustedPrice = applyEntryMultiplier(params.entryPrice!, tickSize, pricePrecision)
+      // WORKFLOW: neaplikuj multiplier zde (workflows nemají fs access)
+      // Multiplier se aplikuje až v Activity (binance API)
+      const adjustedPrice = applyEntryMultiplier(params.entryPrice!, tickSize, pricePrecision, 100.0)
       return { ...commonEntry, type: 'LIMIT', price: String(adjustedPrice), timeInForce: 'GTC' as const, quantity: qty }
     }
     if (params.entryType === 'STOP_MARKET') {
       // SHORT: stopPrice should be below current price
       const baseStopPrice = params.entryPrice && Number.isFinite(params.entryPrice) ? params.entryPrice : refPrice * 0.999
-      const adjustedStopPrice = applyEntryMultiplier(baseStopPrice, tickSize, pricePrecision)
+      const adjustedStopPrice = applyEntryMultiplier(baseStopPrice, tickSize, pricePrecision, 100.0)
       return { ...commonEntry, type: 'STOP_MARKET', stopPrice: String(adjustedStopPrice), quantity: qty, workingType }
     }
     // STOP (stop-limit)
     const basePrice = params.entryPrice && Number.isFinite(params.entryPrice) ? params.entryPrice : refPrice
-    const adjustedPrice = applyEntryMultiplier(basePrice, tickSize, pricePrecision)
+    const adjustedPrice = applyEntryMultiplier(basePrice, tickSize, pricePrecision, 100.0)
     const baseStopPrice = refPrice * 0.999  // SHORT: below current price
-    const adjustedStopPrice = applyEntryMultiplier(baseStopPrice, tickSize, pricePrecision)
+    const adjustedStopPrice = applyEntryMultiplier(baseStopPrice, tickSize, pricePrecision, 100.0)
     return { ...commonEntry, type: 'STOP' as const, price: String(adjustedPrice), stopPrice: String(adjustedStopPrice), timeInForce: 'GTC' as const, quantity: qty, workingType }
   })()
 

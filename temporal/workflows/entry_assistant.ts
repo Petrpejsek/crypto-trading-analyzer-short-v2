@@ -106,8 +106,9 @@ export async function EntryAssistantWorkflow(input: EntryAssistantInput): Promis
 
     const entryParams: any = (() => {
       const ot = String(input.orderType || (input.strategy === 'aggressive' ? 'stop_limit' : 'limit'))
-      // Aplikuj ENTRY_PRICE_MULTIPLIER na cenu před odesláním na burzu (s tickSize + precision zaokrouhlením)
-      const adjustedEntryPx = applyEntryMultiplier(Number(entryPx), tickSize, pricePrecision)
+      // WORKFLOW: neaplikuj multiplier zde (workflows nemají fs access)
+      // Multiplier se aplikuje až v Activity (binance API)
+      const adjustedEntryPx = applyEntryMultiplier(Number(entryPx), tickSize, pricePrecision, 100.0)
       // SHORT: entry always = SELL
       if (ot === 'market') return { symbol: input.symbol, side: 'SELL', type: 'MARKET', quantity: qty, positionSide }
       if (ot === 'limit') return { symbol: input.symbol, side: 'SELL', type: 'LIMIT', price: String(adjustedEntryPx), timeInForce: 'GTC', quantity: qty, positionSide }

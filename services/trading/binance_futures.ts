@@ -1732,13 +1732,13 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       }
       const stopTriggerStr = String(stopTriggerNum)
 
-      // Aplikuj ENTRY_PRICE_MULTIPLIER před odesláním na burzu (s tickSize + precision zaokrouhlením)
+      // Aplikuj ENTRY_PRICE_MULTIPLIER JEN na entry price (NE na stop trigger!)
       const validTickSize = Number.isFinite(tickSize) && tickSize > 0 ? tickSize : undefined
       const validPricePrecision = Number.isFinite(symbolFilters.pricePrecision as any) ? symbolFilters.pricePrecision as number : undefined
       const adjustedEntryNum = applyEntryMultiplier(Number(entryStr), validTickSize, validPricePrecision)
       const adjustedEntryStr = String(adjustedEntryNum)
-      const adjustedStopTriggerNum = applyEntryMultiplier(stopTriggerNum, validTickSize, validPricePrecision)
-      const adjustedStopTriggerStr = String(adjustedStopTriggerNum)
+      // Stop trigger se NEADJUSTUJE - je to jen technický parametr pro STOP order
+      const adjustedStopTriggerStr = String(stopTriggerNum)
 
       const entryParams: OrderParams & { __engine?: string } = (() => {
         if (isAggressive && (ot === 'stop_limit' || ot === 'stop-limit')) {

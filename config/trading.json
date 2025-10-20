@@ -18,7 +18,7 @@
   "EMERGENCY_SL_PCT": 0.05,
   "SL_MONITOR_INTERVAL_MS": 30000,
   "ENTRY_DELTA_CANCEL_PCT": 1.5,
-  "ENTRY_PRICE_MULTIPLIER": 100.3,
+  "ENTRY_PRICE_MULTIPLIER": 100.8,
   "COOLDOWN": {
     "enabled": true,
     "consecutiveLosses": 2,
