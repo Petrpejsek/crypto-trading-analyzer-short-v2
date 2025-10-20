@@ -134,8 +134,7 @@ services:
       - runtime-data:/app/runtime
       - runtime-data:/app/logs
     depends_on:
-      temporal-short:
-        condition: service_healthy
+      - temporal-short
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8888/api/trading/settings >/dev/null || exit 1"]
@@ -185,10 +184,8 @@ services:
       - runtime-data:/app/runtime
       - runtime-data:/app/logs
     depends_on:
-      temporal-short:
-        condition: service_healthy
-      shortv2-backend:
-        condition: service_healthy
+      - temporal-short
+      - shortv2-backend
     restart: unless-stopped
 
   # Caddy reverse proxy with automatic HTTPS
@@ -206,8 +203,7 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
-      shortv2-backend:
-        condition: service_healthy
+      - shortv2-backend
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
