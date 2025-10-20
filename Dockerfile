@@ -17,8 +17,8 @@ RUN npm run build
 FROM node:20-alpine AS runtime
 WORKDIR /app
 
-# System packages (curl for healthchecks), PM2 for process manager
-RUN apk add --no-cache curl \
+# System packages (curl for healthchecks, glibc for Temporal), PM2 for process manager
+RUN apk add --no-cache curl gcompat \
   && npm i -g pm2
 
 # Copy only necessary artifacts
