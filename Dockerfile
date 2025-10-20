@@ -14,11 +14,12 @@ COPY . .
 RUN npm run build
 
 
-FROM node:20-alpine AS runtime
+FROM node:20-slim AS runtime
 WORKDIR /app
 
-# System packages (curl for healthchecks, glibc for Temporal), PM2 for process manager
-RUN apk add --no-cache curl gcompat \
+# System packages (curl for healthchecks), PM2 for process manager
+RUN apt-get update && apt-get install -y curl ca-certificates --no-install-recommends \
+  && rm -rf /var/lib/apt/lists/* \
   && npm i -g pm2
 
 # Copy only necessary artifacts
