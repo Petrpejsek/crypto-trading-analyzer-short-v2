@@ -32,6 +32,8 @@ services:
     container_name: postgres-short-prod
     networks:
       - trader-short-prod
+    env_file:
+      - ../.env.production
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-temporal_short}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -52,6 +54,8 @@ services:
     container_name: temporal-short-prod
     networks:
       - trader-short-prod
+    env_file:
+      - ../.env.production
     ports:
       - "7500:7233"  # Expose Temporal gRPC
     environment:
@@ -99,6 +103,8 @@ services:
     container_name: shortv2-backend-prod
     networks:
       - trader-short-prod
+    env_file:
+      - ../.env.production
     environment:
       - NODE_ENV=production
       - PORT=8888
@@ -150,6 +156,8 @@ services:
     networks:
       - trader-short-prod
     command: ["node", "./node_modules/.bin/tsx", "temporal/worker.ts"]
+    env_file:
+      - ../.env.production
     environment:
       - NODE_ENV=production
       - TRADE_SIDE=${TRADE_SIDE:-SHORT}
