@@ -68,7 +68,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "timeout 2 sh -c '</dev/tcp/localhost/7233' || exit 1"]
+      test: ["CMD", "nc", "-z", "localhost", "7233"]
       interval: 10s
       timeout: 5s
       retries: 10
