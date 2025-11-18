@@ -229,6 +229,10 @@ export function isStrategyUpdaterEnabled(): boolean {
 
 // Process due strategy updates (called by main tick)
 export async function processDueStrategyUpdates(): Promise<void> {
+  // HARDCODED DISABLE: OpenAI kredit úspora - Strategy Updater je trvale vypnut
+  console.warn('[STRATEGY_UPDATER_HARDCODED_DISABLED] Strategy Updater is permanently disabled to save OpenAI credits')
+  return
+
   if (!isStrategyUpdaterEnabled()) return
 
   try {

@@ -67,6 +67,10 @@ export function enqueueFromWatcher(signal: WatcherSignal): void {
 }
 
 export async function processDueTopUpExecutors(): Promise<void> {
+  // HARDCODED DISABLE: OpenAI kredit úspora - Top-Up Executor je trvale vypnut
+  console.warn('[TOP_UP_EXECUTOR_HARDCODED_DISABLED] Top-Up Executor is permanently disabled to save OpenAI credits')
+  return
+
   const cfg = getConfig()
   if (!cfg?.enabled) return
   try {

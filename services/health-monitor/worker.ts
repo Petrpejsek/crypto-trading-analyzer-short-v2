@@ -259,6 +259,10 @@ let lastPeriodicSync = 0
 const PERIODIC_SYNC_INTERVAL_MS = 30_000 // 30 seconds
 
 async function processDueHealthChecks(): Promise<void> {
+  // HARDCODED DISABLE: OpenAI kredit úspora - Health Monitor je trvale vypnut
+  console.warn('[HEALTH_MONITOR_HARDCODED_DISABLED] Health Monitor is permanently disabled to save OpenAI credits')
+  return
+
   try {
     const dueEntries = getDueWorkerEntries()
     
