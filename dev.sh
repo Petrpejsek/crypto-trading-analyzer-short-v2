@@ -146,6 +146,8 @@ preflight_env() {
   OPENAI_API_KEY_VAL=$(awk -F '=' '/^OPENAI_API_KEY=/ {print $2}' "$ENV_FILE" | tail -n1 | tr -d '\r')
   OPENAI_ORG_ID_VAL=$(awk -F '=' '/^OPENAI_ORG_ID=/ {print $2}' "$ENV_FILE" | tail -n1 | tr -d '\r')
   OPENAI_PROJECT_VAL=$(awk -F '=' '/^OPENAI_PROJECT=/ {print $2}' "$ENV_FILE" | tail -n1 | tr -d '\r')
+  BINANCE_API_KEY_VAL=$(awk -F '=' '/^BINANCE_API_KEY=/ {print $2}' "$ENV_FILE" | tail -n1 | tr -d '\r')
+  BINANCE_SECRET_KEY_VAL=$(awk -F '=' '/^BINANCE_SECRET_KEY=/ {print $2}' "$ENV_FILE" | tail -n1 | tr -d '\r')
   [ -n "$TEMPORAL_ADDRESS" ] || err "TEMPORAL_ADDRESS missing in .env.local"
   [ -n "$TASK_QUEUE" ] || err "TASK_QUEUE missing in .env.local"
   [ -n "$TASK_QUEUE_OPENAI" ] || err "TASK_QUEUE_OPENAI missing in .env.local"
@@ -193,6 +195,19 @@ preflight_env() {
   if [ -n "${OPENAI_API_KEY_VAL:-}" ]; then export OPENAI_API_KEY="$OPENAI_API_KEY_VAL"; fi
   if [ -n "${OPENAI_ORG_ID_VAL:-}" ]; then export OPENAI_ORG_ID="$OPENAI_ORG_ID_VAL"; fi
   if [ -n "${OPENAI_PROJECT_VAL:-}" ]; then export OPENAI_PROJECT="$OPENAI_PROJECT_VAL"; fi
+  # Export Binance creds into environment for both backend and worker
+  if [ -n "${BINANCE_API_KEY_VAL:-}" ]; then export BINANCE_API_KEY="$BINANCE_API_KEY_VAL"; fi
+  if [ -n "${BINANCE_SECRET_KEY_VAL:-}" ]; then export BINANCE_SECRET_KEY="$BINANCE_SECRET_KEY_VAL"; fi
+  
+  # CRITICAL: Export background service control flags
+  STRATEGY_UPDATER_ENABLED=$(awk -F '=' '/^STRATEGY_UPDATER_ENABLED=/ {print $2}' "$ENV_FILE" | tail -n1 | tr -d '\r')
+  ENTRY_UPDATER_ENABLED=$(awk -F '=' '/^ENTRY_UPDATER_ENABLED=/ {print $2}' "$ENV_FILE" | tail -n1 | tr -d '\r')
+  TOPUP_WATCHER_ENABLED=$(awk -F '=' '/^TOPUP_WATCHER_ENABLED=/ {print $2}' "$ENV_FILE" | tail -n1 | tr -d '\r')
+  TOP_UP_EXECUTOR_ENABLED=$(awk -F '=' '/^TOP_UP_EXECUTOR_ENABLED=/ {print $2}' "$ENV_FILE" | tail -n1 | tr -d '\r')
+  if [ -n "${STRATEGY_UPDATER_ENABLED:-}" ]; then export STRATEGY_UPDATER_ENABLED; fi
+  if [ -n "${ENTRY_UPDATER_ENABLED:-}" ]; then export ENTRY_UPDATER_ENABLED; fi
+  if [ -n "${TOPUP_WATCHER_ENABLED:-}" ]; then export TOPUP_WATCHER_ENABLED; fi
+  if [ -n "${TOP_UP_EXECUTOR_ENABLED:-}" ]; then export TOP_UP_EXECUTOR_ENABLED; fi
 }
 
 preflight_temporal() {
@@ -256,6 +271,8 @@ start_worker() {
   OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
   OPENAI_ORG_ID="${OPENAI_ORG_ID:-}" \
   OPENAI_PROJECT="${OPENAI_PROJECT:-}" \
+  BINANCE_API_KEY="${BINANCE_API_KEY:-}" \
+  BINANCE_SECRET_KEY="${BINANCE_SECRET_KEY:-}" \
   nohup npm run -s dev:temporal:worker > "$RUNTIME_DIR/worker_dev.log" 2>&1 & echo $! > "$RUNTIME_DIR/worker.pid"
 }
 

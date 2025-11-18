@@ -359,6 +359,89 @@ async function buildAIInput(symbol: string): Promise<AIProfitTakerInput | null> 
       } : null
     })
     
+    // 🎯 TREND DATA MVP - robustní flagy pro profit taker
+    const price = markPrice
+    const ema20_M5 = marketData?.ema20_M5
+    const ema50_M5 = marketData?.ema50_M5
+    const ema20_M15 = marketData?.ema20_M15
+    const ema50_M15 = marketData?.ema50_M15
+    const vwap_today = marketData?.vwap_today
+    
+    // Bezpečnostní kontrola: pokud chybí jakákoliv klíčová hodnota → konzervativní fallback
+    const hasAllData = (
+      Number.isFinite(price) && price > 0 &&
+      Number.isFinite(ema20_M5) && Number.isFinite(ema50_M5) &&
+      Number.isFinite(ema20_M15) && Number.isFinite(ema50_M15) &&
+      Number.isFinite(vwap_today)
+    )
+    
+    let trendData: {
+      bearish_m5: boolean
+      bearish_m15: boolean
+      bearish_score: number
+      chop_flag: boolean
+    }
+    
+    if (!hasAllData) {
+      // FALLBACK: chybí data → konzervativní hodnoty
+      trendData = {
+        bearish_m5: false,
+        bearish_m15: false,
+        bearish_score: 0,
+        chop_flag: false
+      }
+      console.info('[AI_PT_TREND_DATA_FALLBACK]', { 
+        symbol, 
+        reason: 'missing_data',
+        has_price: Number.isFinite(price) && price > 0,
+        has_ema20_M5: Number.isFinite(ema20_M5),
+        has_ema50_M5: Number.isFinite(ema50_M5),
+        has_ema20_M15: Number.isFinite(ema20_M15),
+        has_ema50_M15: Number.isFinite(ema50_M15),
+        has_vwap_today: Number.isFinite(vwap_today)
+      })
+    } else {
+      // Vypočítáme flagy podle MVP pravidel
+      
+      // bearish_m5: EMA20 < EMA50 na M5 A price <= VWAP
+      const bearish_m5 = (ema20_M5 < ema50_M5) && (price <= vwap_today)
+      
+      // bearish_m15: EMA20 < EMA50 na M15 A price <= VWAP
+      const bearish_m15 = (ema20_M15 < ema50_M15) && (price <= vwap_today)
+      
+      // bearish_score: sčítáme body (0-3)
+      let bearish_score = 0
+      if (bearish_m5) bearish_score += 1
+      if (bearish_m15) bearish_score += 1
+      // +1 pokud price < vwap A ema20_M5 < ema20_M15 (krátkodobé momentum slabší)
+      if (price < vwap_today && ema20_M5 < ema20_M15) bearish_score += 1
+      
+      // chop_flag: detekce placky (EMAs velmi blízko + cena u VWAP)
+      const dist_m5 = Math.abs(ema20_M5 - ema50_M5) / price
+      const price_vwap_dist = Math.abs(price - vwap_today) / price
+      const chop_flag = (dist_m5 < 0.002) && (price_vwap_dist < 0.0025)
+      
+      trendData = {
+        bearish_m5,
+        bearish_m15,
+        bearish_score,
+        chop_flag
+      }
+      
+      console.info('[AI_PT_TREND_DATA_COMPUTED]', {
+        symbol,
+        price,
+        ema20_M5,
+        ema50_M5,
+        ema20_M15,
+        ema50_M15,
+        vwap_today,
+        dist_m5_pct: (dist_m5 * 100).toFixed(4),
+        price_vwap_dist_pct: (price_vwap_dist * 100).toFixed(4),
+        trendData
+      })
+    }
+    
     // 5. Build input
     const input: AIProfitTakerInput = {
       symbol,
@@ -374,7 +457,8 @@ async function buildAIInput(symbol: string): Promise<AIProfitTakerInput | null> 
         tp: currentTP
       },
       marketData,
-      obstacles: topObstacles
+      obstacles: topObstacles,
+      trendData
     }
     
     console.info('[AI_PT_INPUT_BUILT]', {
@@ -384,7 +468,8 @@ async function buildAIInput(symbol: string): Promise<AIProfitTakerInput | null> 
       currentPrice: markPrice,
       unrealizedPnl,
       currentSL,
-      currentTP
+      currentTP,
+      trendData
     })
     
     return input

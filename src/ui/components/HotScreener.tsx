@@ -99,6 +99,9 @@ export function HotScreener({ hotPicks, status, onSelectionChange, selectedSymbo
       {status === 'error' && (
         <div style={{ padding: 20, textAlign: 'center', color: 'crimson' }}>
           ❌ Chyba při analýze. Zkuste znovu.
+          <div style={{ fontSize: 12, marginTop: 8, opacity: 0.8 }}>
+            (Otevři konzoli pro detaily)
+          </div>
         </div>
       )}
 

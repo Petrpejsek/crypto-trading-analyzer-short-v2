@@ -1,3 +1,8 @@
+// ====================================================================
+// DISABLED: Top-Up Executor je natvrdo vypnutý - žere OpenAI kredity
+// Timer není spuštěn nikde v server/index.ts
+// ====================================================================
+
 import { getBinanceAPI } from '../trading/binance_futures'
 import { fetchMarketDataForSymbol } from '../strategy-updater/strategy_updater_gpt'
 import {

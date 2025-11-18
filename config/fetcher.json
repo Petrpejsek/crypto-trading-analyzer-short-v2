@@ -39,8 +39,8 @@
   "altBackfillTimeoutMs": 5000,
   "altBackfillConcurrency": 6,
   "staleThresholdSec": 120,
-  "maxSnapshotBytes": 2621440,
-  "maxSnapshotMB": 2.5,
+  "maxSnapshotBytes": 5242880,
+  "maxSnapshotMB": 5,
   "fundingMode": "all",
   "openInterestMode": "all"
   ,

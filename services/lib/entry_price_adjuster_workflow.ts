@@ -1,4 +1,9 @@
 /**
+ * Workflow-safe verze entry_price_adjuster
+ * NEOBSAHUJE fs/path importy - bezpečné pro Temporal workflows
+ */
+
+/**
  * Zaokrouhlí cenu na nejbližší tickSize (minimální cenový krok na Binance)
  */
 function roundToTickSize(price: number, tickSize: number): number {
@@ -17,40 +22,6 @@ function getPrecisionFromTickSize(tickSize: number): number {
 }
 
 /**
- * Načte aktuální ENTRY_PRICE_MULTIPLIER z config/trading.json
- * Čte z disku při každém volání → vždy fresh hodnota
- * 
- * DŮLEŽITÉ: Tato funkce NESMÍ být volána z Temporal workflows (fs access zakázán)!
- * Pro workflows použij loadEntryMultiplierForWorkflow() místo toho.
- */
-export function loadEntryMultiplier(): number {
-  // V workflow kontextu vracíme 100% (žádná úprava)
-  if (typeof process === 'undefined' || !(globalThis as any).process?.cwd) {
-    console.warn('[ENTRY_ADJUSTER] Running in restricted context (workflow?), using 100%')
-    return 100.0
-  }
-  
-  try {
-    // CRITICAL: Import pouze v runtime, ne při bundlování
-    // Webpack by měl skipnout tento blok díky ignoreModules
-    const configPath = require('path').join(process.cwd(), 'config', 'trading.json')
-    const configStr = require('fs').readFileSync(configPath, 'utf8')
-    const config = JSON.parse(configStr)
-    const multiplier = Number(config?.ENTRY_PRICE_MULTIPLIER)
-    
-    if (!Number.isFinite(multiplier)) {
-      console.warn('[ENTRY_ADJUSTER] ENTRY_PRICE_MULTIPLIER not found in config, using 100%')
-      return 100.0
-    }
-    
-    return multiplier
-  } catch (e: any) {
-    console.error('[ENTRY_ADJUSTER] Failed to load config, using 100%:', e.message)
-    return 100.0
-  }
-}
-
-/**
  * Workflow-safe verze: vrací default 100% (workflows nemají fs access)
  * V workflow kontextu multiplier aplikujeme až v Activity
  */
@@ -65,7 +36,7 @@ export function loadEntryMultiplierForWorkflow(): number {
  * @param entryPrice - Původní entry cena z AI asistenta nebo risk managementu
  * @param tickSize - Optional: minimální cenový krok pro zaokrouhlení výsledku
  * @param pricePrecision - Optional: maximální počet desetinných míst (override auto-detect z tickSize)
- * @param multiplierOverride - Optional: explicit multiplier hodnota (pokud není poskytnut, načte se z config)
+ * @param multiplierOverride - Optional: explicit multiplier hodnota (pokud není poskytnut, použije se 100.0)
  * @returns Upravená entry cena (zaokrouhlená na tickSize + precision pokud jsou poskytnuty)
  * 
  * Bezpečnostní kontroly:
@@ -86,10 +57,10 @@ export function applyEntryMultiplier(
     return entryPrice
   }
 
-  // Načtení multiplieru - použij override nebo načti z configu
+  // Načtení multiplieru - použij override nebo default 100.0
   const multiplier = multiplierOverride !== undefined 
     ? multiplierOverride 
-    : loadEntryMultiplier()
+    : 100.0  // V workflows vždy 100%
   
   // Validace multiplieru - musí být v rozsahu 95.0 - 105.0
   const MIN_MULTIPLIER = 95.0
@@ -144,4 +115,10 @@ export function applyEntryMultiplier(
   
   return adjustedPrice
 }
+
+
+
+
+
+
 

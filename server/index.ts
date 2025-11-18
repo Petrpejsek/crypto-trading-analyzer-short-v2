@@ -124,7 +124,7 @@ try {
   const SIDE = (process.env.TRADE_SIDE || 'SHORT').toUpperCase()
   const NAME = process.env.PM2_NAME || 'trader-short-v2'
   const ENV = process.env.NODE_ENV || 'development'
-  const P = process.env.PORT || '8789'
+  const P = process.env.PORT || '8888'
   const prefix = `[${SIDE}] [${NAME}] [PORT:${P}] [NODE_ENV:${ENV}]`
   const wrap = <T extends (...args: any[]) => any>(fn: T): T => ((...args: any[]) => fn(prefix, ...args)) as T
   console.log = wrap(console.log)
@@ -146,7 +146,7 @@ try {
   }
 } catch {}
 
-const PORT = process.env.PORT ? Number(process.env.PORT) : 8789
+const PORT = process.env.PORT ? Number(process.env.PORT) : 8888
 // WS market collector disabled – REST-only mode for klines
 
 // Helper: Parse JSON body from HTTP request
@@ -775,6 +775,11 @@ function loadBackgroundCriteria(): void {
   } catch {}
 }
 
+// ====================================================================
+// DISABLED: Background Trading je natvrdo vypnutý - žere OpenAI kredity
+// Volá Market Decider (GPT) + Final Picker (GPT) v každém cyklu!
+// Spuštění je zakomentováno na řádku ~6370 v server.listen()
+// ====================================================================
 async function backgroundTradingCycle(): Promise<void> {
   try {
     if (!hasRealBinanceKeysGlobal()) return
@@ -868,21 +873,28 @@ function startBackgroundTrading(): void {
 let __lastUiAutoCopyInterval: number | null = null
 
 function persistUiSettings(settings: { auto_copy_enabled: boolean; auto_copy_minutes: number }): void {
-  try {
-    if (!settings.auto_copy_enabled || settings.auto_copy_minutes <= 0) {
-      __lastUiAutoCopyInterval = null
-      if (__backgroundTimer) { clearInterval(__backgroundTimer); __backgroundTimer = null }
-      console.info('[BACKGROUND_STOP]', { reason: 'auto_copy_disabled_or_zero' })
-      return
-    }
-    const intervalMs = settings.auto_copy_minutes * 60 * 1000
-    __lastUiAutoCopyInterval = intervalMs
-    console.info('[UI_SETTINGS_PERSIST]', { auto_copy_minutes: settings.auto_copy_minutes, interval_ms: intervalMs })
-    
-    // Restart timer s novým intervalem
-    if (__backgroundTimer) { clearInterval(__backgroundTimer); __backgroundTimer = null }
-    startBackgroundTrading()
-  } catch {}
+  // DISABLED: Background Trading je natvrdo vypnutý pro úsporu OpenAI kreditů
+  console.warn('[BACKGROUND_TRADING_DISABLED] Background Trading je natvrdo vypnutý v kódu - žere OpenAI kredity')
+  __lastUiAutoCopyInterval = null
+  if (__backgroundTimer) { clearInterval(__backgroundTimer); __backgroundTimer = null }
+  return
+  
+  // Původní funkce zakomentována:
+  // try {
+  //   if (!settings.auto_copy_enabled || settings.auto_copy_minutes <= 0) {
+  //     __lastUiAutoCopyInterval = null
+  //     if (__backgroundTimer) { clearInterval(__backgroundTimer); __backgroundTimer = null }
+  //     console.info('[BACKGROUND_STOP]', { reason: 'auto_copy_disabled_or_zero' })
+  //     return
+  //   }
+  //   const intervalMs = settings.auto_copy_minutes * 60 * 1000
+  //   __lastUiAutoCopyInterval = intervalMs
+  //   console.info('[UI_SETTINGS_PERSIST]', { auto_copy_minutes: settings.auto_copy_minutes, interval_ms: intervalMs })
+  //   
+  //   // Restart timer s novým intervalem
+  //   if (__backgroundTimer) { clearInterval(__backgroundTimer); __backgroundTimer = null }
+  //   startBackgroundTrading()
+  // } catch {}
 }
 
 function loadBackgroundSettings(): void {
@@ -912,17 +924,39 @@ try { loadSettings() } catch {}
 try { loadBackgroundSettings() } catch {}
 
 // Strategy Updater separate timer (every 30 seconds, not on every UI poll)
+// DISABLED: Strategy Updater je vypnutý do odvolání
 let __strategyUpdaterTimer: NodeJS.Timeout | null = null
 const startStrategyUpdaterTimer = () => {
   if (__strategyUpdaterTimer) clearInterval(__strategyUpdaterTimer)
+  __strategyUpdaterTimer = null
+  
+  // Check if Strategy Updater is enabled before starting timer
+  try {
+    const { isStrategyUpdaterEnabled } = require('../services/strategy-updater/trigger')
+    if (!isStrategyUpdaterEnabled()) {
+      console.info('[STRATEGY_UPDATER_TIMER_DISABLED] Strategy Updater je vypnutý - timer nespouštím')
+      return
+    }
+  } catch {}
+  
   __strategyUpdaterTimer = setInterval(async () => {
     try {
-      const { processDueStrategyUpdates } = await import('../services/strategy-updater/trigger')
+      const { processDueStrategyUpdates, isStrategyUpdaterEnabled } = await import('../services/strategy-updater/trigger')
+      if (!isStrategyUpdaterEnabled()) {
+        // If disabled during runtime, stop the timer
+        if (__strategyUpdaterTimer) {
+          clearInterval(__strategyUpdaterTimer)
+          __strategyUpdaterTimer = null
+          console.info('[STRATEGY_UPDATER_TIMER_STOPPED] Strategy Updater byl vypnut - timer zastaven')
+        }
+        return
+      }
       processDueStrategyUpdates().catch(()=>{})
     } catch {}
   }, 30000) // Every 30 seconds
 }
-try { startStrategyUpdaterTimer() } catch {}
+// DISABLED: Timer nespouštíme - Strategy Updater je vypnutý
+// try { startStrategyUpdaterTimer() } catch {}
 
 // Start Binance user-data WS to capture cancel/filled events into audit log
 try {
@@ -1735,49 +1769,51 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+    // DISABLED: Background Trading je natvrdo vypnutý
     // Manual trigger to run background pipeline once (useful for validation/tests)
-    if (url.pathname === '/api/background/run_once' && req.method === 'POST') {
-      try {
-        backgroundTradingCycle().catch((e) => {
-          console.error('[BACKGROUND_RUN_ONCE_ERROR]', {
-            message: e?.message || String(e),
-            stack: e?.stack || 'No stack trace'
-          })
-        })
-        res.statusCode = 202
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: true }))
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
-      }
-      return
-    }
+    // if (url.pathname === '/api/background/run_once' && req.method === 'POST') {
+    //   try {
+    //     backgroundTradingCycle().catch((e) => {
+    //       console.error('[BACKGROUND_RUN_ONCE_ERROR]', {
+    //         message: e?.message || String(e),
+    //         stack: e?.stack || 'No stack trace'
+    //       })
+    //     })
+    //     res.statusCode = 202
+    //     res.setHeader('content-type', 'application/json')
+    //     res.end(JSON.stringify({ ok: true }))
+    //   } catch (e: any) {
+    //     res.statusCode = 500
+    //     res.setHeader('content-type', 'application/json')
+    //     res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+    //   }
+    //   return
+    // }
+    // DISABLED: Background Trading je natvrdo vypnutý
     // UI nastavení Auto Copy - přijme nastavení z UI a nastaví background timer
-    if (url.pathname === '/api/ui/auto_copy' && req.method === 'POST') {
-      try {
-        const chunks: Buffer[] = []
-        for await (const ch of req) chunks.push(ch as Buffer)
-        const bodyStr = Buffer.concat(chunks).toString('utf8')
-        const parsed = bodyStr ? JSON.parse(bodyStr) : null
-        if (parsed && typeof parsed === 'object' && typeof parsed.auto_copy_enabled === 'boolean' && typeof parsed.auto_copy_minutes === 'number') {
-          persistUiSettings(parsed)
-          res.statusCode = 200
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: true, interval_ms: __lastUiAutoCopyInterval }))
-        } else {
-          res.statusCode = 400
-          res.setHeader('content-type', 'application/json')
-          res.end(JSON.stringify({ ok: false, error: 'invalid_settings' }))
-        }
-      } catch (e: any) {
-        res.statusCode = 500
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
-      }
-      return
-    }
+    // if (url.pathname === '/api/ui/auto_copy' && req.method === 'POST') {
+    //   try {
+    //     const chunks: Buffer[] = []
+    //     for await (const ch of req) chunks.push(ch as Buffer)
+    //     const bodyStr = Buffer.concat(chunks).toString('utf8')
+    //     const parsed = bodyStr ? JSON.parse(bodyStr) : null
+    //     if (parsed && typeof parsed === 'object' && typeof parsed.auto_copy_enabled === 'boolean' && typeof parsed.auto_copy_minutes === 'number') {
+    //       persistUiSettings(parsed)
+    //       res.statusCode = 200
+    //       res.setHeader('content-type', 'application/json')
+    //       res.end(JSON.stringify({ ok: true, interval_ms: __lastUiAutoCopyInterval }))
+    //     } else {
+    //       res.statusCode = 400
+    //       res.setHeader('content-type', 'application/json')
+    //       res.end(JSON.stringify({ ok: false, error: 'invalid_settings' }))
+    //     }
+    //   } catch (e: any) {
+    //     res.statusCode = 500
+    //     res.setHeader('content-type', 'application/json')
+    //     res.end(JSON.stringify({ ok: false, error: e?.message || 'unknown' }))
+    //   }
+    //   return
+    // }
     if (url.pathname === '/api/positions' && req.method === 'GET') {
       res.setHeader('Cache-Control', 'no-store')
       try {
@@ -2018,6 +2054,42 @@ const server = http.createServer(async (req, res) => {
       }
       return
     }
+    
+    // Check for active AutoCopy workflows
+    if (url.pathname === '/api/temporal/auto_copy/active' && req.method === 'GET') {
+      try {
+        const address = process.env.TEMPORAL_ADDRESS
+        if (!address) throw new Error('TEMPORAL_ADDRESS missing')
+        const namespace = process.env.TEMPORAL_NAMESPACE || 'default'
+        const { Connection, Client } = await import('@temporalio/client')
+        const connection = await Connection.connect({ address })
+        const client = new Client({ connection })
+        const svc = client.workflowService
+        const listResp = await (svc as any).listWorkflowExecutions({
+          namespace,
+          pageSize: 20,
+          query: 'WorkflowType = "AutoCopyWorkflow" and ExecutionStatus = "Running"'
+        })
+        const execs = (listResp?.executions ?? []) as any[]
+        // Sort by startTime descending to get the most recent workflow
+        const sorted = execs.sort((a: any, b: any) => {
+          const aTime = a?.startTime?.seconds || 0
+          const bTime = b?.startTime?.seconds || 0
+          return bTime - aTime // Descending (newest first)
+        })
+        const latest = sorted.length ? sorted[0] : null
+        const wid = latest?.execution?.workflowId || null
+        res.statusCode = 200
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: true, workflowId: wid }))
+      } catch (e: any) {
+        res.statusCode = 500
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }))
+      }
+      return
+    }
+    
     if (url.pathname === '/api/limits' && req.method === 'GET') {
       try {
         const snap = getLimitsSnapshot()
@@ -2865,6 +2937,12 @@ const server = http.createServer(async (req, res) => {
         }
         const symbol = normalizeSymbol(symbolRaw)
         
+        // Helper: Round price values to max 5 decimals
+        const roundPrice = (value: any): number | null => {
+          if (value == null || !Number.isFinite(value)) return value
+          return Math.round(Number(value) * 100000) / 100000
+        }
+        
         // Fetch data for any symbol directly - use minimal universe to avoid UNIVERSE_INCOMPLETE
         const { buildMarketRawSnapshot } = await import('./fetcher/binance')
         // Retry wrapper pro občasné Abort/timeout chyby
@@ -2920,7 +2998,7 @@ const server = http.createServer(async (req, res) => {
         
         // ENRICHMENT: Add raw klines for pattern recognition (keep more candles for AI analysis)
         const rawKlines = {
-          M5: Array.isArray(targetItem.klines?.M5) ? targetItem.klines.M5.slice(-60).map((k: any) => ({
+          M5: Array.isArray(targetItem.klines?.M5) ? targetItem.klines.M5.slice(-120).map((k: any) => ({
             openTime: toIsoNoMs(k.openTime),
             open: Number(k.open),
             high: Number(k.high),
@@ -2949,26 +3027,375 @@ const server = http.createServer(async (req, res) => {
           })) : []
         }
         
+        const computeEMA = (values: number[], period: number): number | null => {
+          if (!Array.isArray(values) || values.length < period || period <= 0) return null
+          const k = 2 / (period + 1)
+          let ema = values.slice(0, period).reduce((sum, v) => sum + v, 0) / period
+          for (let i = period; i < values.length; i++) {
+            const value = values[i]
+            ema = value * k + ema * (1 - k)
+          }
+          return Number.isFinite(ema) ? ema : null
+        }
+
+        type Bar = { openTime: string; closeTime: string; open: number; high: number; low: number; close: number; volume: number }
+        const computeAtrSeries = (bars: Bar[], period = 14): number[] => {
+          if (!Array.isArray(bars) || bars.length === 0) return []
+          const trs: number[] = []
+          let prevClose: number | null = null
+          for (const bar of bars) {
+            const highLow = bar.high - bar.low
+            const highPrevClose = prevClose === null ? highLow : Math.abs(bar.high - prevClose)
+            const lowPrevClose = prevClose === null ? highLow : Math.abs(bar.low - prevClose)
+            const tr = Math.max(highLow, highPrevClose, lowPrevClose)
+            trs.push(tr)
+            prevClose = bar.close
+          }
+          const atrs: number[] = []
+          let atr: number | null = null
+          for (let i = 0; i < trs.length; i++) {
+            const tr = trs[i]
+            if (i === 0) {
+              atr = tr
+            } else if (atr !== null) {
+              atr = (atr * (period - 1) + tr) / period
+            }
+            atrs.push(atr ?? tr)
+          }
+          return atrs
+        }
+
+        const computeRelativeVolume = (bars: Bar[], lookback = 20): number | null => {
+          if (!Array.isArray(bars) || bars.length < lookback + 1) return null
+          const recent = bars[bars.length - 1]
+          const window = bars.slice(-(lookback + 1), -1)
+          const avgVol = window.reduce((sum, b) => sum + (Number.isFinite(b.volume) ? b.volume : 0), 0) / lookback
+          if (!avgVol || avgVol <= 0) return null
+          const rv = recent.volume / avgVol
+          return Number.isFinite(rv) ? rv : null
+        }
+
+        const findMinLowIndex = (bars: Bar[], start: number, end: number): number => {
+          let minIdx = start
+          for (let i = start + 1; i <= end; i++) {
+            if (bars[i].low < bars[minIdx].low) minIdx = i
+          }
+          return minIdx
+        }
+
+        const computePullbackStats = (bars: Bar[], atrCurrent: number | null) => {
+          if (!Array.isArray(bars) || bars.length < 5) {
+            return { high_m15: null, size_atr_m15: null, impulseLowIndex: null }
+          }
+          const window = Math.min(12, bars.length)
+          const subset = bars.slice(-window)
+          let dropCandidate: { startIdx: number; endIdx: number; lowIdx: number } | null = null
+          const absoluteAtr = atrCurrent ?? (subset.length >= 2 ? Math.abs(subset[subset.length - 2].close - subset[subset.length - 1].close) : null)
+          if (absoluteAtr !== null && absoluteAtr > 0) {
+            for (let len = Math.min(8, subset.length - 1); len >= 3; len--) {
+              const slice = subset.slice(-len)
+              const startClose = slice[0].close
+              const endClose = slice[slice.length - 2]?.close ?? slice[slice.length - 1].close
+              const drop = startClose - endClose
+              if (drop >= absoluteAtr * 1.0) {
+                const startIdx = bars.length - slice.length
+                const endIdx = bars.length - 1
+                const lowIdx = findMinLowIndex(bars, startIdx, endIdx)
+                dropCandidate = { startIdx, endIdx, lowIdx }
+                break
+              }
+            }
+          }
+          if (!dropCandidate) {
+            const lowIdx = findMinLowIndex(bars, bars.length - subset.length, bars.length - 1)
+            dropCandidate = { startIdx: bars.length - subset.length, endIdx: bars.length - 1, lowIdx }
+          }
+          const pullbackStart = dropCandidate.lowIdx
+          const pullbackSlice = bars.slice(pullbackStart + 1)
+          const high = pullbackSlice.length ? Math.max(...pullbackSlice.map(b => b.high)) : null
+          const low = bars[pullbackStart]?.low ?? null
+          let size = null
+          if (high !== null && low !== null && atrCurrent) {
+            size = (high - low) / atrCurrent
+            if (!Number.isFinite(size)) size = null
+          }
+          return { high_m15: Number.isFinite(high) ? high : null, size_atr_m15: size, impulseLowIndex: pullbackStart }
+        }
+
+        const computeImpulseFlags = (bars: Bar[], atrCurrent: number | null) => {
+          if (!Array.isArray(bars) || bars.length < 8) {
+            return { recent_impulse_down: false, recent_impulse_up: false }
+          }
+          // ZMĚNA: Použít posledních 12-16 svíček místo 6 (3-4 hodiny)
+          const subset = bars.slice(-Math.min(16, bars.length))
+          let downMove = 0
+          let upMove = 0
+          for (let i = 1; i < subset.length; i++) {
+            const delta = subset[i].close - subset[i - 1].close
+            if (delta < 0) downMove += Math.abs(delta)
+            else upMove += delta
+          }
+          // ZMĚNA: Zpřísnit práh z 1.0 na 1.5 ATR
+          const threshold = atrCurrent ?? (subset[0].close * 0.005)
+          const downQualifies = threshold ? downMove >= threshold * 1.5 : false
+          const upQualifies = threshold ? upMove >= threshold * 1.5 : false
+          
+          // MUTUAL EXCLUSIVITY: Nemůžou být oba true současně - vyhrává silnější impulse
+          let recentImpulseDown = false
+          let recentImpulseUp = false
+          
+          if (downQualifies && upQualifies) {
+            // Pokud oba kvalifikují, vyber silnější
+            if (downMove > upMove) {
+              recentImpulseDown = true
+            } else {
+              recentImpulseUp = true
+            }
+          } else {
+            recentImpulseDown = downQualifies
+            recentImpulseUp = upQualifies
+          }
+          
+          return {
+            recent_impulse_down: recentImpulseDown,
+            recent_impulse_up: recentImpulseUp,
+          }
+        }
+
+        const computeMicroStructure = (m5Bars: Bar[], options: { ema20?: number | null; ema50?: number | null; premiumHigh?: number | null }) => {
+          if (!Array.isArray(m5Bars) || m5Bars.length < 6) {
+            return {
+              lower_high: false,
+              sweep: false,
+              reclaim: false,
+              ema20_m5_reject: false,
+              ema50_m5_reject: false,
+              range_failure_at_premium: false,
+            }
+          }
+          const recent = m5Bars.slice(-6)
+          const lastSegment = recent.slice(-3)
+          const prevSegment = recent.slice(0, -3)
+          const lastHigh = Math.max(...lastSegment.map(b => b.high))
+          const prevHigh = Math.max(...prevSegment.map(b => b.high))
+          const tolerance = 0.001
+          const lowerHigh = Number.isFinite(lastHigh) && Number.isFinite(prevHigh) ? lastHigh <= prevHigh * (1 - tolerance) : false
+
+          const sweepTolerance = 0.0005
+          const lastClose = lastSegment[lastSegment.length - 1].close
+          const sweep = Number.isFinite(lastHigh) && Number.isFinite(prevHigh)
+            ? lastHigh >= prevHigh * (1 + sweepTolerance) && lastClose < prevHigh
+            : false
+          const reclaim = sweep && lastClose < prevHigh * (1 - tolerance / 2)
+
+          const ema20 = options.ema20 ?? null
+          const ema50 = options.ema50 ?? null
+          const lastBar = lastSegment[lastSegment.length - 1]
+          const emaTolerance = 0.0008
+          const ema20Reject = Number.isFinite(ema20) && lastBar
+            ? lastBar.high >= ema20 * (1 - emaTolerance) && lastBar.close < ema20
+            : false
+          const ema50Reject = Number.isFinite(ema50) && lastBar
+            ? lastBar.high >= ema50 * (1 - emaTolerance) && lastBar.close < ema50
+            : false
+
+          const premiumHigh = options.premiumHigh ?? null
+          let rangeFailure = false
+          if (premiumHigh && premiumHigh > 0) {
+            const highVals = recent.map(b => b.high)
+            const highRange = Math.max(...highVals) - Math.min(...highVals)
+            const avgBody = recent.reduce((sum, b) => sum + Math.abs(b.close - b.open), 0) / recent.length
+            const nearPremium = Math.max(...highVals) >= premiumHigh * (1 - 0.001)
+            const closesWeak = recent.filter(b => b.close < b.open).length >= Math.ceil(recent.length / 2)
+            rangeFailure = nearPremium && highRange <= (premiumHigh * 0.003) && closesWeak && avgBody <= premiumHigh * 0.004
+          }
+
+          return {
+            lower_high: lowerHigh,
+            sweep,
+            reclaim,
+            ema20_m5_reject: ema20Reject,
+            ema50_m5_reject: ema50Reject,
+            range_failure_at_premium: rangeFailure,
+          }
+        }
+
+        const determineTrend = (ema20: number | null, ema50: number | null, ema200: number | null): 'bullish' | 'bearish' | 'neutral' => {
+          if (Number.isFinite(ema20) && Number.isFinite(ema50) && Number.isFinite(ema200)) {
+            if (ema20! > ema50! && ema50! > ema200!) return 'bullish'
+            if (ema20! < ema50! && ema50! < ema200!) return 'bearish'
+          }
+          return 'neutral'
+        }
+
+        const h1BarsRaw = Array.isArray(rawKlines.H1) ? rawKlines.H1 : []
+        const m15BarsRaw = Array.isArray(rawKlines.M15) ? rawKlines.M15 : []
+        const m5BarsRaw = Array.isArray(rawKlines.M5) ? rawKlines.M5 : []
+        const m5Closes = m5BarsRaw.map(b => b.close).filter((n) => Number.isFinite(n))
+
+        const ema20m5 = computeEMA(m5Closes, 20)
+        const ema50m5 = computeEMA(m5Closes, 50)
+
+        const atrSeries = computeAtrSeries(m15BarsRaw, 14)
+        const atrCurrent = atrSeries.length ? atrSeries[atrSeries.length - 1] : Number.isFinite(targetItem.atr_m15) ? Number(targetItem.atr_m15) : null
+        const atrSma20 = (() => {
+          if (!atrSeries.length) return null
+          const slice = atrSeries.slice(-20).filter(n => Number.isFinite(n))
+          if (!slice.length) return null
+          const avg = slice.reduce((sum, v) => sum + v, 0) / slice.length
+          return Number.isFinite(avg) ? avg : null
+        })()
+
+        const rvM15 = computeRelativeVolume(m15BarsRaw, 20)
+        const pullback = computePullbackStats(m15BarsRaw, atrCurrent)
+        const impulseFlags = computeImpulseFlags(m15BarsRaw, atrCurrent)
+
+        const emaH1_20 = Number.isFinite(targetItem.ema20_H1) ? Number(targetItem.ema20_H1) : null
+        const emaH1_50 = Number.isFinite(targetItem.ema50_H1) ? Number(targetItem.ema50_H1) : null
+        const emaH1_200 = Number.isFinite(targetItem.ema200_H1) ? Number(targetItem.ema200_H1) : null
+        const emaM15_20 = Number.isFinite(targetItem.ema20_M15) ? Number(targetItem.ema20_M15) : null
+        const emaM15_50 = Number.isFinite(targetItem.ema50_M15) ? Number(targetItem.ema50_M15) : null
+        const emaM15_200 = Number.isFinite(targetItem.ema200_M15) ? Number(targetItem.ema200_M15) : null
+
+        const pullbackHigh = pullback.high_m15
+        const premiumChecks = (() => {
+          const tolerance = 0.0008
+          const touched = (level: number | null) =>
+            Number.isFinite(pullbackHigh) && Number.isFinite(level)
+              ? pullbackHigh! >= level! * (1 - tolerance)
+              : false
+          const vwapM15 = Number.isFinite(targetItem.vwap_today) ? Number(targetItem.vwap_today) : Number.isFinite(targetItem.vwap_daily) ? Number(targetItem.vwap_daily) : null
+          const touchedVwap = touched(vwapM15)
+          const touchedEma20 = touched(emaM15_20)
+          const touchedEma50 = touched(emaM15_50)
+          const premiumLevels = [emaM15_20, emaM15_50, vwapM15].filter((n): n is number => Number.isFinite(n))
+          const minPremium = premiumLevels.length ? Math.min(...premiumLevels) : null
+          
+          // NOVÁ LOGIKA: Premium = dotek EMA50 NEBO VWAP (EMA20 už nestačí!)
+          const reachedPremiumZone = touchedEma50 || touchedVwap
+          
+          return {
+            touched_ema20_m15: touchedEma20,
+            touched_ema50_m15: touchedEma50,
+            touched_vwap_m15: touchedVwap,
+            reached_premium_zone: reachedPremiumZone,
+            referencePremium: minPremium,
+            vwap_m15: vwapM15,
+          }
+        })()
+
+        const micro = computeMicroStructure(m5BarsRaw, {
+          ema20: ema20m5 ?? null,
+          ema50: ema50m5 ?? null,
+          premiumHigh: premiumChecks.referencePremium ?? pullbackHigh ?? null,
+        })
+
+        const h1Bias = determineTrend(emaH1_20, emaH1_50, emaH1_200)
+        const d1Bias = (() => {
+          const emaD1_20 = Number.isFinite((targetItem as any)?.ema20_D1) ? Number((targetItem as any).ema20_D1) : null
+          const emaD1_50 = Number.isFinite((targetItem as any)?.ema50_D1) ? Number((targetItem as any).ema50_D1) : null
+          const emaD1_200 = Number.isFinite((targetItem as any)?.ema200_D1) ? Number((targetItem as any).ema200_D1) : null
+          if (emaD1_20 !== null && emaD1_50 !== null && emaD1_200 !== null) {
+            return determineTrend(emaD1_20, emaD1_50, emaD1_200)
+          }
+          return 'neutral'
+        })()
+        const m15Trend = determineTrend(emaM15_20, emaM15_50, emaM15_200)
+        const emaAlignment = (() => {
+          if (m15Trend === 'bearish' && h1Bias === 'bearish') return 'bearish'
+          if (m15Trend === 'bearish' && h1Bias !== 'bearish') return 'mixed-bearish'
+          if (m15Trend === 'bullish' && h1Bias === 'bullish') return 'bullish'
+          if (m15Trend === 'bullish' && h1Bias !== 'bullish') return 'mixed-bullish'
+          return 'neutral'
+        })()
+
+        // NOVÉ: Derived metriky pro Risk Manager
+        const derivedMetrics = (() => {
+          // premium_floor = max(EMA20(M15), VWAP) - 0.25 * ATR(M15)
+          const premiumFloor = (() => {
+            const vwap = premiumChecks.vwap_m15
+            const maxBase = Number.isFinite(emaM15_20) && Number.isFinite(vwap)
+              ? Math.max(emaM15_20!, vwap!)
+              : Number.isFinite(emaM15_20) ? emaM15_20
+                : Number.isFinite(vwap) ? vwap
+                  : null
+            
+            if (maxBase === null || !atrCurrent) return null
+            return maxBase - (0.25 * atrCurrent)
+          })()
+          
+          // nearest_support_zone (nejbližší support pod aktuální cenou)
+          const nearestSupport = (() => {
+            const currentPrice = Number(targetItem.price ?? (m15BarsRaw.length ? m15BarsRaw[m15BarsRaw.length-1].close : null))
+            if (!Number.isFinite(currentPrice)) return null
+            
+            const supports = Array.isArray(targetItem.support) 
+              ? targetItem.support.filter((s: number) => Number.isFinite(s) && s < currentPrice)
+              : []
+            
+            return supports.length ? supports[0] : null
+          })()
+          
+          // fresh_low_recent (nová lokální low v posledních 12-16 M15 svíček = 3-4h)
+          const freshLowRecent = (() => {
+            if (!Array.isArray(m15BarsRaw) || m15BarsRaw.length < 16) return false
+            
+            const windowSize = Math.min(16, m15BarsRaw.length)
+            const window = m15BarsRaw.slice(-windowSize)
+            
+            // Rozdělíme okno: poslední 3-4 svíčky vs. zbytek
+            const recentBars = window.slice(-4)  // Poslední 4 M15 (1h)
+            const earlierBars = window.slice(0, -4)  // Předchozí část (2-3h)
+            
+            if (earlierBars.length < 8) return false  // Potřebujeme dostatek historie
+            
+            // Najdi minimum z poslední hodiny a z předchozí části
+            const recentLow = Math.min(...recentBars.map(b => b.low))
+            const earlierLow = Math.min(...earlierBars.map(b => b.low))
+            
+            // Fresh low = poslední hodina udělala výrazně nižší low než předchozí 2-3h
+            // "Výrazně" = ne jen o tick, ale alespoň o 0.1% rozdíl
+            const threshold = earlierLow * 0.001  // 0.1% tolerance
+            return recentLow < (earlierLow - threshold)
+          })()
+          
+          return {
+            premium_floor_m15: roundPrice(premiumFloor),
+            nearest_support_zone: roundPrice(nearestSupport),
+            fresh_low_recent: freshLowRecent
+          }
+        })()
+
         const asset = {
           symbol: targetItem.symbol,
           timestamp: toIsoNoMs((snap as any)?.timestamp || new Date().toISOString()),
-          price: Number(targetItem.price ?? (h1.length ? h1[h1.length-1].close : null)),
+          price: roundPrice(targetItem.price ?? (h1.length ? h1[h1.length-1].close : null)),
           ohlcv: { h1, m15 },
           klines: rawKlines, // NEW: Raw klines for AI pattern recognition
           indicators: {
-            atr_h1: targetItem.atr_h1 ?? null,
-            atr_m15: targetItem.atr_m15 ?? null,
+            atr_h1: roundPrice(targetItem.atr_h1),
+            atr_m15: roundPrice(targetItem.atr_m15),
             atr_pct_h1: targetItem.atr_pct_H1 ?? null,
             atr_pct_m15: targetItem.atr_pct_M15 ?? null,
-            ema_h1: { 20: targetItem.ema20_H1 ?? null, 50: targetItem.ema50_H1 ?? null, 200: targetItem.ema200_H1 ?? null },
-            ema_m15: { 20: targetItem.ema20_M15 ?? null, 50: targetItem.ema50_M15 ?? null, 200: targetItem.ema200_M15 ?? null },
+            ema_h1: { 20: roundPrice(targetItem.ema20_H1), 50: roundPrice(targetItem.ema50_H1), 200: roundPrice(targetItem.ema200_H1) },
+            ema_m15: { 20: roundPrice(targetItem.ema20_M15), 50: roundPrice(targetItem.ema50_M15), 200: roundPrice(targetItem.ema200_M15) },
             rsi_h1: targetItem.rsi_H1 ?? null,
             rsi_m15: targetItem.rsi_M15 ?? null,
-            vwap_today: targetItem.vwap_today ?? targetItem.vwap_daily ?? null
+            vwap_today: roundPrice(targetItem.vwap_today ?? targetItem.vwap_daily),
+            ema_m15_20: roundPrice(emaM15_20),
+            ema_m15_50: roundPrice(emaM15_50),
+            ema_m15_200: roundPrice(emaM15_200),
+            ema_h1_20: roundPrice(emaH1_20),
+            ema_h1_50: roundPrice(emaH1_50),
+            ema_h1_200: roundPrice(emaH1_200),
+            vwap_m15: roundPrice(premiumChecks.vwap_m15),
+            atr_m15_current: roundPrice(atrCurrent),
+            atr_m15_sma20: roundPrice(atrSma20),
+            rv_m15: rvM15,
           },
           levels: {
-            support: Array.isArray(targetItem.support) ? targetItem.support.slice(0,4) : [],
-            resistance: Array.isArray(targetItem.resistance) ? targetItem.resistance.slice(0,4) : []
+            support: Array.isArray(targetItem.support) ? targetItem.support.slice(0,4).map((s: number) => roundPrice(s)) : [],
+            resistance: Array.isArray(targetItem.resistance) ? targetItem.resistance.slice(0,4).map((r: number) => roundPrice(r)) : []
           },
           market: {
             spread_bps: targetItem.spread_bps ?? null,
@@ -2976,7 +3403,29 @@ const server = http.createServer(async (req, res) => {
             volume_24h: targetItem.volume24h_usd ?? null,
             oi_change_1h_pct: targetItem.oi_change_1h_pct ?? null,
             funding_8h_pct: targetItem.funding_8h_pct ?? null
-          }
+          },
+          pullback: {
+            high_m15: roundPrice(pullback.high_m15),
+            size_atr_m15: pullback.size_atr_m15,
+          },
+          premium: {
+            touched_ema20_m15: premiumChecks.touched_ema20_m15,
+            touched_ema50_m15: premiumChecks.touched_ema50_m15,
+            touched_vwap_m15: premiumChecks.touched_vwap_m15,
+            reached_premium_zone: premiumChecks.reached_premium_zone,
+          },
+          impulse: {
+            recent_impulse_down: impulseFlags.recent_impulse_down,
+            recent_impulse_up: impulseFlags.recent_impulse_up,
+            in_fresh_dump_leg: impulseFlags.recent_impulse_down && Number.isFinite(pullback.size_atr_m15) ? (pullback.size_atr_m15 as number) < 0.3 : false,
+          },
+          micro,
+          bias: {
+            h1_bias: h1Bias,
+            d1_bias: d1Bias,
+            ema_trend_alignment: emaAlignment,
+          },
+          derived: derivedMetrics
         }
         
         const out = {
@@ -2985,6 +3434,20 @@ const server = http.createServer(async (req, res) => {
           market_type: 'perp',
           assets: [asset]
         }
+        
+        // Debug log pro ověření asset_data payloadu
+        if (symbol === 'ICNTUSDT' || process.env.DEBUG_ASSET_DATA) {
+          console.log('[ASSET_DATA_SAMPLE]', JSON.stringify({
+            symbol,
+            timestamp: asset.timestamp,
+            m5_count: rawKlines.M5.length,
+            premium: asset.premium,
+            impulse: asset.impulse,
+            derived: asset.derived,
+            last_m5_time: rawKlines.M5.length ? rawKlines.M5[rawKlines.M5.length-1].closeTime : null
+          }, null, 2))
+        }
+        
         res.statusCode = 200
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify(out))
@@ -4314,6 +4777,25 @@ const server = http.createServer(async (req, res) => {
           return
         }
 
+        try {
+          const ad = (input as any)?.asset_data || null
+          if (ad) {
+            console.log('[ENTRY_RISK_DERIVED]', {
+              symbol: (input as any)?.symbol,
+              ema_m15_20: ad?.indicators?.ema_m15_20 ?? null,
+              ema_m15_50: ad?.indicators?.ema_m15_50 ?? null,
+              ema_m15_200: ad?.indicators?.ema_m15_200 ?? null,
+              pullback: ad?.pullback ?? null,
+              premium: ad?.premium ?? null,
+              impulse: ad?.impulse ?? null,
+              micro: ad?.micro ?? null,
+              bias: ad?.bias ?? null,
+            })
+          }
+        } catch (logErr) {
+          console.warn('[ENTRY_RISK_DERIVED_LOG_FAIL]', { error: (logErr as any)?.message })
+        }
+
         const out = await runEntryRisk(input as any)
         const status = out.ok ? 200 : (out.code === 'schema' || out.code === 'invalid_json' || out.code === 'empty_output' ? 422 : (Number((out as any)?.meta?.http_status) || 500))
 
@@ -4910,10 +5392,19 @@ const server = http.createServer(async (req, res) => {
         try { parsed = JSON.parse(bodyStr) } catch { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'invalid_json' })); return }
         const { text, clientSha256, ifMatchRevision } = parsed
         if (!text) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_text' })); return }
+        if (!clientSha256 || typeof clientSha256 !== 'string') { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'missing_clientSha256' })); return }
         const { setOverlayPrompt } = await import('../services/lib/dev_prompts.js')
-        const result = setOverlayPrompt(key, text, clientSha256, ifMatchRevision)
-        res.statusCode = 200; res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify(result))
+        try {
+          const result = setOverlayPrompt(key, text, clientSha256, ifMatchRevision)
+          res.statusCode = 200; res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: true, storedSha256: result.sha256, revision: result.revision, updatedAt: result.updatedAt }))
+        } catch (e: any) {
+          const msg = e?.message || ''
+          if (msg.includes('Revision conflict')) { res.statusCode = 409; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'revision_conflict', message: msg })); return }
+          if (msg.includes('Lint failed')) { res.statusCode = 422; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'lint_failed', message: msg })); return }
+          if (msg.includes('SHA-256 mismatch')) { res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: 'sha256_mismatch', message: msg })); return }
+          throw e
+        }
       } catch (e: any) {
         res.statusCode = 500; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: e?.message || 'unknown' }))
       }
@@ -5900,7 +6391,8 @@ server.listen(PORT, '0.0.0.0', () => {
   try { startOrderSweeper() } catch (e) { console.error('[SWEEPER_START_ERR]', (e as any)?.message || e) }
   try { startSlProtectionMonitor() } catch (e) { console.error('[SL_MONITOR_START_ERR]', (e as any)?.message || e) }
   try { loadBackgroundCriteria() } catch {}
-  try { startBackgroundTrading() } catch (e) { console.error('[BACKGROUND_START_ERR]', (e as any)?.message || e) }
+  // DISABLED: Background Trading je natvrdo vypnutý - žere OpenAI kredity (Market Decider + Final Picker v každém cyklu)
+  // try { startBackgroundTrading() } catch (e) { console.error('[BACKGROUND_START_ERR]', (e as any)?.message || e) }
 })
 
 

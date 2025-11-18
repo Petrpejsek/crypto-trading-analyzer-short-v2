@@ -21,6 +21,13 @@ export type AIProfitTakerInput = {
     tp: number | null  // Aktuální TP price
   }
   marketData: any  // Z fetchMarketDataForSymbol (RSI, EMA, VWAP, ATR, volume, bias, momentum)
+  obstacles?: Array<{ type: 'ema' | 'vwap' | 'level' | 'round'; price: number; strength: 'low' | 'mid' | 'high'; timeframe?: string }>
+  trendData: {
+    bearish_m5: boolean
+    bearish_m15: boolean
+    bearish_score: number  // 0-3
+    chop_flag: boolean
+  }
 }
 
 export type AIProfitTakerDecision = {

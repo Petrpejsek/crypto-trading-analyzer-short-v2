@@ -171,14 +171,12 @@ export const App: React.FC = () => {
   const [rawCoins, setRawCoins] = useState<any[] | null>(null);
   const [rawCoinsTs, setRawCoinsTs] = useState<number | null>(null);
   const [selectedUniverses, setSelectedUniverses] = useState<string[]>(() => {
+    // CRITICAL: Clear legacy localStorage fallback to enforce explicit selection
     try {
-      const stored = localStorage.getItem('selected_universes')
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
-      }
+      localStorage.removeItem('selected_universes')
+      localStorage.removeItem('universe_rotation_index')
     } catch {}
-    return ['losers']
+    return []
   });
   const [currentRotationIndex, setCurrentRotationIndex] = useState<number>(() => {
     try {
@@ -186,9 +184,9 @@ export const App: React.FC = () => {
       return Number.isFinite(n) && n >= 0 ? n : 0
     } catch { return 0 }
   })
-  const prevStrategyRef = useRef(selectedUniverses[currentRotationIndex] || 'losers')
+  const prevStrategyRef = useRef(selectedUniverses[currentRotationIndex] || null)
   useEffect(() => {
-    const currentStrategy = selectedUniverses[currentRotationIndex] || 'losers'
+    const currentStrategy = selectedUniverses[currentRotationIndex] || null
     if (prevStrategyRef.current !== currentStrategy) {
       console.error(`[UNIVERSE_STRATEGY_CHANGED] from=${prevStrategyRef.current} to=${currentStrategy}`)
       setRawCoins(null)
@@ -516,7 +514,11 @@ export const App: React.FC = () => {
 
       // removed: local fetchWithRetry (using module-level helper)
 
-      const currentStrategy = selectedUniverses[currentRotationIndex] || 'losers'
+      const currentStrategy = selectedUniverses[currentRotationIndex] || null
+      if (!currentStrategy) {
+        setError('No universe selected. Please select at least one universe preset.')
+        return
+      }
       const snapUrl = currentStrategy === 'overheat'
         ? `/api/snapshot_overheat?topN=70&fresh=1`
         : `/api/snapshot?universe=${currentStrategy}&topN=70`
@@ -807,7 +809,12 @@ export const App: React.FC = () => {
     // Clear previous UI error state before fresh fetch
     setError(null)
     try {
-      const currentStrategy = selectedUniverses[currentRotationIndex] || 'losers'
+      const currentStrategy = selectedUniverses[currentRotationIndex] || null
+      if (!currentStrategy) {
+        setError('No universe selected. Please select at least one universe preset.')
+        setRawLoading(false)
+        return
+      }
       const uni = encodeURIComponent(currentStrategy)
       const q = `universe=${uni}&topN=70&side=short`
       const res = await fetchWithRetry(`/api/metrics?${q}`)
@@ -946,7 +953,12 @@ export const App: React.FC = () => {
     setSelectedHotSymbols([])
     
     try {
-      const currentStrategy = selectedUniverses[currentRotationIndex] || 'losers'
+      const currentStrategy = selectedUniverses[currentRotationIndex] || null
+      if (!currentStrategy) {
+        setError('No universe selected. Please select at least one universe preset.')
+        setHotScreenerStatus('error')
+        return
+      }
       
       // FRESHNESS VALIDATION: Check if coins data is recent (< 60s old)
       if (Array.isArray(coins) && coins.length > 0) {
@@ -984,23 +996,49 @@ export const App: React.FC = () => {
       })
       try { setAiHotScreenerBody(hsBody) } catch {}
 
-      if (!res.ok) {
-        let msg = `HTTP ${res.status}`
-        try {
-          const j = await res.json()
-          if (j && typeof j === 'object') {
-            const detail = (j?.meta?.http_error || j?.error || j?.message || j?.code)
-            const httpStatus = (j?.meta?.http_status || res.status)
-            msg = detail ? String(detail) : `HTTP ${httpStatus}`
-          }
-        } catch {}
-        throw new Error(msg)
+      // Zpracuj odpověď - může být JSON i při HTTP chybě
+      let result: any
+      try {
+        result = await res.json()
+      } catch (e) {
+        // Pokud se JSON nepodaří parsovat, vytvoř základní chybový objekt
+        throw new Error(`HTTP ${res.status}: Server vrátil neplatnou odpověď`)
       }
 
-      const result = await res.json()
+      // Zpracuj HTTP chyby (4xx, 5xx)
+      if (!res.ok) {
+        let errorMsg = `HTTP ${res.status}`
+        
+        if (result && typeof result === 'object') {
+          // Zkus získat detailní chybovou zprávu
+          const detail = result.meta?.http_error || result.error || result.message || result.code
+          if (detail) {
+            errorMsg = String(detail)
+          }
+          
+          // Speciální zpráva pro 429 (quota)
+          if (res.status === 429 || result.meta?.http_status === 429) {
+            errorMsg = '🚨 OpenAI API quota vyčerpán!\n\nZkontroluj billing a kredit na:\nhttps://platform.openai.com/account/billing\n\nPo doplnění kreditu zkus znovu.'
+          }
+        }
+        
+        throw new Error(errorMsg)
+      }
       
+      // Zpracuj business logiku chyby (ok: false)
       if (!result.ok) {
-        throw new Error(result.code || 'Unknown error')
+        let errorMsg = result.code || 'Unknown error'
+        
+        // Pro HTTP chyby zobraz detail z meta
+        if (result.meta?.http_error) {
+          errorMsg = result.meta.http_error
+        } else if (result.meta?.http_status === 429) {
+          errorMsg = '🚨 OpenAI API quota vyčerpán!\n\nZkontroluj billing a kredit na:\nhttps://platform.openai.com/account/billing\n\nPo doplnění kreditu zkus znovu.'
+        } else if (result.meta?.http_status) {
+          errorMsg = `HTTP ${result.meta.http_status}: ${errorMsg}`
+        }
+        
+        throw new Error(errorMsg)
       }
 
       let hotPicks = result.data.hot_picks || []
@@ -1078,7 +1116,9 @@ export const App: React.FC = () => {
       
       setHotScreenerStatus('success')
     } catch (e: any) {
-      setError(`Hot screener error: ${e?.message || 'unknown'}`)
+      const errorMsg = e?.message || 'unknown'
+      console.error('[HOT_SCREENER_FRONTEND_ERROR]', { error: errorMsg, fullError: e })
+      setError(`Hot screener error: ${errorMsg}`)
       setHotScreenerStatus('error')
     }
   }
@@ -1843,7 +1883,7 @@ ${goControls.length === 0 ? '❌ NO COINS TO SEND!' : '✅ Will send ' + goContr
         onChangeDefaultLeverage={(n)=>setDefaultLeverage(Math.max(1, Math.floor(n || 0)))}
         selectedUniverses={selectedUniverses}
         onChangeSelectedUniverses={(arr)=>setSelectedUniverses(arr)}
-        currentStrategy={selectedUniverses[currentRotationIndex] || 'losers'}
+        currentStrategy={selectedUniverses[currentRotationIndex] || null}
         onCopyRawAll={copyRawAll}
         rawLoading={rawLoading}
         rawCopied={rawCopied}
@@ -1992,7 +2032,22 @@ ${goControls.length === 0 ? '❌ NO COINS TO SEND!' : '✅ Will send ' + goContr
         </>
       )}
       {/* Snapshot/status UI intentionally hidden */}
-      {errorPayload ? <ErrorPanel payload={errorPayload} /> : (error ? <pre style={{ color: 'crimson', whiteSpace: 'pre-wrap' }}>{error}</pre> : null)}
+      {errorPayload ? <ErrorPanel payload={errorPayload} /> : (error ? (
+        <div style={{ 
+          padding: 16, 
+          margin: '8px 0', 
+          background: 'rgba(220, 38, 38, 0.1)', 
+          border: '1px solid rgba(220, 38, 38, 0.3)', 
+          borderRadius: 6,
+          color: '#ef4444',
+          whiteSpace: 'pre-wrap',
+          fontSize: 13,
+          lineHeight: 1.5
+        }}>
+          <strong>❌ Chyba:</strong>
+          <div style={{ marginTop: 8 }}>{error}</div>
+        </div>
+      ) : null)}
       <label style={{fontSize:12,opacity:.9,display:'flex',gap:6,alignItems:'center',margin:'8px 0'}}>
         <input type="checkbox" checked={forceCandidates} onChange={e=>setForceCandidates(e.target.checked)} />
         Show candidates even when NO-TRADE (preview)

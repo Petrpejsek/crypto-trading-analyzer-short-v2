@@ -48,6 +48,15 @@ function result(ok: boolean, code: string | undefined, latencyMs: number, data: 
 export async function runHotScreener(input: HotScreenerInput): Promise<{ ok: boolean; code?: string; latencyMs: number; data: HotPicksResponse; meta?: any }> {
   const t0 = Date.now()
   
+  // Načti prompt z management systému PŘED try blokem, aby byl dostupný i v catch bloku
+  let promptData: { text: string; sha256: string }
+  try {
+    promptData = getHotScreenerPrompt()
+  } catch (e) {
+    // Fallback pokud se nepodaří načíst prompt
+    promptData = { text: '', sha256: 'unknown' }
+  }
+  
   try {
     if (!process.env.OPENAI_API_KEY) {
       throw Object.assign(new Error('no_api_key'), { status: 401 })
@@ -87,8 +96,6 @@ export async function runHotScreener(input: HotScreenerInput): Promise<{ ok: boo
       }
     }
 
-    // Načti prompt z management systému (používá dev overlay pokud existuje)
-    const promptData = getHotScreenerPrompt()
     console.info('[HOT_SCREENER_PROMPT_HASH]', promptData.sha256.slice(0, 16))
 
     // Simplified message for GPT-5 - direct input without duplication
@@ -111,7 +118,32 @@ export async function runHotScreener(input: HotScreenerInput): Promise<{ ok: boo
       })
     } catch {}
 
-    const resp = await client.chat.completions.create(body)
+    // Retry logic for rate limits (429) with exponential backoff
+    let resp: any
+    let lastError: any
+    const maxRetries = 3
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        resp = await client.chat.completions.create(body)
+        break // Success - exit retry loop
+      } catch (e: any) {
+        lastError = e
+        const status = e?.status ?? e?.response?.status ?? null
+        
+        // Only retry on 429 (rate limit)
+        if (status === 429 && attempt < maxRetries - 1) {
+          const waitMs = Math.min(1000 * Math.pow(2, attempt), 8000) // 1s, 2s, 4s (max 8s)
+          console.warn(`[HOT_SCREENER_RETRY] Attempt ${attempt + 1}/${maxRetries}, waiting ${waitMs}ms`)
+          await new Promise(resolve => setTimeout(resolve, waitMs))
+          continue
+        }
+        
+        // For other errors or last attempt, throw
+        throw e
+      }
+    }
+    
+    if (!resp) throw lastError
     
     // AI Overview: Emit response payload
     try {
@@ -201,7 +233,7 @@ export async function runHotScreener(input: HotScreenerInput): Promise<{ ok: boo
     } catch {}
     
     return result(false, code, latencyMs, { hot_picks: [] }, {
-      prompt_hash: PROMPT_HASH,
+      prompt_hash: promptData.sha256,
       schema_version: SCHEMA_VERSION,
       http_status: status,
       http_error: msg ? String(msg).slice(0, 160) : null

@@ -12,7 +12,7 @@
  * NEVER cancel orders before creating new ones - pozice by byla bez ochrany!
  */
 
-import { getBinanceAPI } from '../trading/binance_futures'
+import { getBinanceAPI, cancelOrder } from '../trading/binance_futures'
 import type { AIProfitTakerDecision, ExecutionResult } from './types'
 
 /**
@@ -224,7 +224,7 @@ export async function executeAIProfitTaker(
         }
         
         try {
-          await api.cancelOrder(symbol, orderId)
+          await cancelOrder(symbol, orderId)
           results.cancelled_order_ids = results.cancelled_order_ids || []
           results.cancelled_order_ids.push(orderId)
           console.info('[AI_PT_CANCELLED]', { symbol, orderId, clientId })

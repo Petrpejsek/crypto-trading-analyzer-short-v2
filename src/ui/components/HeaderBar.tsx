@@ -22,7 +22,7 @@ type Props = {
   // RAW copy flow (propagováno z App) - CHANGED to array
   selectedUniverses?: string[]
   onChangeSelectedUniverses?: (arr: string[]) => void
-  currentStrategy?: string
+  currentStrategy?: string | null
   onCopyRawAll?: () => Promise<void> | void
   rawLoading?: boolean
   rawCopied?: boolean
@@ -39,7 +39,7 @@ type Props = {
   onToggleAiOverview?: () => void
 }
 
-export const HeaderBar: React.FC<Props> = ({ running, onRun, onExportSnapshot, onExportFeatures, onToggleSettings, onToggleReport, showingReport, defaultPreset='conservative', onChangeDefaultPreset, defaultSide='SHORT', onChangeDefaultSide, defaultTPLevel='tp2', onChangeDefaultTPLevel, defaultAmount=20, onChangeDefaultAmount, defaultLeverage=15, onChangeDefaultLeverage, selectedUniverses=['losers'], onChangeSelectedUniverses, currentStrategy='losers', onCopyRawAll, rawLoading=false, rawCopied=false, onAutoCopyRawToggle, serverNextAt=null, onToggleAiPayloads, onTogglePrompts, onToggleAiOverview }) => {
+export const HeaderBar: React.FC<Props> = ({ running, onRun, onExportSnapshot, onExportFeatures, onToggleSettings, onToggleReport, showingReport, defaultPreset='conservative', onChangeDefaultPreset, defaultSide='SHORT', onChangeDefaultSide, defaultTPLevel='tp2', onChangeDefaultTPLevel, defaultAmount=20, onChangeDefaultAmount, defaultLeverage=15, onChangeDefaultLeverage, selectedUniverses=[], onChangeSelectedUniverses, currentStrategy=null, onCopyRawAll, rawLoading=false, rawCopied=false, onAutoCopyRawToggle, serverNextAt=null, onToggleAiPayloads, onTogglePrompts, onToggleAiOverview }) => {
   // Auto Copy RAW – jednoduchý interval s odpočtem
   const [autoCopyEnabled, setAutoCopyEnabled] = useState<boolean>(() => {
     try { return localStorage.getItem('auto_copy_enabled') === '1' } catch { return false }

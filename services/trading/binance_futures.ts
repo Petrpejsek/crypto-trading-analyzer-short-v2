@@ -527,31 +527,32 @@ class BinanceFuturesAPI {
       const res = await this.request('POST', '/fapi/v1/order', p)
       // Hook: Track Entry Updater for internal conservative entries (SELL LIMIT for SHORT, clientOrderId e_l_*)
       try {
-        const sideSell = String(p.side || '').toUpperCase() === 'SELL'
-        const isLimit = String(p.type || '').toUpperCase() === 'LIMIT'
-        const reduceOnly = (p as any)?.reduceOnly === true
-        const closePosition = (p as any)?.closePosition === true
-        const cid = String((res as any)?.clientOrderId || (p as any)?.newClientOrderId || '')
-        const isInternalEntry = /^sv2_e_l_/.test(cid)
-        if (sideSell && isLimit && !reduceOnly && !closePosition && isInternalEntry) {
-          const { trackEntryOrder, hasEntryTrack } = await import('../entry-updater/registry')
-          const orderIdNum = Number((res as any)?.orderId || 0)
-          const entryPriceNum = Number((p as any)?.price || 0)
-          if (orderIdNum > 0 && entryPriceNum > 0) {
-            // Avoid duplicate tracking
-            if (!hasEntryTrack(orderIdNum)) {
-              trackEntryOrder({
-                symbol: String(p.symbol),
-                orderId: orderIdNum,
-                clientOrderId: cid || null,
-                entryPrice: entryPriceNum,
-                sl: null,
-                tpLevels: []
-              })
-              try { console.info('[EU_TRACK_ATTACHED]', { symbol: String(p.symbol), orderId: orderIdNum }) } catch {}
-            }
-          }
-        }
+        // DISABLED: Entry Updater je natvrdo vypnutý - netrackovat entry orders
+        // const sideSell = String(p.side || '').toUpperCase() === 'SELL'
+        // const isLimit = String(p.type || '').toUpperCase() === 'LIMIT'
+        // const reduceOnly = (p as any)?.reduceOnly === true
+        // const closePosition = (p as any)?.closePosition === true
+        // const cid = String((res as any)?.clientOrderId || (p as any)?.newClientOrderId || '')
+        // const isInternalEntry = /^sv2_e_l_/.test(cid)
+        // if (sideSell && isLimit && !reduceOnly && !closePosition && isInternalEntry) {
+        //   const { trackEntryOrder, hasEntryTrack } = await import('../entry-updater/registry')
+        //   const orderIdNum = Number((res as any)?.orderId || 0)
+        //   const entryPriceNum = Number((p as any)?.price || 0)
+        //   if (orderIdNum > 0 && entryPriceNum > 0) {
+        //     // Avoid duplicate tracking
+        //     if (!hasEntryTrack(orderIdNum)) {
+        //       trackEntryOrder({
+        //         symbol: String(p.symbol),
+        //         orderId: orderIdNum,
+        //         clientOrderId: cid || null,
+        //         entryPrice: entryPriceNum,
+        //         sl: null,
+        //         tpLevels: []
+        //       })
+        //       try { console.info('[EU_TRACK_ATTACHED]', { symbol: String(p.symbol), orderId: orderIdNum }) } catch {}
+        //     }
+        //   }
+        // }
       } catch (hookErr) {
         try { console.warn('[EU_TRACK_HOOK_ERR]', (hookErr as any)?.message || hookErr) } catch {}
       }
@@ -1597,13 +1598,14 @@ function countStepDecimals(step: number): number {
 }
 
 // Helper: precise quantization to step using integer math
-function quantizeToStep(value: number, step: number, mode: 'round' | 'floor' = 'round'): number {
+function quantizeToStep(value: number, step: number, mode: 'round' | 'floor' | 'ceil' = 'round'): number {
   const decimals = countStepDecimals(step)
   const factor = Math.pow(10, decimals)
   const v = Math.round(value * factor)
   const st = Math.round(step * factor)
   let q: number
   if (mode === 'floor') q = Math.floor(v / st) * st
+  else if (mode === 'ceil') q = Math.ceil(v / st) * st
   else q = Math.round(v / st) * st
   return q / factor
 }
@@ -1611,6 +1613,54 @@ function quantizeToStep(value: number, step: number, mode: 'round' | 'floor' = '
 // Keep legacy signature
 function roundToTickSize(price: number, tickSize: number): number {
   return quantizeToStep(price, tickSize, 'round')
+}
+
+/**
+ * Zaokrouhlí cenu na validní tick grid podle tickSize.
+ * 
+ * @param price - Cena k zaokrouhlení
+ * @param tickSize - Minimální cenový krok (z Binance PRICE_FILTER)
+ * @param mode - Režim zaokrouhlení:
+ *   - 'up': zaokrouhlit nahoru (Math.ceil) - pro SHORT entry/SL
+ *   - 'down': zaokrouhlit dolů (Math.floor) - pro SHORT TP
+ *   - 'nearest': zaokrouhlit na nejbližší (Math.round)
+ * @returns Zaokrouhlená cena na tick grid
+ */
+function roundToTick(price: number, tickSize: number, mode: 'up' | 'down' | 'nearest'): number {
+  if (!Number.isFinite(price) || !Number.isFinite(tickSize) || tickSize <= 0) {
+    return price
+  }
+  
+  // Převod módu na interní formát
+  const internalMode: 'ceil' | 'floor' | 'round' = 
+    mode === 'up' ? 'ceil' : 
+    mode === 'down' ? 'floor' : 
+    'round'
+  
+  return quantizeToStep(price, tickSize, internalMode)
+}
+
+/**
+ * Získá tickSize pro daný symbol z exchangeInfo.
+ * 
+ * @param symbolInfo - Výsledek z api.getSymbolInfo(symbol)
+ * @returns tickSize jako number, nebo 0.01 jako fallback
+ */
+function getTickSizeForSymbol(symbolInfo: any): number {
+  try {
+    const priceFilter = (symbolInfo?.filters || []).find((f: any) => f?.filterType === 'PRICE_FILTER')
+    const tickSize = Number(priceFilter?.tickSize)
+    
+    if (Number.isFinite(tickSize) && tickSize > 0) {
+      return tickSize
+    }
+    
+    console.warn('[TICK_SIZE_MISSING]', { symbol: symbolInfo?.symbol, using_default: 0.01 })
+    return 0.01
+  } catch (e: any) {
+    console.warn('[TICK_SIZE_ERROR]', { symbol: symbolInfo?.symbol, error: e?.message, using_default: 0.01 })
+    return 0.01
+  }
 }
 
 // V3: Batch flow requested by user
@@ -1671,26 +1721,87 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
 
       // Get Binance filters for price precision and round prices
       let symbolFilters = { tickSize: null as number | null, stepSize: null as number | null, pricePrecision: null as number | null }
+      let symbolInfo: any = null
       try {
-        const info = await api.getSymbolInfo(order.symbol)
-        const priceFilter = (info?.filters || []).find((f: any) => f?.filterType === 'PRICE_FILTER')
-        const lotSize = (info?.filters || []).find((f: any) => f?.filterType === 'LOT_SIZE')
+        symbolInfo = await api.getSymbolInfo(order.symbol)
+        const priceFilter = (symbolInfo?.filters || []).find((f: any) => f?.filterType === 'PRICE_FILTER')
+        const lotSize = (symbolInfo?.filters || []).find((f: any) => f?.filterType === 'LOT_SIZE')
         symbolFilters = {
           tickSize: priceFilter ? Number(priceFilter.tickSize) : null,
           stepSize: lotSize ? Number(lotSize.stepSize) : null,
-          pricePrecision: Number.isFinite(Number(info?.pricePrecision)) ? Number(info.pricePrecision) : null
+          pricePrecision: Number.isFinite(Number(symbolInfo?.pricePrecision)) ? Number(symbolInfo.pricePrecision) : null
         }
       } catch {}
 
-      // Prices: kvantizuj SL/TP na tickSize, aby prošly Binance validací přesnosti
-      const entryStr = String(order.entry)
-      const tickSize = Number(symbolFilters.tickSize)
-      const slNumRaw = Number(order.sl)
-      const tpNumRaw = Number(order.tp)
-      const slNum = Number.isFinite(tickSize) && tickSize > 0 ? roundToTickSize(slNumRaw, tickSize) : slNumRaw
-      const tpNum = Number.isFinite(tickSize) && tickSize > 0 ? roundToTickSize(tpNumRaw, tickSize) : tpNumRaw
-      const slStr = String(slNum)
-      const tpStr = String(tpNum)
+      // Get tickSize using helper
+      const tickSize = symbolInfo ? getTickSizeForSymbol(symbolInfo) : 0.01
+      
+      // Raw prices from order
+      const entryRaw = Number(order.entry)
+      const slRaw = Number(order.sl)
+      const tpRaw = Number(order.tp)
+      
+      // Determine if SHORT (always SHORT in this project)
+      const isShort = String(order.side).toUpperCase() === 'SHORT'
+      
+      // Apply tick size rounding with proper modes for SHORT:
+      // - Entry: round UP (sell higher is better for SHORT)
+      // - SL: round UP (more conservative stop-loss)
+      // - TP: round DOWN (take-profit below entry for SHORT)
+      let entryRounded = entryRaw
+      let slRounded = slRaw
+      let tpRounded = tpRaw
+      
+      if (tickSize > 0) {
+        entryRounded = roundToTick(entryRaw, tickSize, 'up')
+        slRounded = roundToTick(slRaw, tickSize, 'up')
+        tpRounded = roundToTick(tpRaw, tickSize, 'down')
+      }
+      
+      // Sanity check for SHORT: sl > entry > tp
+      if (isShort && tickSize > 0) {
+        // Fix SL if it's not above entry
+        if (slRounded <= entryRounded) {
+          slRounded = entryRounded + tickSize
+          console.warn('[TICK_ADJUST_SL]', { 
+            symbol: order.symbol, 
+            reason: 'sl_not_above_entry', 
+            entry: entryRounded, 
+            sl_before: slRaw, 
+            sl_after: slRounded 
+          })
+        }
+        
+        // Fix TP if it's not below entry
+        if (tpRounded >= entryRounded) {
+          tpRounded = entryRounded - tickSize
+          console.warn('[TICK_ADJUST_TP]', { 
+            symbol: order.symbol, 
+            reason: 'tp_not_below_entry', 
+            entry: entryRounded, 
+            tp_before: tpRaw, 
+            tp_after: tpRounded 
+          })
+        }
+      }
+      
+      // Log tick adjustments for debugging
+      try {
+        console.info('[TICK_ADJUSTED]', {
+          symbol: order.symbol,
+          tickSize,
+          original: { entry: entryRaw, sl: slRaw, tp: tpRaw },
+          rounded: { entry: entryRounded, sl: slRounded, tp: tpRounded },
+          diff: { 
+            entry: entryRounded - entryRaw, 
+            sl: slRounded - slRaw, 
+            tp: tpRounded - tpRaw 
+          }
+        })
+      } catch {}
+      
+      const slStr = String(slRounded)
+      const tpStr = String(tpRounded)
       const qtyStr = String(qty)
 
       const rawLog = {
@@ -1708,36 +1819,40 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
       // ENTRY: respect aggressive strategy -> STOP/STOP_MARKET, conservative -> LIMIT
       const ot = String((order as any)?.orderType || '').toLowerCase()
       const isAggressive = String((order as any)?.strategy || '') === 'aggressive'
+      
       // Compute safe stop trigger to avoid immediate trigger (-2021)
+      // Use ROUNDED entry for stop trigger calculation
       let markPxNum: number | null = null
       try { const m = await api.getMarkPrice(order.symbol); markPxNum = Number(m) } catch {}
-      const entryNum = Number(entryStr)
       const triggerBuffer = 0.001 // 0.1%
       const markBase = Number.isFinite(markPxNum as any) ? (markPxNum as number) : 0
-      const entryBase = Number.isFinite(entryNum) ? entryNum : 0
-      const isShort = String(order.side).toUpperCase() === 'SHORT'
+      const entryBase = Number.isFinite(entryRounded) ? entryRounded : 0
+      
       let stopTriggerNum = 0
       if (!isShort) {
         // LONG: trigger above both entry and current mark
         const baseForStop = Math.max(entryBase, markBase)
         stopTriggerNum = (baseForStop > 0 ? baseForStop : entryBase) * (1 + triggerBuffer)
       } else {
-        // SHORT: trigger below both entry a current mark
+        // SHORT: trigger below both entry and current mark
         const baseForStop = Math.min(entryBase || Infinity, markBase || Infinity)
         const baseVal = Number.isFinite(baseForStop) ? baseForStop : (entryBase > 0 ? entryBase : markBase)
         stopTriggerNum = baseVal * (1 - triggerBuffer)
       }
-      if (Number.isFinite(tickSize) && tickSize > 0) {
-        stopTriggerNum = roundToTickSize(stopTriggerNum, tickSize)
+      
+      // Round stop trigger: for SHORT use 'down' mode (trigger must be below entry)
+      if (tickSize > 0) {
+        stopTriggerNum = roundToTick(stopTriggerNum, tickSize, isShort ? 'down' : 'up')
       }
       const stopTriggerStr = String(stopTriggerNum)
 
-      // Aplikuj ENTRY_PRICE_MULTIPLIER JEN na entry price (NE na stop trigger!)
+      // Aplikuj ENTRY_PRICE_MULTIPLIER na již zaokrouhlenou entry price
+      // Note: applyEntryMultiplier již obsahuje své vlastní zaokrouhlení na tickSize
       const validTickSize = Number.isFinite(tickSize) && tickSize > 0 ? tickSize : undefined
       const validPricePrecision = Number.isFinite(symbolFilters.pricePrecision as any) ? symbolFilters.pricePrecision as number : undefined
-      const adjustedEntryNum = applyEntryMultiplier(Number(entryStr), validTickSize, validPricePrecision)
+      const adjustedEntryNum = applyEntryMultiplier(entryRounded, validTickSize, validPricePrecision)
       const adjustedEntryStr = String(adjustedEntryNum)
-      // Stop trigger se NEADJUSTUJE - je to jen technický parametr pro STOP order
+      // Stop trigger se NEADJUSTUJE multiplierem - je to jen technický parametr pro STOP order
       const adjustedStopTriggerStr = String(stopTriggerNum)
 
       const entryParams: OrderParams & { __engine?: string } = (() => {
@@ -1803,13 +1918,13 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
         }
       })()
 
-      prepared.push({ symbol: order.symbol, order, qty: qtyStr, positionSide, entryParams, rounded: { entry: entryStr, sl: slStr, tp: tpStr, qty: qtyStr } })
+      prepared.push({ symbol: order.symbol, order, qty: qtyStr, positionSide, entryParams, rounded: { entry: adjustedEntryStr, sl: slStr, tp: tpStr, qty: qtyStr } })
 
       // minimal payload log
       try {
         const entryPayload = (() => {
           if (isAggressive && (ot === 'stop_limit' || ot === 'stop-limit')) {
-            return { type: 'STOP' as const, price: entryStr, stopPrice: stopTriggerStr, timeInForce: 'GTC', quantity: qtyStr }
+            return { type: 'STOP' as const, price: adjustedEntryStr, stopPrice: stopTriggerStr, timeInForce: 'GTC', quantity: qtyStr }
           }
           if (isAggressive && ot === 'stop') {
             return { type: 'STOP_MARKET' as const, price: null, stopPrice: stopTriggerStr, timeInForce: null, quantity: qtyStr }
@@ -1817,7 +1932,7 @@ async function executeHotTradingOrdersV3_Batch2s(request: PlaceOrdersRequest): P
           if (ot === 'market') {
             return { type: 'MARKET' as const, price: null, stopPrice: null, timeInForce: null, quantity: qtyStr }
           }
-          return { type: 'LIMIT' as const, price: entryStr, stopPrice: null, timeInForce: 'GTC', quantity: qtyStr }
+          return { type: 'LIMIT' as const, price: adjustedEntryStr, stopPrice: null, timeInForce: 'GTC', quantity: qtyStr }
         })()
         console.info('[PRICE_PAYLOAD]', {
           symbol: order.symbol,

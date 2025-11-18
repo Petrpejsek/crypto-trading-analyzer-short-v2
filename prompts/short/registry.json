@@ -20,8 +20,8 @@
   {
     "name": "entry_strategy_conservative",
     "path": "prompts/short/entry_strategy_conservative.md",
-    "version": "20251020T0125",
-    "checksum_sha256": "772b8149367f36ce08764779088b1ddb29cefcccd2024748419f56a7cebf98da"
+    "version": "20251113T0000",
+    "checksum_sha256": "3d9478e878c793028dad292ed14be002524d952f07105a5869dc1973c18db620"
   },
   {
     "name": "entry_updater",

@@ -1,6 +1,6 @@
 import { proxyActivities, sleep, setHandler, condition, defineQuery, defineSignal } from '@temporalio/workflow'
 import type { Activities } from '../activities/types'
-import { applyEntryMultiplier } from '../../services/lib/entry_price_adjuster'
+import { applyEntryMultiplier } from '../../services/lib/entry_price_adjuster_workflow'
 
 export type EntryAssistantInput = {
   symbol: string

@@ -135,6 +135,15 @@ export function scheduleStrategyUpdate(
   currentTP: number | null,
   options?: { initialDelayMs?: number }
 ): void {
+  // DISABLED: Strategy Updater je vypnutý do odvolání
+  try {
+    const { isStrategyUpdaterEnabled } = require('./trigger')
+    if (!isStrategyUpdaterEnabled()) {
+      console.info('[STRATEGY_UPDATER_SCHEDULE_SKIPPED] Strategy Updater je vypnutý - scheduling přeskočen', { symbol })
+      return
+    }
+  } catch {}
+  
   try {
     const existing = strategyUpdaterBySymbol[symbol]
     const now = new Date()
@@ -237,6 +246,15 @@ export function markStrategyUpdateProcessing(symbol: string): void {
 
 // Reschedule existing entry for the next cycle (default 5 minutes)
 export function rescheduleStrategyUpdate(symbol: string, delayMs: number = UPDATE_DELAY_MS): void {
+  // DISABLED: Strategy Updater je vypnutý do odvolání
+  try {
+    const { isStrategyUpdaterEnabled } = require('./trigger')
+    if (!isStrategyUpdaterEnabled()) {
+      console.info('[STRATEGY_UPDATER_RESCHEDULE_SKIPPED] Strategy Updater je vypnutý - rescheduling přeskočen', { symbol })
+      return
+    }
+  } catch {}
+  
   try {
     const entry = strategyUpdaterBySymbol[symbol]
     if (!entry) return

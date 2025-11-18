@@ -94,6 +94,16 @@ async function run(): Promise<void> {
     identity: `trader-worker:${env.traderQueue}`,
     maxConcurrentWorkflowTaskExecutions: Number(process.env.TRADER_WF_CONCURRENCY || 20),
     maxConcurrentActivityTaskExecutions: Number(process.env.TRADER_ACTIVITY_CONCURRENCY || 10),
+    bundlerOptions: {
+      ignoreModules: ['fs', 'path'],
+      webpackConfigHook: (config) => {
+        config.externals = config.externals || [];
+        if (Array.isArray(config.externals)) {
+          config.externals.push('fs', 'path');
+        }
+        return config;
+      }
+    }
   });
 
   // OpenAI-specific queue (activities only)

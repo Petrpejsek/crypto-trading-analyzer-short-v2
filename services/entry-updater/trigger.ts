@@ -1,3 +1,8 @@
+// ====================================================================
+// DISABLED: Entry Updater je natvrdo vypnutý - žere OpenAI kredity
+// Timer je vypnutý v server/index.ts a tracking je zakázán v binance_futures.ts
+// ====================================================================
+
 import { getBinanceAPI } from '../trading/binance_futures'
 import { getDueEntryOrders, reschedule, markTouchedRecently, setEntryStatus, untrackEntryOrder, trackEntryOrder } from './registry'
 import { isAuditEnabled, appendAudit } from './audit'

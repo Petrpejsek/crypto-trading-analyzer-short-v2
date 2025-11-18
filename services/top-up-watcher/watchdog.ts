@@ -1,3 +1,8 @@
+// ====================================================================
+// DISABLED: Top-Up Watcher je natvrdo vypnutý - žere OpenAI kredity
+// Timer není spuštěn nikde v server/index.ts
+// ====================================================================
+
 import { fetchWatcherSnapshot } from './fetch'
 import { evaluateWatcherTick } from './logic'
 import { emitWatcherEvent } from './events'

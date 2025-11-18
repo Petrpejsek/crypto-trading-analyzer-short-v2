@@ -1,3 +1,8 @@
+// ====================================================================
+// DISABLED: Strategy Updater je natvrdo vypnutý - žere OpenAI kredity
+// Timer je vypnutý (zakomentován) v server/index.ts
+// ====================================================================
+
 import { getBinanceAPI } from '../trading/binance_futures'
 import { scheduleStrategyUpdate, cleanupStrategyUpdaterForSymbol } from './registry'
 
@@ -17,6 +22,10 @@ export function detectInternalPositionOpened(
   positions: any[], 
   auditEvent?: { type: 'filled' | 'cancel'; symbol: string; orderId: number }
 ): void {
+  if (!isStrategyUpdaterEnabled()) {
+    try { console.info('[STRATEGY_UPDATER_DISABLED_SKIP_DETECT]') } catch {}
+    return
+  }
   try {
     // First, handle WebSocket filled events
     if (auditEvent?.type === 'filled') {
@@ -100,6 +109,10 @@ function handlePotentialInternalFill(
 
 // Start strategy updater timer for a position
 export function startStrategyUpdaterForPosition(symbol: string, position: any, orders: any[], options?: { initialDelayMs?: number }): void {
+  if (!isStrategyUpdaterEnabled()) {
+    try { console.info('[STRATEGY_UPDATER_DISABLED_SKIP_START]', { symbol }) } catch {}
+    return
+  }
   try {
     const positionAmt = Number(position?.positionAmt || position?.size || 0)
     const entryPrice = Number(position?.entryPrice || position?.averagePrice || 0)
@@ -197,16 +210,21 @@ function cleanupExpiredTracking(positions: any[]): void {
   }
 }
 
-// Check if strategy updater is enabled (controlled by UI toggle)
+// Check if strategy updater is enabled
+// DISABLED: Strategy Updater je vypnutý do odvolání - hardcoded false
 export function isStrategyUpdaterEnabled(): boolean {
-  try {
-    // Default to enabled; allow explicit disable via env
-    const envVar = String(process.env.STRATEGY_UPDATER_ENABLED || '').toLowerCase()
-    if (envVar === '0' || envVar === 'false' || envVar === 'off') return false
-    return true
-  } catch {
-    return true
-  }
+  // HARD DISABLED: Vypnuto do odvolání - pro zapnutí změň na return true
+  return false
+  
+  // Původní logika (zakomentována):
+  // try {
+  //   // Default to enabled; allow explicit disable via env
+  //   const envVar = String(process.env.STRATEGY_UPDATER_ENABLED || '').toLowerCase()
+  //   if (envVar === '0' || envVar === 'false' || envVar === 'off') return false
+  //   return true
+  // } catch {
+  //   return true
+  // }
 }
 
 // Process due strategy updates (called by main tick)

@@ -17,6 +17,11 @@ export default defineConfig({
     host: '::',
     port: 4302,
     strictPort: true,
+    hmr: {
+      // Zpomal HMR updaty, aby se předešlo zbytečným re-renderům
+      overlay: true,
+      clientPort: 4302
+    },
     proxy: {
       '/api': {
         target: process.env.VITE_PROXY_TARGET || 'http://localhost:8888',

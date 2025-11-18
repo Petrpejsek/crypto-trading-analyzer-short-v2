@@ -163,6 +163,122 @@ async function getTopLosersUsdtSymbols(n: number, fresh = false): Promise<string
   return unique.slice(0, n)
 }
 
+// Alt universe - volume preset
+// Určen pro: intraday SHORT Pattern E (Failure at Premium → Collapse)
+// Vrací altcoin universe (60-120 coinů) pro Hot Screener
+// 
+// Současná logika:
+// Hard filtry (must-have):
+// - volume_24h >= 15M USDT
+// - spread_bps <= 60 (pokud dostupné)
+// - liquidity_usd >= 500k (pokud dostupné)
+// - blacklist: stablecoiny a BTC/ETH
+// Soft kritéria (scoring):
+// - vyšší volume → vyšší skóre
+// - vyšší likvidita → vyšší skóre
+// - nižší spread → vyšší skóre
+async function getAltUniverseVolume(desiredTopN: number, fresh = false): Promise<string[]> {
+  // Blacklist stable/major coins pro alt universe
+  const BLACKLIST = new Set([
+    'USDTUSDT', 'BUSDUSDT', 'FDUSDUSDT', 'TUSDUSDT', 'USDCUSDT',
+    'BTCUSDT', 'ETHUSDT'
+  ])
+
+  // Hard filtry thresholds
+  const MIN_VOLUME_24H = 15_000_000  // 15M USDT
+  const MIN_LIQUIDITY_USD = 500_000   // 500k USD
+  const MAX_SPREAD_BPS = 60           // 60 basis points
+
+  // Získej všechny USDT perp trhy s metrikami
+  const data = await withRetry(() => httpGetCached('/fapi/v1/ticker/24hr', undefined, (config as any).cache?.ticker24hMs ?? 30000, fresh), config.retry)
+  const entries = Array.isArray(data) ? data : []
+
+  // Hard filtry: pouze coiny, které splňují všechny podmínky
+  type CoinWithMetrics = {
+    symbol: string
+    volume24h: number
+    spread_bps?: number
+    liquidity_usd?: number
+  }
+
+  const hardFiltered: CoinWithMetrics[] = []
+  
+  for (const e of entries) {
+    const symbol = String(e?.symbol || '')
+    
+    // 1) Must end with USDT
+    if (!symbol.endsWith('USDT')) continue
+    
+    // 2) Not in blacklist
+    if (BLACKLIST.has(symbol)) continue
+    
+    // 3) Volume >= 15M
+    const volume24h = Number(e?.quoteVolume || 0)
+    if (!Number.isFinite(volume24h) || volume24h < MIN_VOLUME_24H) continue
+    
+    // Pro spread a likviditu: pokud jsou k dispozici, musí splňovat požadavky
+    // Pokud nejsou k dispozici, coin prochází (metrika se získá později v orderbook fázi)
+    const spread_bps = e?.spread_bps != null ? Number(e.spread_bps) : undefined
+    const liquidity_usd = e?.liquidity_usd != null ? Number(e.liquidity_usd) : undefined
+    
+    // 4) Pokud máme spread, musí být <= 60
+    if (spread_bps != null && Number.isFinite(spread_bps) && spread_bps > MAX_SPREAD_BPS) continue
+    
+    // 5) Pokud máme likviditu, musí být >= 500k
+    if (liquidity_usd != null && Number.isFinite(liquidity_usd) && liquidity_usd < MIN_LIQUIDITY_USD) continue
+    
+    hardFiltered.push({ symbol, volume24h, spread_bps, liquidity_usd })
+  }
+
+  console.error(`[ALT_UNIVERSE_VOLUME] After hard filters: ${hardFiltered.length} symbols (from ${entries.length} total)`)
+  
+  // Varování pokud je universe příliš utažený
+  if (hardFiltered.length < 40) {
+    console.error(`[ALT_UNIVERSE_VOLUME] ⚠️ WARNING: ALT_UNIVERSE_TOO_TIGHT - only ${hardFiltered.length} symbols after hard filters (expected 40+)`)
+  }
+
+  // Scoring: jednoduchý bodový systém
+  type ScoredCoin = CoinWithMetrics & { score: number }
+  const scored: ScoredCoin[] = hardFiltered.map(coin => {
+    let score = 0
+    
+    // 1) Body za volume (0-50 bodů)
+    // Škála: 15M → 0 bodů, 500M+ → 50 bodů
+    const volumeScore = Math.min(50, Math.max(0, (coin.volume24h - MIN_VOLUME_24H) / (500_000_000 - MIN_VOLUME_24H) * 50))
+    score += volumeScore
+    
+    // 2) Body za likviditu (0-30 bodů) - pokud je k dispozici
+    if (coin.liquidity_usd != null && Number.isFinite(coin.liquidity_usd)) {
+      // Škála: 500k → 0 bodů, 5M+ → 30 bodů
+      const liqScore = Math.min(30, Math.max(0, (coin.liquidity_usd - MIN_LIQUIDITY_USD) / (5_000_000 - MIN_LIQUIDITY_USD) * 30))
+      score += liqScore
+    }
+    
+    // 3) Body za tight spread (0-20 bodů) - pokud je k dispozici
+    if (coin.spread_bps != null && Number.isFinite(coin.spread_bps)) {
+      // Menší spread = více bodů
+      // Škála: 0 bps → 20 bodů, 60 bps → 0 bodů
+      const spreadScore = Math.min(20, Math.max(0, (MAX_SPREAD_BPS - coin.spread_bps) / MAX_SPREAD_BPS * 20))
+      score += spreadScore
+    }
+    
+    return { ...coin, score }
+  })
+
+  // Seřaď podle skóre (nejvyšší první)
+  scored.sort((a, b) => b.score - a.score)
+
+  // Určení finálního počtu symbolů: clamp mezi 60-120
+  const targetCount = Math.max(60, Math.min(120, desiredTopN))
+  const finalCount = Math.min(targetCount, scored.length)
+  
+  const result = scored.slice(0, finalCount).map(c => c.symbol)
+  
+  console.error(`[ALT_UNIVERSE_VOLUME] Final output: ${result.length} symbols (target: ${targetCount}, top 5: ${result.slice(0, 5).join(', ')})`)
+  
+  return result
+}
+
 export async function getKlines(symbol: string, interval: string, limit: number, fresh = false): Promise<Kline[]> {
   const run = () => httpGet('/fapi/v1/klines', { symbol, interval, limit })
   let raw: any
@@ -385,7 +501,8 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
   const strategy = (opts?.universeStrategy || (config as any)?.universe?.strategy || 'losers') as 'volume'|'gainers'|'losers'|'overheat'
   console.error(`[BUILD_SNAPSHOT] strategy=${strategy}, opts.universeStrategy=${opts?.universeStrategy}`)
   const fresh = Boolean(opts?.fresh)
-  const baseList = strategy === 'gainers' ? await getTopGainersUsdtSymbols(1000, fresh) :
+  const baseList = strategy === 'volume' ? await getAltUniverseVolume(desired, fresh) :  // Alt universe - volume preset s hard filtry
+                   strategy === 'gainers' ? await getTopGainersUsdtSymbols(1000, fresh) :
                    strategy === 'losers' ? await getTopLosersUsdtSymbols(1000, fresh) :
                    strategy === 'overheat' ? await getTopGainersUsdtSymbols(1000, fresh) : // Overheat používá gainers jako base
                    await getTopNUsdtSymbols(1000, fresh)
@@ -408,17 +525,20 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
   let dropsAlts: string[] = []
 
   const klinesTasks: Array<() => Promise<any>> = []
-  const coreIntervals: Array<{ key: 'H4'|'H1'|'M15'; interval: string; limit: number }> = [
+  const coreIntervals: Array<{ key: 'H4'|'H1'|'M15'|'M5'; interval: string; limit: number }> = [
     { key: 'H4', interval: '4h', limit: (config as any).candles || 220 },
     { key: 'H1', interval: '1h', limit: (config as any).candles || 220 },
-    { key: 'M15', interval: '15m', limit: (config as any).candles || 220 }
+    { key: 'M15', interval: '15m', limit: (config as any).candles || 220 },
+    { key: 'M5', interval: '5m', limit: 130 }
   ]
   for (const c of coreIntervals) klinesTasks.push(async () => ({ key: `btc.${c.key}`, k: await getKlines('BTCUSDT', c.interval, c.limit) }))
   for (const c of coreIntervals) klinesTasks.push(async () => ({ key: `eth.${c.key}`, k: await getKlines('ETHUSDT', c.interval, c.limit) }))
   // Lighter alt intervals to keep snapshot under maxSnapshotBytes
   const altH1Limit = Number((config as any)?.altH1Limit ?? 80)
   const altM15Limit = Number((config as any)?.altM15Limit ?? 96)
-  const altIntervals: Array<{ key: 'H1'|'M15'; interval: string; limit: number }> = [
+  const altM5Limit = Number((config as any)?.altM5Limit ?? 130)
+  const altIntervals: Array<{ key: 'H1'|'M15'|'M5'; interval: string; limit: number }> = [
+    { key: 'M5', interval: '5m', limit: altM5Limit },
     { key: 'H1', interval: '1h', limit: altH1Limit },
     { key: 'M15', interval: '15m', limit: altM15Limit }
   ]
@@ -512,7 +632,7 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
     const core = sym === 'BTCUSDT' ? (btc.klines as any) : (eth.klines as any)
     const coreOkNow = !!(core?.H1 && core?.H4 && core.H1.length && core.H4.length)
     if (!coreOkNow) { warnings.push(`drop:core:no_klines:${sym}`); continue }
-    const item: UniverseItem = { symbol: sym, klines: { H1: core?.H1, M15: core?.M15 }, funding: fundingMap[sym], oi_now: oiNowMap[sym], oi_hist: [], depth1pct_usd: undefined, spread_bps: undefined, volume24h_usd: tickerMap[sym]?.volume24h_usd, price: tickerMap[sym]?.lastPrice, exchange: 'Binance', market_type: 'perp', fees_bps: null, tick_size: (exchangeFilters as any)?.[sym]?.tickSize ?? null }
+    const item: UniverseItem = { symbol: sym, klines: { M5: core?.M5, H1: core?.H1, M15: core?.M15 }, funding: fundingMap[sym], oi_now: oiNowMap[sym], oi_hist: [], depth1pct_usd: undefined, spread_bps: undefined, volume24h_usd: tickerMap[sym]?.volume24h_usd, price: tickerMap[sym]?.lastPrice, exchange: 'Binance', market_type: 'perp', fees_bps: null, tick_size: (exchangeFilters as any)?.[sym]?.tickSize ?? null }
     // Analytics
     const h1 = item.klines.H1 || []
     const m15 = item.klines.M15 || []
@@ -585,7 +705,7 @@ export async function buildMarketRawSnapshot(opts?: { universeStrategy?: 'volume
   }
   for (const sym of universeSymbols) {
     if (!hasAlt(sym) && !(opts as any)?.allowPartial) { warnings.push(`drop:alt:noH1:${sym}`); continue }
-    const item: UniverseItem = { symbol: sym, klines: { H1: (uniKlines[sym]?.H1 || []), M15: (uniKlines[sym]?.M15 || []) }, funding: fundingMap[sym], oi_now: oiNowMap[sym], oi_hist: [], depth1pct_usd: undefined, spread_bps: undefined, volume24h_usd: tickerMap[sym]?.volume24h_usd, price: tickerMap[sym]?.lastPrice, exchange: 'Binance', market_type: 'perp', fees_bps: null, tick_size: (exchangeFilters as any)?.[sym]?.tickSize ?? null }
+    const item: UniverseItem = { symbol: sym, klines: { M5: (uniKlines[sym]?.M5 || []), H1: (uniKlines[sym]?.H1 || []), M15: (uniKlines[sym]?.M15 || []) }, funding: fundingMap[sym], oi_now: oiNowMap[sym], oi_hist: [], depth1pct_usd: undefined, spread_bps: undefined, volume24h_usd: tickerMap[sym]?.volume24h_usd, price: tickerMap[sym]?.lastPrice, exchange: 'Binance', market_type: 'perp', fees_bps: null, tick_size: (exchangeFilters as any)?.[sym]?.tickSize ?? null }
     // Analytics for alts
     const h1 = item.klines.H1 || []
     const m15 = item.klines.M15 || []

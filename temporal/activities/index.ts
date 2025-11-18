@@ -1,3 +1,8 @@
+import 'dotenv/config';
+import dotenv from 'dotenv';
+// CRITICAL: Load .env.local in activities to ensure Binance API keys are available
+dotenv.config({ path: '.env.local' });
+
 import type { Activities } from './types';
 
 export const activities: Activities = {

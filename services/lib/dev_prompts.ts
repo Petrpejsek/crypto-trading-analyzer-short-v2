@@ -88,9 +88,11 @@ function ensureDir(dirPath: string): void {
 /**
  * Resolve prompt pro asistenta
  * 
- * Dev mód: pokud existuje overlay v runtime/prompts/dev/{key}.md, použije se
- *          pokud neexistuje, FAIL HARD (žádný fallback)
- * Prod mód: vždy použije fallbackPath
+ * PRIORITA:
+ * 1. Pokud existuje overlay v runtime/prompts/dev/_meta.json → použij ho (v JAKÉMKOLI módu)
+ * 2. Jinak použij fallbackPath (registry prompt z prompts/short/*.md)
+ * 
+ * KRITICKÁ ZMĚNA: Overlay prompty mají VŽDY prioritu, nejen v dev módu!
  * 
  * @param assistantKey - Klíč asistenta (např. 'strategy_updater')
  * @param fallbackPath - Cesta k původnímu promptu (např. 'prompts/short/strategy_updater.md')
@@ -100,44 +102,49 @@ export function resolveAssistantPrompt(
   assistantKey: string,
   fallbackPath: string
 ): { text: string; sha256: string; source: 'dev-overlay' | 'registry' } {
-  // Prod mód: vždy registry
-  if (!isDevMode()) {
-    const resolved = path.resolve(fallbackPath)
-    if (!fs.existsSync(resolved)) {
-      throw new Error(`[dev_prompts] Registry prompt not found: ${fallbackPath}`)
-    }
-    const text = fs.readFileSync(resolved, 'utf8')
-    return {
-      text,
-      sha256: sha256(text),
-      source: 'registry'
-    }
-  }
-  
-  // Dev mód: overlay nebo FAIL
+  // PRIORITA 1: Zkontroluj, jestli existuje overlay (v JAKÉMKOLI módu)
   const meta = loadMeta()
   const overlayMeta = meta[assistantKey]
   
-  if (!overlayMeta) {
-    throw new Error(
-      `[dev_prompts] DEV MODE: Overlay prompt not found for '${assistantKey}'. ` +
-      `Use Prompt Management UI to create one. NO FALLBACK.`
-    )
+  if (overlayMeta) {
+    // Read-after-write verifikace
+    const currentHash = sha256(overlayMeta.text)
+    if (currentHash !== overlayMeta.sha256) {
+      console.error(
+        `[dev_prompts] SHA-256 mismatch for '${assistantKey}': ` +
+        `stored=${overlayMeta.sha256.slice(0, 16)}, actual=${currentHash.slice(0, 16)}`
+      )
+      // V production módu padáme na chybu, v dev módu jen logujeme warning
+      if (!isDevMode()) {
+        throw new Error(
+          `[dev_prompts] SHA-256 mismatch for '${assistantKey}': ` +
+          `stored=${overlayMeta.sha256.slice(0, 16)}, actual=${currentHash.slice(0, 16)}`
+        )
+      }
+    }
+    
+    console.info(`[dev_prompts] Using OVERLAY prompt for '${assistantKey}' (${overlayMeta.sha256.slice(0, 16)}...)`)
+    
+    return {
+      text: overlayMeta.text,
+      sha256: overlayMeta.sha256,
+      source: 'dev-overlay'
+    }
   }
   
-  // Read-after-write verifikace
-  const currentHash = sha256(overlayMeta.text)
-  if (currentHash !== overlayMeta.sha256) {
-    throw new Error(
-      `[dev_prompts] SHA-256 mismatch for '${assistantKey}': ` +
-      `stored=${overlayMeta.sha256.slice(0, 16)}, actual=${currentHash.slice(0, 16)}`
-    )
+  // PRIORITA 2: Fallback na registry prompt
+  const resolved = path.resolve(fallbackPath)
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`[dev_prompts] Prompt not found: ${fallbackPath} (and no overlay exists)`)
   }
+  
+  const text = fs.readFileSync(resolved, 'utf8')
+  console.info(`[dev_prompts] Using REGISTRY prompt for '${assistantKey}'`)
   
   return {
-    text: overlayMeta.text,
-    sha256: overlayMeta.sha256,
-    source: 'dev-overlay'
+    text,
+    sha256: sha256(text),
+    source: 'registry'
   }
 }
 
